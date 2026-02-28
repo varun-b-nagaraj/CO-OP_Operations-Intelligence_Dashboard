@@ -11,7 +11,7 @@ import { excuseShiftAbsence, markShiftAbsent, markShiftPresent } from '@/app/act
 import { fetchSchedule } from '@/lib/api-client';
 import { ScheduleAssignment, ShiftAttendanceStatus } from '@/lib/types';
 
-import { useBrowserSupabase } from './utils';
+import { getTodayDateKey, isDateTodayOrPast, useBrowserSupabase } from './utils';
 
 const ScheduleFormSchema = z.object({
   year: z.number().int().min(2000).max(2100),
@@ -422,6 +422,10 @@ export function ScheduleTab() {
     () => editableAssignments.find((assignment) => assignment.uid === attendanceModalUid) ?? null,
     [attendanceModalUid, editableAssignments]
   );
+  const todayKey = getTodayDateKey();
+  const selectedShiftIsFuture = selectedAssignment
+    ? !isDateTodayOrPast(selectedAssignment.date, todayKey)
+    : false;
 
   const onOptionsSubmit = (values: ScheduleFormValues) => {
     setParams(values);
@@ -1082,7 +1086,7 @@ export function ScheduleTab() {
             <div className="mt-3 grid grid-cols-3 gap-2">
               <button
                 className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={updateAttendanceMutation.isPending}
+                disabled={updateAttendanceMutation.isPending || selectedShiftIsFuture}
                 onClick={() =>
                   updateAttendanceMutation.mutate({
                     assignment: selectedAssignment,
@@ -1108,7 +1112,7 @@ export function ScheduleTab() {
               </button>
               <button
                 className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={updateAttendanceMutation.isPending || !attendanceReason.trim()}
+                disabled={updateAttendanceMutation.isPending || !attendanceReason.trim() || selectedShiftIsFuture}
                 onClick={() =>
                   updateAttendanceMutation.mutate({
                     assignment: selectedAssignment,
@@ -1121,6 +1125,11 @@ export function ScheduleTab() {
                 Mark Excused
               </button>
             </div>
+            {selectedShiftIsFuture && (
+              <p className="mt-2 text-xs text-neutral-600">
+                Present and excused overrides are only allowed on the shift date or after.
+              </p>
+            )}
           </div>
         </div>
       )}

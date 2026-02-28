@@ -12,6 +12,8 @@ import {
   formatRate,
   getStudentDisplayName,
   getStudentSNumber,
+  getTodayDateKey,
+  isDateTodayOrPast,
   StudentRow,
   useBrowserSupabase
 } from './utils';
@@ -105,6 +107,7 @@ export function ShiftAttendanceTab() {
   });
 
   const byEmployee = useMemo(() => {
+    const todayKey = getTodayDateKey();
     const map = new Map<string, Array<Record<string, unknown>>>();
     for (const row of attendanceQuery.data ?? []) {
       const key = row.employee_s_number as string;
@@ -113,9 +116,11 @@ export function ShiftAttendanceTab() {
       map.set(key, bucket);
     }
     return [...map.entries()].map(([sNumber, rows]) => {
+      const eligibleRows = rows.filter((row) => isDateTodayOrPast(String(row.shift_date ?? ''), todayKey));
       const rates = calculateShiftAttendanceRate({
         shiftAttendanceRecords: rows.map((row) => ({
-          status: row.status as 'expected' | 'present' | 'absent' | 'excused'
+          status: row.status as 'expected' | 'present' | 'absent' | 'excused',
+          date: String(row.shift_date ?? '')
         }))
       });
       const student = (studentsQuery.data ?? []).find((item) => getStudentSNumber(item) === sNumber);
@@ -123,14 +128,16 @@ export function ShiftAttendanceTab() {
         sNumber,
         name: student ? getStudentDisplayName(student) : sNumber,
         expected: rates.expected_shifts,
-        present: rows.filter((row) => row.status === 'present').length,
-        absent: rows.filter((row) => row.status === 'absent').length,
-        excused: rows.filter((row) => row.status === 'excused').length,
+        present: eligibleRows.filter((row) => row.status === 'present').length,
+        absent: eligibleRows.filter((row) => row.status === 'absent').length,
+        excused: eligibleRows.filter((row) => row.status === 'excused').length,
         raw: rates.raw_rate,
         adjusted: rates.adjusted_rate
       };
     });
   }, [attendanceQuery.data, studentsQuery.data]);
+
+  const todayKey = getTodayDateKey();
 
   if (!canView) {
     return <p className="text-sm text-neutral-700">You do not have permission to view shift attendance.</p>;
@@ -228,66 +235,71 @@ export function ShiftAttendanceTab() {
             </tr>
           </thead>
           <tbody>
-            {(attendanceQuery.data ?? []).slice(0, 300).map((row) => (
-              <tr className="border-b border-neutral-200" key={row.id as string}>
-                <td className="p-2">{row.shift_date as string}</td>
-                <td className="p-2">{row.shift_period as number}</td>
-                <td className="p-2">{row.shift_slot_key as string}</td>
-                <td className="p-2">{row.employee_s_number as string}</td>
-                <td className="p-2">{row.status as string}</td>
-                <td className="p-2">
-                  {canOverride && (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        className="min-h-[44px] border border-neutral-500 px-2 text-xs"
-                        onClick={() =>
-                          presentMutation.mutate({
-                            sNumber: row.employee_s_number as string,
-                            date: row.shift_date as string,
-                            period: row.shift_period as number,
-                            shiftSlotKey: row.shift_slot_key as string
-                          })
-                        }
-                        type="button"
-                      >
-                        Present
-                      </button>
-                      <button
-                        className="min-h-[44px] border border-neutral-500 px-2 text-xs"
-                        onClick={() =>
-                          absentMutation.mutate({
-                            sNumber: row.employee_s_number as string,
-                            date: row.shift_date as string,
-                            period: row.shift_period as number,
-                            shiftSlotKey: row.shift_slot_key as string
-                          })
-                        }
-                        type="button"
-                      >
-                        Absent
-                      </button>
-                      <button
-                        className="min-h-[44px] border border-neutral-500 px-2 text-xs"
-                        onClick={() => {
-                          const reason = window.prompt('Reason for excused absence') ?? '';
-                          if (!reason.trim()) return;
-                          excuseMutation.mutate({
-                            sNumber: row.employee_s_number as string,
-                            date: row.shift_date as string,
-                            period: row.shift_period as number,
-                            shiftSlotKey: row.shift_slot_key as string,
-                            reason
-                          });
-                        }}
-                        type="button"
-                      >
-                        Excuse
-                      </button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {(attendanceQuery.data ?? []).slice(0, 300).map((row) => {
+              const isFutureShift = !isDateTodayOrPast(String(row.shift_date ?? ''), todayKey);
+              return (
+                <tr className="border-b border-neutral-200" key={row.id as string}>
+                  <td className="p-2">{row.shift_date as string}</td>
+                  <td className="p-2">{row.shift_period as number}</td>
+                  <td className="p-2">{row.shift_slot_key as string}</td>
+                  <td className="p-2">{row.employee_s_number as string}</td>
+                  <td className="p-2">{row.status as string}</td>
+                  <td className="p-2">
+                    {canOverride && (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className="min-h-[44px] border border-neutral-500 px-2 text-xs"
+                          disabled={isFutureShift}
+                          onClick={() =>
+                            presentMutation.mutate({
+                              sNumber: row.employee_s_number as string,
+                              date: row.shift_date as string,
+                              period: row.shift_period as number,
+                              shiftSlotKey: row.shift_slot_key as string
+                            })
+                          }
+                          type="button"
+                        >
+                          Present
+                        </button>
+                        <button
+                          className="min-h-[44px] border border-neutral-500 px-2 text-xs"
+                          onClick={() =>
+                            absentMutation.mutate({
+                              sNumber: row.employee_s_number as string,
+                              date: row.shift_date as string,
+                              period: row.shift_period as number,
+                              shiftSlotKey: row.shift_slot_key as string
+                            })
+                          }
+                          type="button"
+                        >
+                          Absent
+                        </button>
+                        <button
+                          className="min-h-[44px] border border-neutral-500 px-2 text-xs"
+                          disabled={isFutureShift}
+                          onClick={() => {
+                            const reason = window.prompt('Reason for excused absence') ?? '';
+                            if (!reason.trim()) return;
+                            excuseMutation.mutate({
+                              sNumber: row.employee_s_number as string,
+                              date: row.shift_date as string,
+                              period: row.shift_period as number,
+                              shiftSlotKey: row.shift_slot_key as string,
+                              reason
+                            });
+                          }}
+                          type="button"
+                        >
+                          Excuse
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

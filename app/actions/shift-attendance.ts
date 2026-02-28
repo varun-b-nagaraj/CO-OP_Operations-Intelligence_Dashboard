@@ -16,6 +16,14 @@ import {
 } from '@/lib/types';
 import { ShiftAttendanceMarkSchema, zodFieldErrors } from '@/lib/validation';
 
+function getTodayDateKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isShiftDateTodayOrPast(shiftDate: string): boolean {
+  return shiftDate <= getTodayDateKey();
+}
+
 async function maybeAwardShiftPoints(
   params: {
     employeeSNumber: string;
@@ -182,6 +190,13 @@ export async function markShiftPresent(
   if (!allowed) {
     return errorResult(correlationId, 'FORBIDDEN', 'You do not have permission to mark attendance.');
   }
+  if (!isShiftDateTodayOrPast(date)) {
+    return errorResult(
+      correlationId,
+      'VALIDATION_ERROR',
+      'You can only mark a shift present on the shift date or after.'
+    );
+  }
 
   return upsertShiftAttendanceStatus({
     sNumber,
@@ -227,6 +242,13 @@ export async function excuseShiftAbsence(
   if (!allowed) {
     return errorResult(correlationId, 'FORBIDDEN', 'You do not have permission to excuse attendance.');
   }
+  if (!isShiftDateTodayOrPast(date)) {
+    return errorResult(
+      correlationId,
+      'VALIDATION_ERROR',
+      'You can only pardon a shift absence on the shift date or after.'
+    );
+  }
 
   return upsertShiftAttendanceStatus({
     sNumber,
@@ -270,7 +292,7 @@ export async function getShiftAttendance(
 
     const rows = (data ?? []) as ShiftAttendance[];
     calculateShiftAttendanceRate({
-      shiftAttendanceRecords: rows.map((row) => ({ status: row.status }))
+      shiftAttendanceRecords: rows.map((row) => ({ status: row.status, date: row.shift_date }))
     });
 
     logInfo('shift_attendance_read', {

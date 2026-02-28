@@ -23,6 +23,14 @@ export function currentMonthRange(): { from: string; to: string } {
   };
 }
 
+export function getTodayDateKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function isDateTodayOrPast(dateKey: string, todayKey: string = getTodayDateKey()): boolean {
+  return dateKey <= todayKey;
+}
+
 export type StudentRow = Record<string, unknown>;
 
 function getFirstStringField(row: StudentRow, keys: string[]): string | null {

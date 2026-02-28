@@ -26,6 +26,8 @@ import {
   getStudentDisplayName,
   getStudentId,
   getStudentSNumber,
+  getTodayDateKey,
+  isDateTodayOrPast,
   StudentRow,
   useBrowserSupabase
 } from './utils';
@@ -123,6 +125,8 @@ export function EmployeesTab() {
     scheduleable: true,
     assignedPeriods: ''
   });
+  const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
+  const [showMoreByEmployeeId, setShowMoreByEmployeeId] = useState<Record<string, boolean>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const studentsQuery = useQuery({
@@ -412,6 +416,7 @@ export function EmployeesTab() {
         scheduleable: true,
         assignedPeriods: ''
       });
+      setIsAddEmployeeModalOpen(false);
       setStatusMessage('Employee added.');
     },
     onError: (error) => {
@@ -656,7 +661,8 @@ export function EmployeesTab() {
       const offPeriods = settingsByEmployeeId.get(id) ?? settingsBySNumber.get(sNumber) ?? [4, 8];
       const shiftRates = calculateShiftAttendanceRate({
         shiftAttendanceRecords: shifts.map((item) => ({
-          status: item.status as 'expected' | 'present' | 'absent' | 'excused'
+          status: item.status as 'expected' | 'present' | 'absent' | 'excused',
+          date: String(item.shift_date ?? '')
         }))
       });
 
@@ -774,13 +780,13 @@ export function EmployeesTab() {
     });
   };
 
-  const employeeRecordRows = useMemo(
-    () =>
-      Object.values(employeeRecordDrafts).sort((left, right) =>
-        left.name.localeCompare(right.name)
-      ),
-    [employeeRecordDrafts]
-  );
+  const toggleShowMore = (employeeId: string) => {
+    setShowMoreByEmployeeId((previous) => ({
+      ...previous,
+      [employeeId]: !previous[employeeId]
+    }));
+  };
+  const todayKey = getTodayDateKey();
 
   if (!canViewAttendance && !canOverrideAttendance && !canEditSettings && !canManageStrikes) {
     return <p className="text-sm text-neutral-700">You do not have permission to view employee management.</p>;
@@ -788,159 +794,21 @@ export function EmployeesTab() {
 
   return (
     <section className="space-y-4">
-      <div className="space-y-3 border border-neutral-300 bg-neutral-50 p-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-neutral-900">Editable Employee Records</h3>
+      <div className="flex flex-wrap items-center justify-between gap-3 border border-neutral-300 bg-neutral-50 p-3">
+        <div>
+          <h3 className="text-sm font-semibold text-neutral-900">Employee Management</h3>
           <p className="text-xs text-neutral-600">
-            Add/remove employees and edit name, s-number, schedulable status, and assigned periods.
+            Shift rates only include shifts on or before today.
           </p>
         </div>
-        <div className="grid gap-2 border border-neutral-300 bg-white p-2 md:grid-cols-5">
-          <input
-            className="min-h-[44px] border border-neutral-300 px-2 text-sm"
-            onChange={(event) =>
-              setNewEmployeeDraft((previous) => ({ ...previous, name: event.target.value }))
-            }
-            placeholder="Name"
-            value={newEmployeeDraft.name}
-          />
-          <input
-            className="min-h-[44px] border border-neutral-300 px-2 text-sm"
-            onChange={(event) =>
-              setNewEmployeeDraft((previous) => ({ ...previous, sNumber: event.target.value }))
-            }
-            placeholder="s_number"
-            value={newEmployeeDraft.sNumber}
-          />
-          <input
-            className="min-h-[44px] border border-neutral-300 px-2 text-sm"
-            onChange={(event) =>
-              setNewEmployeeDraft((previous) => ({ ...previous, assignedPeriods: event.target.value }))
-            }
-            placeholder="Assigned periods"
-            value={newEmployeeDraft.assignedPeriods}
-          />
-          <label className="flex min-h-[44px] items-center gap-2 border border-neutral-300 px-2 text-sm">
-            <input
-              checked={newEmployeeDraft.scheduleable}
-              onChange={(event) =>
-                setNewEmployeeDraft((previous) => ({ ...previous, scheduleable: event.target.checked }))
-              }
-              type="checkbox"
-            />
-            Schedulable
-          </label>
-          <button
-            className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={
-              !canEditSettings ||
-              addEmployeeRecordMutation.isPending ||
-              !newEmployeeDraft.name.trim() ||
-              !newEmployeeDraft.sNumber.trim()
-            }
-            onClick={() =>
-              addEmployeeRecordMutation.mutate({
-                name: newEmployeeDraft.name,
-                sNumber: newEmployeeDraft.sNumber,
-                scheduleable: newEmployeeDraft.scheduleable,
-                assignedPeriods: newEmployeeDraft.assignedPeriods
-              })
-            }
-            type="button"
-          >
-            Add Employee
-          </button>
-        </div>
-        <div className="overflow-x-auto border border-neutral-300 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-neutral-100">
-              <tr>
-                <th className="border-b border-neutral-300 p-2 text-left">Name</th>
-                <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
-                <th className="border-b border-neutral-300 p-2 text-left">Schedulable</th>
-                <th className="border-b border-neutral-300 p-2 text-left">Assigned</th>
-                <th className="border-b border-neutral-300 p-2 text-left">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {employeeRecordRows.map((record) => (
-                <tr className="border-b border-neutral-200" key={`employee-record-${record.id}`}>
-                  <td className="p-2">
-                    <input
-                      className="min-h-[40px] w-full border border-neutral-300 px-2"
-                      onChange={(event) =>
-                        setEmployeeRecordDrafts((previous) => ({
-                          ...previous,
-                          [record.id]: { ...record, name: event.target.value }
-                        }))
-                      }
-                      value={record.name}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <input
-                      className="min-h-[40px] w-full border border-neutral-300 px-2"
-                      onChange={(event) =>
-                        setEmployeeRecordDrafts((previous) => ({
-                          ...previous,
-                          [record.id]: { ...record, sNumber: event.target.value }
-                        }))
-                      }
-                      value={record.sNumber}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <label className="flex min-h-[40px] items-center gap-2">
-                      <input
-                        checked={record.scheduleable}
-                        onChange={(event) =>
-                          setEmployeeRecordDrafts((previous) => ({
-                            ...previous,
-                            [record.id]: { ...record, scheduleable: event.target.checked }
-                          }))
-                        }
-                        type="checkbox"
-                      />
-                      <span>{record.scheduleable ? 'Yes' : 'No'}</span>
-                    </label>
-                  </td>
-                  <td className="p-2">
-                    <input
-                      className="min-h-[40px] w-full border border-neutral-300 px-2"
-                      onChange={(event) =>
-                        setEmployeeRecordDrafts((previous) => ({
-                          ...previous,
-                          [record.id]: { ...record, assignedPeriods: event.target.value }
-                        }))
-                      }
-                      value={record.assignedPeriods}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <div className="flex gap-2">
-                      <button
-                        className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={!canEditSettings || saveEmployeeRecordMutation.isPending}
-                        onClick={() => saveEmployeeRecordMutation.mutate(record.id)}
-                        type="button"
-                      >
-                        Save
-                      </button>
-                      <button
-                        className="min-h-[40px] border border-neutral-500 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={!canEditSettings || removeEmployeeRecordMutation.isPending}
-                        onClick={() => removeEmployeeRecordMutation.mutate(record.id)}
-                        type="button"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <button
+          className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!canEditSettings}
+          onClick={() => setIsAddEmployeeModalOpen(true)}
+          type="button"
+        >
+          Add Employee
+        </button>
       </div>
 
       <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-4">
@@ -995,10 +863,21 @@ export function EmployeesTab() {
               const selectedShiftKey = selectedShiftDrafts[employee.id] ?? '';
               const selectedShift =
                 recentShiftRows.find((row) => shiftRowKey(row) === selectedShiftKey) ?? null;
+              const selectedShiftIsFuture = selectedShift
+                ? !isDateTodayOrPast(String(selectedShift.shift_date ?? ''), todayKey)
+                : false;
               const selectedMeetingStatus =
                 derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(meetingDate) ?? null;
               const selectedMeetingOverride =
                 derived.overrideTypeBySNumberDate.get(employee.sNumber)?.get(meetingDate) ?? null;
+              const employeeRecordDraft = employeeRecordDrafts[employee.id] ?? {
+                id: employee.id,
+                name: employee.name,
+                sNumber: employee.sNumber,
+                scheduleable: true,
+                assignedPeriods: employee.assignedPeriods
+              };
+              const showMore = showMoreByEmployeeId[employee.id] ?? false;
 
               return (
                 <Fragment key={employee.id}>
@@ -1039,374 +918,480 @@ export function EmployeesTab() {
                   {isExpanded && (
                     <tr className="border-b border-neutral-200 bg-neutral-50">
                       <td className="p-3" colSpan={7}>
-                        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-                          <div className="space-y-2 border border-neutral-300 bg-white p-3">
-                            <h3 className="text-sm font-semibold text-neutral-900">Attendance</h3>
-                            <p className="text-sm text-neutral-700">Username: {employee.username ?? 'N/A'}</p>
-                            <p className="text-sm text-neutral-700">
-                              Active strikes: {employee.strikesCount}
-                            </p>
-                            <p className="text-sm text-neutral-700">
-                              Assigned periods: {employee.assignedPeriods || 'N/A'}
-                            </p>
-                            <p className="text-sm text-neutral-700">
-                              Meeting: {employee.meetingAttended}/{employee.meetingSessions} attended,{' '}
-                              {employee.meetingExcused} excused
-                            </p>
-                            <p className="text-sm text-neutral-700">
-                              Shift: {employee.shiftPresent} present, {employee.shiftAbsent} absent,{' '}
-                              {employee.shiftExcused} excused
-                            </p>
-                            <p className="text-sm text-neutral-700">
-                              Morning shift presents: {employee.morningShifts}
-                            </p>
-                            <p className="text-sm text-neutral-700">
-                              Off-period presents: {employee.offPeriodShifts}
-                            </p>
+                        <div className="space-y-4">
+                          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                            <div className="space-y-2 border border-neutral-300 bg-white p-3">
+                              <h3 className="text-sm font-semibold text-neutral-900">General Overview</h3>
+                              <p className="text-sm text-neutral-700">Username: {employee.username ?? 'N/A'}</p>
+                              <p className="text-sm text-neutral-700">s_number: {employee.sNumber || 'N/A'}</p>
+                              <p className="text-sm text-neutral-700">
+                                Assigned periods: {employee.assignedPeriods || 'N/A'}
+                              </p>
+                              <p className="text-sm text-neutral-700">
+                                Active strikes: {employee.strikesCount}
+                              </p>
+                              <p className="text-sm text-neutral-700">Points: {employee.points}</p>
+                              <p className="text-sm text-neutral-700">
+                                Meeting rates: {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
+                              </p>
+                              <p className="text-sm text-neutral-700">
+                                Shift rates: {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
+                              </p>
+                              <p className="text-sm text-neutral-700">
+                                Shift summary: {employee.shiftPresent} present, {employee.shiftAbsent} absent, {employee.shiftExcused} excused
+                              </p>
+                            </div>
+
+                            <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                              <h3 className="text-sm font-semibold text-neutral-900">Meeting Attendance Overview</h3>
+                              <p className="text-xs text-neutral-600">
+                                {employee.meetingAttended}/{employee.meetingSessions} attended, {employee.meetingExcused} excused
+                              </p>
+                              <label className="block text-sm">
+                                Session Date
+                                <select
+                                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                  onChange={(event) =>
+                                    setMeetingDateDrafts((previous) => ({
+                                      ...previous,
+                                      [employee.id]: event.target.value
+                                    }))
+                                  }
+                                  value={meetingDate}
+                                >
+                                  {recentMeetingDates.length === 0 && <option value="">No recent sessions</option>}
+                                  {recentMeetingDates.map((date) => (
+                                    <option key={`${employee.id}-meeting-${date}`} value={date}>
+                                      {date}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <p className="text-xs text-neutral-600">
+                                Current status:{' '}
+                                {selectedMeetingStatus ? selectedMeetingStatus : 'No record for selected session'}
+                              </p>
+                              <p className="text-xs text-neutral-600">
+                                Current override: {selectedMeetingOverride ? selectedMeetingOverride : 'none'}
+                              </p>
+                              <label className="block text-sm">
+                                Reason
+                                <textarea
+                                  className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                                  onChange={(event) =>
+                                    setMeetingReasonDrafts((previous) => ({
+                                      ...previous,
+                                      [employee.id]: event.target.value
+                                    }))
+                                  }
+                                  value={meetingReason}
+                                />
+                              </label>
+                              <div className="grid grid-cols-3 gap-2">
+                                <button
+                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={!canOverrideAttendance || !meetingDate || pardonMeetingMutation.isPending}
+                                  onClick={() => {
+                                    if (!meetingReason.trim()) {
+                                      setStatusMessage('Meeting pardon reason is required.');
+                                      return;
+                                    }
+                                    pardonMeetingMutation.mutate({
+                                      sNumber: employee.sNumber,
+                                      date: meetingDate,
+                                      reason: meetingReason.trim()
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Pardon Meeting
+                                </button>
+                                <button
+                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={
+                                    !canOverrideAttendance || !meetingDate || markMeetingPresentMutation.isPending
+                                  }
+                                  onClick={() => {
+                                    if (!meetingReason.trim()) {
+                                      setStatusMessage('Meeting present reason is required.');
+                                      return;
+                                    }
+                                    markMeetingPresentMutation.mutate({
+                                      sNumber: employee.sNumber,
+                                      date: meetingDate,
+                                      reason: meetingReason.trim()
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Mark Meeting Present
+                                </button>
+                                <button
+                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={
+                                    !canOverrideAttendance ||
+                                    !meetingDate ||
+                                    clearMeetingOverrideMutation.isPending
+                                  }
+                                  onClick={() => {
+                                    clearMeetingOverrideMutation.mutate({
+                                      sNumber: employee.sNumber,
+                                      date: meetingDate
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Remove Override
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                              <h3 className="text-sm font-semibold text-neutral-900">Shift Attendance Override</h3>
+                              <label className="block text-sm">
+                                Recent Shift
+                                <select
+                                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                  onChange={(event) =>
+                                    setSelectedShiftDrafts((previous) => ({
+                                      ...previous,
+                                      [employee.id]: event.target.value
+                                    }))
+                                  }
+                                  value={selectedShiftKey}
+                                >
+                                  {recentShiftRows.length === 0 && <option value="">No recent shifts</option>}
+                                  {recentShiftRows.map((row) => (
+                                    <option key={`${employee.id}-${shiftRowKey(row)}`} value={shiftRowKey(row)}>
+                                      {String(row.shift_date)} P{String(row.shift_period)} ({String(row.shift_slot_key)}) —{' '}
+                                      {String(row.status)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <p className="text-xs text-neutral-600">
+                                Selected status: {selectedShift ? String(selectedShift.status) : 'N/A'}
+                              </p>
+                              <label className="block text-sm">
+                                Reason
+                                <textarea
+                                  className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                                  onChange={(event) =>
+                                    setShiftReasonDrafts((previous) => ({
+                                      ...previous,
+                                      [employee.id]: event.target.value
+                                    }))
+                                  }
+                                  value={shiftReason}
+                                />
+                              </label>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={
+                                    !canOverrideAttendance ||
+                                    !selectedShift ||
+                                    selectedShiftIsFuture ||
+                                    pardonShiftMutation.isPending
+                                  }
+                                  onClick={() => {
+                                    if (!selectedShift) {
+                                      setStatusMessage('Select a shift first.');
+                                      return;
+                                    }
+                                    if (!shiftReason.trim()) {
+                                      setStatusMessage('Shift pardon reason is required.');
+                                      return;
+                                    }
+                                    pardonShiftMutation.mutate({
+                                      sNumber: employee.sNumber,
+                                      date: String(selectedShift.shift_date),
+                                      period: toNumber(selectedShift.shift_period),
+                                      shiftSlotKey: String(selectedShift.shift_slot_key),
+                                      reason: shiftReason.trim()
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Pardon Shift
+                                </button>
+                                <button
+                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={
+                                    !canOverrideAttendance ||
+                                    !selectedShift ||
+                                    selectedShiftIsFuture ||
+                                    markShiftPresentMutation.isPending
+                                  }
+                                  onClick={() => {
+                                    if (!selectedShift) {
+                                      setStatusMessage('Select a shift first.');
+                                      return;
+                                    }
+                                    markShiftPresentMutation.mutate({
+                                      sNumber: employee.sNumber,
+                                      date: String(selectedShift.shift_date),
+                                      period: toNumber(selectedShift.shift_period),
+                                      shiftSlotKey: String(selectedShift.shift_slot_key)
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Mark Shift Present
+                                </button>
+                              </div>
+                              {selectedShiftIsFuture && (
+                                <p className="text-xs text-neutral-600">
+                                  Shift overrides are available on the shift date or after.
+                                </p>
+                              )}
+                            </div>
                           </div>
 
-                          <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                            <h3 className="text-sm font-semibold text-neutral-900">Login Credentials</h3>
-                            <label className="block text-sm">
-                              Username
-                              <input
-                                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                                onChange={(event) =>
-                                  setLoginUsernameDrafts((previous) => ({
-                                    ...previous,
-                                    [employee.id]: event.target.value
-                                  }))
-                                }
-                                value={loginUsername}
-                              />
-                            </label>
-                            <label className="block text-sm">
-                              Password
-                              <input
-                                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                                onChange={(event) =>
-                                  setLoginPasswordDrafts((previous) => ({
-                                    ...previous,
-                                    [employee.id]: event.target.value
-                                  }))
-                                }
-                                type="password"
-                                value={loginPassword}
-                              />
-                            </label>
+                          <div className="flex justify-start">
                             <button
-                              className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
-                              disabled={!canEditSettings || saveLoginMutation.isPending}
-                              onClick={() => {
-                                if (!loginUsername.trim()) {
-                                  setStatusMessage('Username is required.');
-                                  return;
-                                }
-                                if (loginPassword.length < 8) {
-                                  setStatusMessage('Password must be at least 8 characters.');
-                                  return;
-                                }
-                                saveLoginMutation.mutate({
-                                  employeeId: employee.id,
-                                  username: loginUsername.trim(),
-                                  password: loginPassword
-                                });
-                              }}
+                              className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                              onClick={() => toggleShowMore(employee.id)}
                               type="button"
                             >
-                              Save Login
+                              {showMore ? 'Show less' : 'Show more'}
                             </button>
                           </div>
 
-                          <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                            <h3 className="text-sm font-semibold text-neutral-900">Off-Period Settings</h3>
-                            <div className="grid grid-cols-4 gap-2">
-                              {Array.from({ length: 8 }, (_, index) => index + 1).map((period) => {
-                                const selected = draftOffPeriods.includes(period);
-                                return (
+                          {showMore && (
+                            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                                <h3 className="text-sm font-semibold text-neutral-900">Employee Record</h3>
+                                <label className="block text-sm">
+                                  Name
+                                  <input
+                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setEmployeeRecordDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: { ...employeeRecordDraft, name: event.target.value }
+                                      }))
+                                    }
+                                    value={employeeRecordDraft.name}
+                                  />
+                                </label>
+                                <label className="block text-sm">
+                                  s_number
+                                  <input
+                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setEmployeeRecordDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: { ...employeeRecordDraft, sNumber: event.target.value }
+                                      }))
+                                    }
+                                    value={employeeRecordDraft.sNumber}
+                                  />
+                                </label>
+                                <label className="block text-sm">
+                                  Assigned periods
+                                  <input
+                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setEmployeeRecordDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: {
+                                          ...employeeRecordDraft,
+                                          assignedPeriods: event.target.value
+                                        }
+                                      }))
+                                    }
+                                    value={employeeRecordDraft.assignedPeriods}
+                                  />
+                                </label>
+                                <label className="flex min-h-[44px] items-center gap-2 text-sm">
+                                  <input
+                                    checked={employeeRecordDraft.scheduleable}
+                                    onChange={(event) =>
+                                      setEmployeeRecordDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: {
+                                          ...employeeRecordDraft,
+                                          scheduleable: event.target.checked
+                                        }
+                                      }))
+                                    }
+                                    type="checkbox"
+                                  />
+                                  Schedulable
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
                                   <button
-                                    className={`min-h-[44px] border px-2 text-sm ${
-                                      selected
-                                        ? 'border-brand-maroon bg-brand-maroon text-white'
-                                        : 'border-neutral-300 bg-white text-neutral-900'
-                                    }`}
-                                    key={`${employee.id}-period-${period}`}
-                                    onClick={() => toggleOffPeriodDraft(employee.id, period, employee.offPeriods)}
+                                    className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canEditSettings || saveEmployeeRecordMutation.isPending}
+                                    onClick={() => saveEmployeeRecordMutation.mutate(employee.id)}
                                     type="button"
                                   >
-                                    P{period}
+                                    Save Record
                                   </button>
-                                );
-                              })}
-                            </div>
-                            <button
-                              className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
-                              disabled={!canEditSettings || saveOffPeriodsMutation.isPending || draftOffPeriods.length === 0}
-                              onClick={() => {
-                                if (draftOffPeriods.length === 0) {
-                                  setStatusMessage('At least one off-period must be selected.');
-                                  return;
-                                }
-                                saveOffPeriodsMutation.mutate({
-                                  employeeId: employee.id,
-                                  offPeriods: draftOffPeriods
-                                });
-                              }}
-                              type="button"
-                            >
-                              Save Off-Periods
-                            </button>
-                          </div>
-
-                          <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                            <h3 className="text-sm font-semibold text-neutral-900">Meeting Attendance Override</h3>
-                            <label className="block text-sm">
-                              Session Date
-                              <select
-                                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                                onChange={(event) =>
-                                  setMeetingDateDrafts((previous) => ({
-                                    ...previous,
-                                    [employee.id]: event.target.value
-                                  }))
-                                }
-                                value={meetingDate}
-                              >
-                                {recentMeetingDates.length === 0 && <option value="">No recent sessions</option>}
-                                {recentMeetingDates.map((date) => (
-                                  <option key={`${employee.id}-meeting-${date}`} value={date}>
-                                    {date}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <p className="text-xs text-neutral-600">
-                              Current status:{' '}
-                              {selectedMeetingStatus ? selectedMeetingStatus : 'No record for selected session'}
-                            </p>
-                            <p className="text-xs text-neutral-600">
-                              Current override:{' '}
-                              {selectedMeetingOverride ? selectedMeetingOverride : 'none'}
-                            </p>
-                            <label className="block text-sm">
-                              Reason
-                              <textarea
-                                className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
-                                onChange={(event) =>
-                                  setMeetingReasonDrafts((previous) => ({
-                                    ...previous,
-                                    [employee.id]: event.target.value
-                                  }))
-                                }
-                                value={meetingReason}
-                              />
-                            </label>
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                disabled={!canOverrideAttendance || !meetingDate || pardonMeetingMutation.isPending}
-                                onClick={() => {
-                                  if (!meetingReason.trim()) {
-                                    setStatusMessage('Meeting pardon reason is required.');
-                                    return;
-                                  }
-                                  pardonMeetingMutation.mutate({
-                                    sNumber: employee.sNumber,
-                                    date: meetingDate,
-                                    reason: meetingReason.trim()
-                                  });
-                                }}
-                                type="button"
-                              >
-                                Pardon Meeting
-                              </button>
-                              <button
-                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                disabled={
-                                  !canOverrideAttendance || !meetingDate || markMeetingPresentMutation.isPending
-                                }
-                                onClick={() => {
-                                  if (!meetingReason.trim()) {
-                                    setStatusMessage('Meeting present reason is required.');
-                                    return;
-                                  }
-                                  markMeetingPresentMutation.mutate({
-                                    sNumber: employee.sNumber,
-                                    date: meetingDate,
-                                    reason: meetingReason.trim()
-                                  });
-                                }}
-                                type="button"
-                              >
-                                Mark Meeting Present
-                              </button>
-                              <button
-                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                disabled={
-                                  !canOverrideAttendance ||
-                                  !meetingDate ||
-                                  clearMeetingOverrideMutation.isPending
-                                }
-                                onClick={() => {
-                                  clearMeetingOverrideMutation.mutate({
-                                    sNumber: employee.sNumber,
-                                    date: meetingDate
-                                  });
-                                }}
-                                type="button"
-                              >
-                                Remove Override
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                            <h3 className="text-sm font-semibold text-neutral-900">Shift Attendance Override</h3>
-                            <label className="block text-sm">
-                              Recent Shift
-                              <select
-                                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                                onChange={(event) =>
-                                  setSelectedShiftDrafts((previous) => ({
-                                    ...previous,
-                                    [employee.id]: event.target.value
-                                  }))
-                                }
-                                value={selectedShiftKey}
-                              >
-                                {recentShiftRows.length === 0 && <option value="">No recent shifts</option>}
-                                {recentShiftRows.map((row) => (
-                                  <option key={`${employee.id}-${shiftRowKey(row)}`} value={shiftRowKey(row)}>
-                                    {String(row.shift_date)} P{String(row.shift_period)} ({String(row.shift_slot_key)}) —{' '}
-                                    {String(row.status)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <p className="text-xs text-neutral-600">
-                              Selected status: {selectedShift ? String(selectedShift.status) : 'N/A'}
-                            </p>
-                            <label className="block text-sm">
-                              Reason
-                              <textarea
-                                className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
-                                onChange={(event) =>
-                                  setShiftReasonDrafts((previous) => ({
-                                    ...previous,
-                                    [employee.id]: event.target.value
-                                  }))
-                                }
-                                value={shiftReason}
-                              />
-                            </label>
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                disabled={
-                                  !canOverrideAttendance || !selectedShift || pardonShiftMutation.isPending
-                                }
-                                onClick={() => {
-                                  if (!selectedShift) {
-                                    setStatusMessage('Select a shift first.');
-                                    return;
-                                  }
-                                  if (!shiftReason.trim()) {
-                                    setStatusMessage('Shift pardon reason is required.');
-                                    return;
-                                  }
-                                  pardonShiftMutation.mutate({
-                                    sNumber: employee.sNumber,
-                                    date: String(selectedShift.shift_date),
-                                    period: toNumber(selectedShift.shift_period),
-                                    shiftSlotKey: String(selectedShift.shift_slot_key),
-                                    reason: shiftReason.trim()
-                                  });
-                                }}
-                                type="button"
-                              >
-                                Pardon Shift
-                              </button>
-                              <button
-                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                disabled={
-                                  !canOverrideAttendance || !selectedShift || markShiftPresentMutation.isPending
-                                }
-                                onClick={() => {
-                                  if (!selectedShift) {
-                                    setStatusMessage('Select a shift first.');
-                                    return;
-                                  }
-                                  markShiftPresentMutation.mutate({
-                                    sNumber: employee.sNumber,
-                                    date: String(selectedShift.shift_date),
-                                    period: toNumber(selectedShift.shift_period),
-                                    shiftSlotKey: String(selectedShift.shift_slot_key)
-                                  });
-                                }}
-                                type="button"
-                              >
-                                Mark Shift Present
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                            <h3 className="text-sm font-semibold text-neutral-900">Strike Management</h3>
-                            <label className="block text-sm">
-                              Reason
-                              <textarea
-                                className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
-                                onChange={(event) =>
-                                  setStrikeReasonDrafts((previous) => ({
-                                    ...previous,
-                                    [employee.id]: event.target.value
-                                  }))
-                                }
-                                value={strikeReason}
-                              />
-                            </label>
-                            <button
-                              className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
-                              disabled={!canManageStrikes || addStrikeMutation.isPending}
-                              onClick={() => {
-                                const reason = strikeReason.trim();
-                                if (!reason) {
-                                  setStatusMessage('Strike reason is required.');
-                                  return;
-                                }
-                                addStrikeMutation.mutate({
-                                  employeeId: employee.id,
-                                  reason
-                                });
-                              }}
-                              type="button"
-                            >
-                              Add Strike
-                            </button>
-                            <div className="space-y-2">
-                              {employeeStrikes.length === 0 && (
-                                <p className="text-sm text-neutral-600">No active strikes.</p>
-                              )}
-                              {employeeStrikes.map((strike) => (
-                                <div className="border border-neutral-300 p-2" key={String(strike.id)}>
-                                  <p className="text-sm text-neutral-800">{String(strike.reason ?? 'No reason')}</p>
-                                  <div className="mt-2 flex items-center justify-between gap-2">
-                                    <p className="text-xs text-neutral-600">
-                                      {new Date(String(strike.issued_at ?? '')).toLocaleDateString()}
-                                    </p>
-                                    <button
-                                      className="min-h-[44px] border border-neutral-400 px-2 text-xs"
-                                      disabled={!canManageStrikes || removeStrikeMutation.isPending}
-                                      onClick={() => removeStrikeMutation.mutate(String(strike.id))}
-                                      type="button"
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
+                                  <button
+                                    className="min-h-[44px] border border-neutral-500 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canEditSettings || removeEmployeeRecordMutation.isPending}
+                                    onClick={() => removeEmployeeRecordMutation.mutate(employee.id)}
+                                    type="button"
+                                  >
+                                    Remove Employee
+                                  </button>
                                 </div>
-                              ))}
+                              </div>
+
+                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                                <h3 className="text-sm font-semibold text-neutral-900">Login Credentials</h3>
+                                <label className="block text-sm">
+                                  Username
+                                  <input
+                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setLoginUsernameDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: event.target.value
+                                      }))
+                                    }
+                                    value={loginUsername}
+                                  />
+                                </label>
+                                <label className="block text-sm">
+                                  Password
+                                  <input
+                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setLoginPasswordDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: event.target.value
+                                      }))
+                                    }
+                                    type="password"
+                                    value={loginPassword}
+                                  />
+                                </label>
+                                <button
+                                  className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={!canEditSettings || saveLoginMutation.isPending}
+                                  onClick={() => {
+                                    if (!loginUsername.trim()) {
+                                      setStatusMessage('Username is required.');
+                                      return;
+                                    }
+                                    if (loginPassword.length < 8) {
+                                      setStatusMessage('Password must be at least 8 characters.');
+                                      return;
+                                    }
+                                    saveLoginMutation.mutate({
+                                      employeeId: employee.id,
+                                      username: loginUsername.trim(),
+                                      password: loginPassword
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Save Login
+                                </button>
+                              </div>
+
+                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                                <h3 className="text-sm font-semibold text-neutral-900">Off-Period Settings</h3>
+                                <div className="grid grid-cols-4 gap-2">
+                                  {Array.from({ length: 8 }, (_, index) => index + 1).map((period) => {
+                                    const selected = draftOffPeriods.includes(period);
+                                    return (
+                                      <button
+                                        className={`min-h-[44px] border px-2 text-sm ${
+                                          selected
+                                            ? 'border-brand-maroon bg-brand-maroon text-white'
+                                            : 'border-neutral-300 bg-white text-neutral-900'
+                                        }`}
+                                        key={`${employee.id}-period-${period}`}
+                                        onClick={() => toggleOffPeriodDraft(employee.id, period, employee.offPeriods)}
+                                        type="button"
+                                      >
+                                        P{period}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <button
+                                  className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={!canEditSettings || saveOffPeriodsMutation.isPending || draftOffPeriods.length === 0}
+                                  onClick={() => {
+                                    if (draftOffPeriods.length === 0) {
+                                      setStatusMessage('At least one off-period must be selected.');
+                                      return;
+                                    }
+                                    saveOffPeriodsMutation.mutate({
+                                      employeeId: employee.id,
+                                      offPeriods: draftOffPeriods
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Save Off-Periods
+                                </button>
+                              </div>
+
+                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                                <h3 className="text-sm font-semibold text-neutral-900">Strike Management</h3>
+                                <label className="block text-sm">
+                                  Reason
+                                  <textarea
+                                    className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                                    onChange={(event) =>
+                                      setStrikeReasonDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: event.target.value
+                                      }))
+                                    }
+                                    value={strikeReason}
+                                  />
+                                </label>
+                                <button
+                                  className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={!canManageStrikes || addStrikeMutation.isPending}
+                                  onClick={() => {
+                                    const reason = strikeReason.trim();
+                                    if (!reason) {
+                                      setStatusMessage('Strike reason is required.');
+                                      return;
+                                    }
+                                    addStrikeMutation.mutate({
+                                      employeeId: employee.id,
+                                      reason
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Add Strike
+                                </button>
+                                <div className="space-y-2">
+                                  {employeeStrikes.length === 0 && (
+                                    <p className="text-sm text-neutral-600">No active strikes.</p>
+                                  )}
+                                  {employeeStrikes.map((strike) => (
+                                    <div className="border border-neutral-300 p-2" key={String(strike.id)}>
+                                      <p className="text-sm text-neutral-800">{String(strike.reason ?? 'No reason')}</p>
+                                      <div className="mt-2 flex items-center justify-between gap-2">
+                                        <p className="text-xs text-neutral-600">
+                                          {new Date(String(strike.issued_at ?? '')).toLocaleDateString()}
+                                        </p>
+                                        <button
+                                          className="min-h-[44px] border border-neutral-400 px-2 text-xs"
+                                          disabled={!canManageStrikes || removeStrikeMutation.isPending}
+                                          onClick={() => removeStrikeMutation.mutate(String(strike.id))}
+                                          type="button"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1417,6 +1402,94 @@ export function EmployeesTab() {
           </tbody>
         </table>
       </div>
+
+      {isAddEmployeeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+          <div className="w-full max-w-2xl border border-neutral-400 bg-white p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-base font-semibold text-neutral-900">Add Employee</h3>
+              <button
+                className="min-h-[36px] border border-neutral-500 px-2 text-sm"
+                onClick={() => setIsAddEmployeeModalOpen(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="text-sm">
+                Name
+                <input
+                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setNewEmployeeDraft((previous) => ({ ...previous, name: event.target.value }))
+                  }
+                  value={newEmployeeDraft.name}
+                />
+              </label>
+              <label className="text-sm">
+                s_number
+                <input
+                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setNewEmployeeDraft((previous) => ({ ...previous, sNumber: event.target.value }))
+                  }
+                  value={newEmployeeDraft.sNumber}
+                />
+              </label>
+              <label className="text-sm md:col-span-2">
+                Assigned periods
+                <input
+                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setNewEmployeeDraft((previous) => ({ ...previous, assignedPeriods: event.target.value }))
+                  }
+                  value={newEmployeeDraft.assignedPeriods}
+                />
+              </label>
+              <label className="flex min-h-[44px] items-center gap-2 text-sm">
+                <input
+                  checked={newEmployeeDraft.scheduleable}
+                  onChange={(event) =>
+                    setNewEmployeeDraft((previous) => ({ ...previous, scheduleable: event.target.checked }))
+                  }
+                  type="checkbox"
+                />
+                Schedulable
+              </label>
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                onClick={() => setIsAddEmployeeModalOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={
+                  !canEditSettings ||
+                  addEmployeeRecordMutation.isPending ||
+                  !newEmployeeDraft.name.trim() ||
+                  !newEmployeeDraft.sNumber.trim()
+                }
+                onClick={() =>
+                  addEmployeeRecordMutation.mutate({
+                    name: newEmployeeDraft.name,
+                    sNumber: newEmployeeDraft.sNumber,
+                    scheduleable: newEmployeeDraft.scheduleable,
+                    assignedPeriods: newEmployeeDraft.assignedPeriods
+                  })
+                }
+                type="button"
+              >
+                Create Employee
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

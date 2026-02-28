@@ -63,7 +63,7 @@ export function calculateMeetingAttendanceRate(inputs: {
 }
 
 export function calculateShiftAttendanceRate(inputs: {
-  shiftAttendanceRecords: Array<{ status: 'expected' | 'present' | 'absent' | 'excused' }>;
+  shiftAttendanceRecords: Array<{ status: 'expected' | 'present' | 'absent' | 'excused'; date?: string | null }>;
 }): {
   raw_rate: number | null;
   adjusted_rate: number | null;
@@ -71,13 +71,19 @@ export function calculateShiftAttendanceRate(inputs: {
   attended: number;
   excused: number;
 } {
-  const expected_shifts = inputs.shiftAttendanceRecords.length;
+  const today = new Date().toISOString().slice(0, 10);
+  const eligibleRecords = inputs.shiftAttendanceRecords.filter((item) => {
+    if (!item.date) return true;
+    return item.date <= today;
+  });
+
+  const expected_shifts = eligibleRecords.length;
   if (expected_shifts === 0) {
     return { raw_rate: null, adjusted_rate: null, expected_shifts: 0, attended: 0, excused: 0 };
   }
 
-  const attended = inputs.shiftAttendanceRecords.filter((item) => item.status === 'present').length;
-  const excused = inputs.shiftAttendanceRecords.filter((item) => item.status === 'excused').length;
+  const attended = eligibleRecords.filter((item) => item.status === 'present').length;
+  const excused = eligibleRecords.filter((item) => item.status === 'excused').length;
   const raw_rate = (attended / expected_shifts) * 100;
   const adjustedDenominator = expected_shifts - excused;
   const adjusted_rate = adjustedDenominator <= 0 ? null : (attended / adjustedDenominator) * 100;
