@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import type { Route } from 'next';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { hasPermission } from '@/lib/permissions';
@@ -50,7 +51,8 @@ export function HRModule() {
   const onTabChange = (tab: HRTabItem['id']) => {
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.set('tab', tab);
-    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+    const href = `${pathname}?${nextParams.toString()}` as Route;
+    router.replace(href, { scroll: false });
   };
 
   return (
