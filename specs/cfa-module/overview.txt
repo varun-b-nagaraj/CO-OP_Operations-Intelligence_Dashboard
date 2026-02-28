@@ -1,0 +1,94 @@
+Chick-fil-A Dashboard
+
+I worked with Anishka Vasanthu on different Chick-fil-A operations I would need to include. Some basic features would include order quantity, left-over quantity, request quantity(how many people asked for CFA after it sold out), the amount of sales generated from Chick-fil-A as well as revenue generated to estimate net-profit/loss.
+
+Initial Menu of Products:
+CFA Strip Sliders: Buy for 2.45 and sell for 4.00
+CFA Half Grilled Cool Wrap: Buy for 3:49 and sell for 5:00
+
+UI (for approved roles only):
+Inventory -> Chick-fil-A -> Menu
+Actions Allowed:
+View items (all users with CFA access)
+Edit buy cost / sell price (approved roles)
+Add new item (approved roles)
+Disable/remove item (approved roles)
+Fields (per CFA item):
+itemId (string, unique)
+name (string)
+buyCostCents (int)
+sellPriceCents (int)
+active (boolean)
+
+Daily Selling Log (form)
+Meta:
+date (YYYY-MM-DD)
+dayType (A or B) (auto-detected, but editable with permission)
+period (A→2, B→6) (auto)
+Per item (for each active CFA item):
+receivedQty (int) — how many you start with
+leftoverQty (int) — how many remain at end
+missedDemandQty (int) — # people who asked after sell-out (0 if none)
+
+Auto-calculations (computed on save)
+
+For each item:
+soldQty = receivedQty - leftoverQty
+trueDemandQty = soldQty + missedDemandQty
+revenueCents = soldQty * sellPriceCents
+cogsCents = soldQty * buyCostCents
+profitCents = revenueCents - cogsCents
+marginPct = profitCents / revenueCents (if revenueCents > 0)
+Daily totals:
+totalRevenueCents = Σ(revenueCents)
+totalCogsCents = Σ(cogsCents)
+totalProfitCents = Σ(profitCents)
+stockoutFlag = (missedDemandQty > 0 for any item)
+
+History + Analytics Views: 
+
+1. Day-by-day history
+
+Shows each date with:
+dayType, period
+soldQty, missedDemandQty, trueDemandQty per item
+totalRevenue, totalProfit
+Filters:
+Date range
+A vs B vs All
+Item
+Export: CSV export for regression / reporting
+
+2. A-day vs B-day comparison
+
+Charts + tables:
+Avg soldQty per item on A vs B
+Avg trueDemandQty per item on A vs B
+Stockout frequency on A vs B
+Profit/day on A vs B
+
+3. Forecasting (regression-ready)
+
+Goal: predict trueDemandQty separately for A and B.
+
+Model plan: Since sales change based on day, there will be different predictive models for A-day and B-day.
+A-day model per item
+B-day model per item
+
+Features stored/derived (minimum):
+dayType (A/B)
+weekday
+month
+trueDemandQty (target)
+rolling averages (e.g., last 3 same-dayType sales)
+
+Output:
+Recommended stock quantity for next A-day / next B-day
+Expected profit estimate using menu prices/costs
+
+Permissions / Roles (required)
+CFA Staff: submit Daily Log, view history
+CFA Admin / Exec / Finance: edit menu items (cost/price), edit dayType override, export data
+
+Notes (important):
+This system does not require Lightspeed sales data. Lightspeed can be optional later for inventory validation, but the core process uses manual received/leftover + missed demand which is enough for profit/loss + forecasting.

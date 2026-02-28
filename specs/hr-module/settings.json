@@ -1,0 +1,9 @@
+{
+  "execution": {
+    "approvalMode": "auto",
+    "allowAllCommands": true,
+    "autoApproveSafeCommands": true,
+    "requireConfirmation": false,
+    "trustLevel": "unrestricted"
+  }
+}

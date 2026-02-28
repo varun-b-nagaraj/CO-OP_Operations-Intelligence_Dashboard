@@ -1,0 +1,247 @@
+import { z } from 'zod';
+
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+const isValidDateString = (value: string): boolean => {
+  if (!DATE_REGEX.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+export const DateStringSchema = z
+  .string()
+  .regex(DATE_REGEX, 'Date must use YYYY-MM-DD format')
+  .refine(isValidDateString, 'Date must be a valid calendar date');
+
+export const SNumberSchema = z.string().trim().min(1).max(50);
+
+export const ShiftSlotKeySchema = z.string().trim().min(1).max(200);
+
+export const StrikeSchema = z.object({
+  employee_id: z.string().uuid(),
+  reason: z.string().trim().min(1).max(500)
+});
+
+export const AttendanceOverrideSchema = z
+  .object({
+    s_number: SNumberSchema,
+    checkin_date: DateStringSchema,
+    scope: z.enum(['meeting', 'shift']),
+    shift_period: z.number().int().min(0).max(8).nullable(),
+    override_type: z.enum(['excused', 'present_override']),
+    reason: z.string().trim().min(1).max(500)
+  })
+  .superRefine((value, ctx) => {
+    if (value.scope === 'meeting' && value.shift_period !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['shift_period'],
+        message: "shift_period must be null when scope='meeting'"
+      });
+    }
+
+    if (value.scope === 'shift' && value.shift_period === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['shift_period'],
+        message: "shift_period is required when scope='shift'"
+      });
+    }
+  });
+
+export const ShiftExchangeRequestSchema = z
+  .object({
+    shift_date: DateStringSchema,
+    shift_period: z.number().int().min(0).max(8),
+    shift_slot_key: ShiftSlotKeySchema,
+    from_employee_s_number: SNumberSchema,
+    to_employee_s_number: SNumberSchema,
+    reason: z.string().trim().min(1).max(500)
+  })
+  .superRefine((value, ctx) => {
+    if (value.from_employee_s_number === value.to_employee_s_number) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['to_employee_s_number'],
+        message: 'To employee must be different from from employee'
+      });
+    }
+  });
+
+export const ShiftExchangeReviewSchema = z.object({
+  request_id: z.string().uuid()
+});
+
+export const PointsEntrySchema = z.object({
+  employee_id: z.string().uuid(),
+  point_type: z.enum(['meeting', 'morning_shift', 'off_period_shift', 'project', 'manual']),
+  points: z.number().int(),
+  description: z.string().trim().max(500).nullable().optional()
+});
+
+export const EmployeeSettingsSchema = z.object({
+  employee_id: z.string().uuid(),
+  employee_s_number: SNumberSchema,
+  off_periods: z.array(z.number().int().min(1).max(8)).max(8)
+});
+
+export const ShiftAttendanceSchema = z.object({
+  shift_date: DateStringSchema,
+  shift_period: z.number().int().min(0).max(8),
+  shift_slot_key: ShiftSlotKeySchema,
+  employee_s_number: SNumberSchema,
+  status: z.enum(['expected', 'present', 'absent', 'excused']),
+  source: z.enum(['scheduler', 'manual', 'shift_exchange', 'rebuild']),
+  reason: z.string().trim().max(500).nullable().optional()
+});
+
+export const ShiftAttendanceMarkSchema = z.object({
+  s_number: SNumberSchema,
+  date: DateStringSchema,
+  period: z.number().int().min(0).max(8),
+  shift_slot_key: ShiftSlotKeySchema,
+  reason: z.string().trim().max(500).optional()
+});
+
+export const ScheduleParamsSchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+  anchorDate: DateStringSchema,
+  anchorDay: z.enum(['A', 'B']),
+  seed: z.number().int(),
+  forceRefresh: z.boolean().optional(),
+  forceRebuildExpectedShifts: z.boolean().optional()
+});
+
+export const MeetingAttendanceParamsSchema = z
+  .object({
+    date: DateStringSchema.optional(),
+    from: DateStringSchema.optional(),
+    to: DateStringSchema.optional(),
+    exclude: z.string().max(500).optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.date && (value.from || value.to)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['date'],
+        message: 'Use either date or from/to, not both'
+      });
+    }
+  });
+
+const RawScheduleMetaSchema = z.object({
+  year: z.number().int(),
+  month: z.number().int(),
+  anchorDate: DateStringSchema,
+  anchorDay: z.enum(['A', 'B']),
+  seed: z.number().int(),
+  generatedAt: z.string(),
+  regularsPerShift: z.number(),
+  alternatesPerShift: z.number()
+});
+
+export const ScheduleApiResponseSchema = z.object({
+  meta: RawScheduleMetaSchema,
+  roster: z.array(
+    z.object({
+      id: z.number(),
+      name: z.string(),
+      s_number: SNumberSchema,
+      scheduleable: z.boolean(),
+      Schedule: z.number().optional()
+    })
+  ),
+  calendar: z.record(z.enum(['A', 'B'])),
+  schedule: z.array(
+    z.object({
+      Date: DateStringSchema,
+      Day: z.string(),
+      Period: z.number().int().min(0).max(8),
+      Student: z.string(),
+      Type: z.string(),
+      Group: z.string(),
+      Role: z.string()
+    })
+  ),
+  summary: z.array(
+    z.object({
+      Student: z.string(),
+      Role: z.string(),
+      Group: z.string(),
+      'Regular Shifts': z.number(),
+      'Alternate Shifts': z.number(),
+      'Total Shifts': z.number(),
+      'Periods Worked': z.string()
+    })
+  ),
+  statistics: z.array(
+    z.object({
+      Metric: z.string(),
+      Value: z.number()
+    })
+  ),
+  balanceAnalysis: z.array(
+    z.object({
+      Category: z.string(),
+      Metric: z.string(),
+      Value: z.number()
+    })
+  )
+});
+
+export const MeetingAttendanceApiResponseSchema = z.object({
+  ok: z.boolean(),
+  dates: z.array(DateStringSchema),
+  meta: z.object({
+    timezone: z.string(),
+    generated_at: z.string(),
+    filters: z.object({
+      date: DateStringSchema.optional(),
+      from: DateStringSchema.optional(),
+      to: DateStringSchema.optional(),
+      exclude: z.string().optional()
+    })
+  }),
+  analytics: z.object({
+    total_students: z.number().int().nonnegative(),
+    total_sessions: z.number().int().nonnegative(),
+    avg_attendance: z.number(),
+    students: z.array(
+      z.object({
+        name: z.string(),
+        s_number: SNumberSchema,
+        present_count: z.number().int().nonnegative(),
+        absent_count: z.number().int().nonnegative(),
+        attendance_rate: z.number()
+      })
+    )
+  }),
+  sessions: z.array(
+    z.object({
+      date: DateStringSchema,
+      present_count: z.number().int().nonnegative(),
+      absent_count: z.number().int().nonnegative(),
+      total_students: z.number().int().nonnegative(),
+      attendance_rate: z.number()
+    })
+  ),
+  roster: z.array(
+    z.object({
+      name: z.string(),
+      s_number: SNumberSchema
+    })
+  )
+});
+
+export function sanitizeTextInput(input: string): string {
+  return input.trim().replace(/\s+/g, ' ');
+}
+
+export function zodFieldErrors(error: z.ZodError): Record<string, string> {
+  return error.issues.reduce<Record<string, string>>((accumulator, issue) => {
+    const key = issue.path.join('.') || 'root';
+    accumulator[key] = issue.message;
+    return accumulator;
+  }, {});
+}

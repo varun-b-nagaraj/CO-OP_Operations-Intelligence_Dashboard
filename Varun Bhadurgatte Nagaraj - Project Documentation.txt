@@ -1,0 +1,292 @@
+﻿Full Project Overview
+CO-OP Operations & Intelligence Portal
+
+
+Project Overview:
+The CO-OP Operations and Intelligence Portal is an online centralized hub for information and communication within the CO-OP. Over the past year, communication gaps have led to missed opportunities and operational inefficiencies. My project will help mitigate that by providing one portal between departments that will relay all relevant information between each other ensuring no communication mishaps.
+
+
+Department-by-Department Overview:
+Here are some features that each department would have access to.
+
+
+* Lightspeed: Website code, code documentation, troubleshooting guides
+* Marketing: Promotional data, social media metrics, historical event performance data
+* Inventory: Count uploads, inventory schedules, stock monitoring, inventory attendance
+* Kiosk: Sales trend analysis, product performance analysis
+* Chick-fil-A Operations: Ordering logs (quantity), profit and loss analysis, demand trend - analysis, order prediction tools
+* Finance: Report submissions, transaction records
+* Product: Order tracking, order placement, compliance analysis, product design changes
+* Human Resources (HR): Employee attendance, scheduling, shift swapping, employee notifications
+
+
+Those are just a very basic overview with more features being added as work progresses. When each department logs in they only see the access which is made available to them so each department’s home dashboard would look different showing only information relevant to that department.
+
+
+Announcements/Calendar:
+To improve schedules and communication there will be a calendar where important events and dates can be denoted. If an event is added we can pick who the event is visible to and it will help us keep track of schedules. There can also be reminders sent to relevant people to keep them updated and on schedule.
+
+
+Role-based security:
+Since we support almost a 100 members within the organization, we cannot give access to all information to everybody. To accommodate this we will have role-based security within the website so each employee will have access to only the services available to them and the executives will be able to edit permissions through a portal. There will also be an audit log to check what changes have been made by each employee to ensure integrity.
+
+
+Hosting & Deployment:
+The website will be deployed and hosted on Vercel which is unblocked on school Wi-Fi and the code will have control on GitHub. If the project becomes more successful then we can have district hosting as well in the future. The code documentation will also be hosted on GitHub so after graduation new members can still understand and modify code if necessary.
+Executive Dashboard
+Executive Dashboard
+
+
+WORK IN PROGRESS
+Human Resources (HR)
+Human Resources (HR) Dashboard
+
+
+I worked with Sona Rao who is part of the HR team to work on useful features for the HR dashboard. Some basic features include scheduling, strikes, attendance, and shift-switching. All automatic elements below can also be edited manually by HR. A main dashboard that provides insights on tracked metrics will also be available.
+
+
+Scheduling:
+The application will be able to generate and display schedules for each month. Supporting Off-period shift scheduling, and employees can comment or fill out a form to request changes in the schedule if they are unable to make it. We can track the amount of shift absences and change requests along with morning shift absences. You can flag a shift as an off period shift by clicking on their name within the shift and selecting “off period shift” if it hasn’t been done automatically.
+
+
+Employee Overview:
+Someone with access will be able to also view the breakdown of each employee with relevant information such as name, strikes, attendance rate, shifts taken, morning shifts taken (before 1st period) , off-period shifts taken (4th and 8th period). You can also edit the username and password for each employee as well as what period they are in as well as what off-periods they have. You can also look at how many points they have (1 point per meeting attended, 1 point per morning/off-period shift, and project points).
+
+
+Strikes:
+A person with the permission to hand out strikes can give employees a strike. A database will store the amount of strikes received via a table setup at a later date. You can also add or remove strikes through the UI.
+
+
+Scheduling API URL: https://scheduler-v2-gules.vercel.app/
+Endpoint: /api/schedule
+Params:
+* year — integer | range: 2000–2100 | default: current UTC year | determines which year to generate the schedule
+* month — integer | range: 1–12 | default: current UTC month | determines which month to generate
+* anchorDate — string (YYYY-MM-DD) | default: today (UTC) | reference date for A/B day
+* anchorDay — string (A or B) | default: A | defines whether the anchor date is an A-day or B-day
+* seed — integer | default: random runtime value | controls schedule randomization 
+
+
+Example API Request: 
+curl -s "https://scheduler-v2-gules.vercel.app/api/schedule?year=2026&month=3&anchorDate=2026-03-03&anchorDay=A&seed=123"
+Example API Response:
+{
+  "meta": {
+    "year": 2026,
+    "month": 3,
+    "anchorDate": "2026-03-03",
+    "anchorDay": "A",
+    "seed": 123,
+    "generatedAt": "2026-02-28T16:20:26.036Z",
+    "regularsPerShift": 3,
+    "alternatesPerShift": 0
+  },
+  "roster": [
+    { "id": 2, "name": "Ananya Chakka", "s_number": "126996", "scheduleable": true, "Schedule": 3 },
+    { "id": 22, "name": "Anirudh Puvvada", "s_number": "147201", "scheduleable": true, "Schedule": 5 }
+    // ... more roster entries
+  ],
+  "calendar": {
+    "2026-03-03": "A",
+    "2026-03-04": "B",
+    "2026-03-05": "A"
+    // ... more dates
+  },
+  "schedule": [
+    { "Date": "2026-03-02", "Day": "B", "Period": 5, "Student": "Anirudh Puvvada", "Type": "Regular", "Group": "BM", "Role": "employee" },
+    { "Date": "2026-03-02", "Day": "B", "Period": 5, "Student": "Sathvik Chintha", "Type": "Regular", "Group": "BM", "Role": "employee" }
+    // ... more assignments
+  ],
+  "summary": [
+    { "Student": "Aryan Rapolu", "Role": "employee", "Group": "BM", "Regular Shifts": 3, "Alternate Shifts": 0, "Total Shifts": 3, "Periods Worked": "5" }
+    // ... more summaries
+  ],
+  "statistics": [
+    { "Metric": "Total Assignments", "Value": 165 },
+    { "Metric": "Unique Students Scheduled", "Value": 34 }
+    // ... more statistics
+  ],
+  "balanceAnalysis": [
+    { "Category": "BM Overall", "Metric": "Students", "Value": 34 }
+    // ... more balance analysis
+  ]
+}
+
+
+
+
+
+
+
+Morning Shift Attendance:
+If using the morning shift attendance app this website will provide an overview of the attendance statistics, a student-by-student breakdown, as well as a way to pardon people of absences/remove/give extras. A sample API call and return statement is below.
+
+
+Morning Attendance API URL: https://hr-check-in-hnrx.vercel.app/
+Endpoint: /api/report/
+Params:
+* date — string (YYYY-MM-DD) | default: none | selects a single day (overrides from/to)
+* from — string (YYYY-MM-DD) | default: none | start date (inclusive); if set without to, to defaults to from
+* to — string (YYYY-MM-DD) | default: none | end date (inclusive); if set without from, from defaults to to
+* exclude — string (comma-separated) | default: empty | omit parts of the response (supported: roster/students, dates, attendance_rows/attendance, sessions, analytics, photos/photo, times/timestamps/formatted_timestamps, absent/absences)
+
+
+Example API Request: 
+curl -sS "https://hr-check-in-hnrx.vercel.app/api/report?date=2026-02-28&from=2026-02-01&to=2026-02-28&exclude=photos,absent"
+
+Example API Response:
+{
+  "ok": true,
+  "dates": ["2026-02-28"],
+
+
+  "meta": {
+    "timezone": "America/Chicago",
+    "generated_at": "2026-02-28T11:12:24-06:00",
+    "filters": { "from": "2026-02-28", "to": "2026-02-28" }
+  },
+  "analytics": {
+    "total_students": 64,
+    "total_sessions": 1,
+    "avg_attendance": 0.0,
+    "students": [
+      {
+        "name": "Aanya Sandhir",
+        "s_number": "185941",
+        "present_count": 0,
+        "absent_count": 1,
+        "attendance_rate": 0.0
+      },
+      {
+        "name": "Amber Lin",
+        "s_number": "126788",
+        "present_count": 0,
+        "absent_count": 1,
+        "attendance_rate": 0.0
+      },
+      ...
+    ]
+  },
+  "sessions": [
+    {
+      "date": "2026-02-28",
+      "present_count": 0,
+      "absent_count": 64,
+      "total_students": 64,
+      "attendance_rate": 0.0
+    },
+    ...
+  ],
+  "roster": [
+    { "name": "Aanya Sandhir", "s_number": "185941" },
+    { "name": "Amber Lin", "s_number": "126788" },
+    ...
+  ]
+}
+
+Technical Overview
+
+
+This is the overview of what tech stacks and resources will be used to build the entire platform. When picking resources we have to make sure it’s unblocked on school wifi, is efficient, and scalable for long term deployment.
+
+
+High Level Project Architecture:
+The project will use industry standard modern web-app architecture. We will do our best to support MCP tooling support for enhanced interaction at a future date. A basic overview:
+* Frontend (User interface): A simple web-based dashboard for each department
+* Backend (API + Business Logic): processes data, handles authentication, links to database, tracks permission
+* Database: Postgres table to store operational logs, long term data, and analytics
+* Integrations: Connects to existing tools such as Lightspeed backend, as well as other custom app solutions
+Splitting project logic across different segments allows for future customization and new features without website rewrites.
+
+
+Frontend:
+The frontend will be built with Next.js (React) since it prioritizes speed and responsiveness. React also works especially well with district wifi protections causing less lag and glitches. React also provides an amazing framework to allow for website support on mobile and desktop devices by automatically shuffling content sizes which would also allow for a future App migration if necessary. Tailwind CSS will be used for styles since it is consistent styling and is easy to apply to multiple elements without logic issues or lag.
+
+
+Backend & API Logic:
+The backend will be hosted on Vercel using serverless api routes and functions. This way we can run the entire application for free since serverless functions are much cheaper to run. The application will use RESTful API style endpoints for communication between the frontend, backend, and database which has been the industry standard for more than a decade. This tech stack reduces maintenance complexity versus running a traditional server.
+
+
+There will also be JSON-RPC log audits and messages sent with each API call as well as any communication between sections of the app, this way we can allow for possible scaling through Agentic setup via Model Context Protocol(MCP — a way to give and receive information to LLMs, chatbots, so they can interact with external applications) tooling at a later date.
+
+
+Database & Storage:
+PostgreSQL will be used as the main database schema to store all information. Postgres is stable, cost-effective and even supports Object Storage so files and non-basic information can also be stored. Specifically we will use Supabase as the hosting location for the database since it is free and quick to set up.
+
+
+Authentication & Role-Based Access Control (RBAC)
+The application will enforce department only access based on secure logins and permissions given. Within each department there will also be sub-access levels to allow employees to only be given the visibility they require. Some core features:
+* Single-Sign On(SSO) logic with a simple username/password login
+* Role-based access (department, position, executive permissions)
+* Fine-grained access controls (who can view vs edit)
+* Audit log tracking permission changes and key actions
+This will prevent sensitive information from being exposed to outside of the organization or in-between departments.
+Hosting & Deployment
+Vercel: Deployment will be hosted and routed by Vercel. Vercel is an optimal method of hosting the application since it has proven to be accessible on school Wi-Fi as well as fast global performance (CDN).
+GitHub: The version control as well as project documentation and resources will be hosted on GitHub. Automatic deployments are enabled so pushing code to GitHub will also automatically deploy the latest versions. There will also be easy rollback access so in case of faulty code, GitHub allows us to quickly and seamlessly revert to an older version.
+Data Imports & Reporting:
+To allow for compatibility with current CO-OP workflows, the system will support CSV uploads for inventory counts and overall data transfer. Automated parsing and validation checks for the imported information. There will also be optional exporting of information to Google Sheets/Excel for backups and easy data transfer.
+Frontend Packages
+Frontend Packages (Next.js / React)
+
+
+This section contains the frontend packages that will be used to build the User Interface/User Experience (UI/UX) side of the website. The packages here are only for client-side logic and not for actual data processing or validation but purely for visualization purposes. Only the more prominent packages are currently listed but as development progresses so will the package uses.
+
+
+* Core Framework
+   * Next.js — React framework to handle rendering, routing, as well as automatically optimizing performance for faster loading times
+   * React — Component-based library for UI components (allows for easy conversion to mobile)
+   * React DOM — React component renderer for browser
+* Styling & UI
+   * Tailwind CSS — Utility-first CSS framework for efficient styling
+   * PostCSS — optimizes CSS for compatibility and speed
+   * Lucide-react — lightweight icon library
+   * Other packages: Autoprefixes, clsx, tailwind-merge
+* Forms & Validation
+   * React-hook-form — efficient form state management
+   * Zod - schema validation library
+   * @hookform/resolvers
+* Data fetching & State Management
+   * @tanstack/react-query — handles data fetching, caching, as well as background updates
+* Authentication & Database Client
+   * @supabase/supabase-js — secure Client library that communicated with Supabase database and authentication protocols
+Backend Packages
+Backend & API Logic
+
+
+This section contains which backend packages will be used as well as which external APIs will be used. Only the more prominent packages will be listed but as development continues more packages may be used.
+
+
+Server & API:
+* Next.js API Routes / Server Actions — data and business logic will be handled via serverless endpoints
+* REST API architecture — industry standard communication protocol between frontend, backend, and database
+* Model Context Protocol (MCP) — new technology centered around agentic development where data is transferred in LLM (ChatGBT, Gemini, Claude, etc) friendly formats
+Validation & Security:
+* zod — validation for API requests to prevent unsafe or corrupt data
+* jose — JWT operations and verifications
+* rate-limiter-flexible — limits requests which prevents spam or abuse
+Logging & Monitoring:
+* Structured JSON logging — recording system events in machine-readable format for debugging
+* Request correlation IDs — request tracking across components for troubleshooting
+Notification Services:
+* Resend API / Nodemailer — email notifications or reminders
+Database & Storage:
+* PostgreSQL — relational database for operational data, logs, and analytics
+* Supabase — backend platform for database hosting, authentication, and storage
+* Supabase Storage — free and secure file storage for relevant documents and information
+* Supabase SQL migrations — database schema with version control for long-term maintainability and rollback support.
+External APIs & Integrations:
+* Supabase Auth API — user authentication and handles sessions
+* Supabase PostgREST API — exposes data via role-based access control
+* Supabase Storage API — handles secure file uploads and downloads
+* Lightspeed R-series API — allows imports of operational data from existing systems
+* Google Sheets API — easy exporting to spreadsheets
+* Custom CO-OP API — a collection of different tools I’ve built over the past year
+Security & Access Control:
+* Role-Based Access Control (RBAC) — restricts features dependent on department and position
+* Row Level Security (RLS) — enforces department and position only visibility at a database level
+* Audit logging — records changes to ensure transparency 
+Future Integration Readiness:
+* JSON-RPC Structured Logging — provides a consistent data exchange between different sections
+* Model Context Protocol (MCP) — lays framework for future integration with AI assistants or agentic workflows
+Database Schema
