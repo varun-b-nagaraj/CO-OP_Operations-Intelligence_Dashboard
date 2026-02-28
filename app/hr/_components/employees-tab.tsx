@@ -3,7 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useMemo, useState } from 'react';
 
-import { overrideMeetingAttendance, pardonMeetingAbsence } from '@/app/actions/attendance';
+import {
+  clearMeetingOverride,
+  overrideMeetingAttendance,
+  pardonMeetingAbsence
+} from '@/app/actions/attendance';
 import {
   getEmployeeLoginProfiles,
   updateEmployeeLoginCredentials
@@ -264,6 +268,22 @@ export function EmployeesTab() {
     }
   });
 
+  const clearMeetingOverrideMutation = useMutation({
+    mutationFn: async (payload: { sNumber: string; date: string }) => {
+      const result = await clearMeetingOverride(payload.sNumber, payload.date);
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-data-for-employees'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-overrides'] });
+      setStatusMessage('Meeting override cleared.');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to clear meeting override.');
+    }
+  });
+
   const pardonShiftMutation = useMutation({
     mutationFn: async (payload: {
       sNumber: string;
@@ -372,6 +392,16 @@ export function EmployeesTab() {
       bucket.push(row);
       overridesBySNumber.set(key, bucket);
     }
+    const overrideTypeBySNumberDate = new Map<string, Map<string, string>>();
+    for (const row of overridesQuery.data ?? []) {
+      const sNumber = String(row.s_number ?? '');
+      const date = String(row.checkin_date ?? '');
+      const overrideType = String(row.override_type ?? '');
+      if (!sNumber || !date || !overrideType) continue;
+      const bucket = overrideTypeBySNumberDate.get(sNumber) ?? new Map<string, string>();
+      bucket.set(date, overrideType);
+      overrideTypeBySNumberDate.set(sNumber, bucket);
+    }
 
     const meetingStatusBySNumberDate = new Map<string, Map<string, 'present' | 'absent'>>();
     for (const record of meetingAttendanceQuery.data?.records ?? []) {
@@ -461,7 +491,8 @@ export function EmployeesTab() {
       strikesByEmployee,
       shiftBySNumber,
       meetingStatusBySNumberDate,
-      recentMeetingDatesBySNumber
+      recentMeetingDatesBySNumber,
+      overrideTypeBySNumberDate
     };
   }, [
     loginProfilesQuery.data,
@@ -582,6 +613,8 @@ export function EmployeesTab() {
                 recentShiftRows.find((row) => shiftRowKey(row) === selectedShiftKey) ?? null;
               const selectedMeetingStatus =
                 derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(meetingDate) ?? null;
+              const selectedMeetingOverride =
+                derived.overrideTypeBySNumberDate.get(employee.sNumber)?.get(meetingDate) ?? null;
 
               return (
                 <Fragment key={employee.id}>
@@ -626,6 +659,9 @@ export function EmployeesTab() {
                           <div className="space-y-2 border border-neutral-300 bg-white p-3">
                             <h3 className="text-sm font-semibold text-neutral-900">Attendance</h3>
                             <p className="text-sm text-neutral-700">Username: {employee.username ?? 'N/A'}</p>
+                            <p className="text-sm text-neutral-700">
+                              Active strikes: {employee.strikesCount}
+                            </p>
                             <p className="text-sm text-neutral-700">
                               Assigned periods: {employee.assignedPeriods || 'N/A'}
                             </p>
@@ -764,6 +800,10 @@ export function EmployeesTab() {
                               Current status:{' '}
                               {selectedMeetingStatus ? selectedMeetingStatus : 'No record for selected session'}
                             </p>
+                            <p className="text-xs text-neutral-600">
+                              Current override:{' '}
+                              {selectedMeetingOverride ? selectedMeetingOverride : 'none'}
+                            </p>
                             <label className="block text-sm">
                               Reason
                               <textarea
@@ -815,6 +855,23 @@ export function EmployeesTab() {
                                 type="button"
                               >
                                 Mark Meeting Present
+                              </button>
+                              <button
+                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={
+                                  !canOverrideAttendance ||
+                                  !meetingDate ||
+                                  clearMeetingOverrideMutation.isPending
+                                }
+                                onClick={() => {
+                                  clearMeetingOverrideMutation.mutate({
+                                    sNumber: employee.sNumber,
+                                    date: meetingDate
+                                  });
+                                }}
+                                type="button"
+                              >
+                                Remove Override
                               </button>
                             </div>
                           </div>

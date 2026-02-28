@@ -62,26 +62,53 @@ async function upsertMeetingOverride(
       .eq('s_number', parsed.data.s_number)
       .eq('checkin_date', parsed.data.checkin_date)
       .eq('scope', 'meeting')
-      .maybeSingle();
+      .order('overridden_at', { ascending: false });
 
-    const { data, error } = await supabase
-      .from('attendance_overrides')
-      .upsert(
-        {
-          s_number: parsed.data.s_number,
-          checkin_date: parsed.data.checkin_date,
-          scope: 'meeting',
-          shift_period: null,
-          override_type: parsed.data.override_type,
-          reason: parsed.data.reason,
-          overridden_by: 'open_access'
-        },
-        {
-          onConflict: 's_number,checkin_date,scope'
-        }
-      )
-      .select('*')
-      .single();
+    const existingRows = (existing ?? []) as AttendanceOverride[];
+    const existingRow = existingRows[0] ?? null;
+
+    let data: AttendanceOverride | null = null;
+    let error: { message?: string } | null = null;
+
+    if (existingRows.length > 0) {
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('attendance_overrides')
+        .update(
+          {
+            override_type: parsed.data.override_type,
+            reason: parsed.data.reason,
+            overridden_by: 'open_access',
+            overridden_at: new Date().toISOString()
+          }
+        )
+        .eq('s_number', parsed.data.s_number)
+        .eq('checkin_date', parsed.data.checkin_date)
+        .eq('scope', 'meeting')
+        .select('*')
+        .order('overridden_at', { ascending: false });
+
+      data = (updatedRows?.[0] as AttendanceOverride | undefined) ?? null;
+      error = updateError ? { message: updateError.message } : null;
+    } else {
+      const { data: insertedRow, error: insertError } = await supabase
+        .from('attendance_overrides')
+        .insert(
+          {
+            s_number: parsed.data.s_number,
+            checkin_date: parsed.data.checkin_date,
+            scope: 'meeting',
+            shift_period: null,
+            override_type: parsed.data.override_type,
+            reason: parsed.data.reason,
+            overridden_by: 'open_access'
+          }
+        )
+        .select('*')
+        .single();
+
+      data = insertedRow as AttendanceOverride | null;
+      error = insertError ? { message: insertError.message } : null;
+    }
 
     if (error || !data) {
       return errorResult(correlationId, 'DB_ERROR', error?.message ?? 'Unable to save override');
@@ -95,8 +122,8 @@ async function upsertMeetingOverride(
             ? 'meeting_absence_pardoned'
             : 'meeting_attendance_overridden',
         tableName: 'attendance_overrides',
-        recordId: data.id,
-        oldValue: existing ?? null,
+        recordId: String(data.id ?? ''),
+        oldValue: existingRow ?? null,
         newValue: data,
         userId: 'open_access'
       },
@@ -110,13 +137,100 @@ async function upsertMeetingOverride(
       overrideType: parsed.data.override_type
     });
 
-    return successResult(data as AttendanceOverride, correlationId);
+    return successResult(data, correlationId);
   } catch (error) {
     logError('meeting_override_failed', {
       correlationId,
       error: error instanceof Error ? error.message : String(error)
     });
     return errorResult(correlationId, 'UNKNOWN_ERROR', 'Failed to save attendance override.');
+  }
+}
+
+export async function clearMeetingOverride(
+  sNumber: string,
+  date: string
+): Promise<Result<{ removed: number }>> {
+  const correlationId = generateCorrelationId();
+
+  try {
+    const allowed = await ensureServerPermission('hr.attendance.override');
+    if (!allowed) {
+      return errorResult(
+        correlationId,
+        'FORBIDDEN',
+        'You do not have permission to override attendance.'
+      );
+    }
+
+    const parsed = AttendanceOverrideSchema.safeParse({
+      s_number: sNumber,
+      checkin_date: date,
+      scope: 'meeting',
+      shift_period: null,
+      override_type: 'present_override',
+      reason: 'clear'
+    });
+
+    if (!parsed.success) {
+      return errorResult(
+        correlationId,
+        'VALIDATION_ERROR',
+        'Invalid meeting override clear payload',
+        zodFieldErrors(parsed.error)
+      );
+    }
+
+    const supabase = createServerClient();
+    const { data: existingRows, error: existingError } = await supabase
+      .from('attendance_overrides')
+      .select('*')
+      .eq('s_number', sNumber)
+      .eq('checkin_date', date)
+      .eq('scope', 'meeting');
+
+    if (existingError) {
+      return errorResult(correlationId, 'DB_ERROR', existingError.message);
+    }
+
+    const rows = (existingRows ?? []) as AttendanceOverride[];
+    if (rows.length === 0) {
+      return successResult({ removed: 0 }, correlationId);
+    }
+
+    const ids = rows.map((row) => row.id);
+    const { error: deleteError } = await supabase.from('attendance_overrides').delete().in('id', ids);
+    if (deleteError) {
+      return errorResult(correlationId, 'DB_ERROR', deleteError.message);
+    }
+
+    await insertAuditEntry(
+      supabase,
+      {
+        action: 'meeting_override_cleared',
+        tableName: 'attendance_overrides',
+        recordId: `${sNumber}:${date}`,
+        oldValue: rows,
+        newValue: null,
+        userId: 'open_access'
+      },
+      correlationId
+    );
+
+    logInfo('meeting_override_cleared', {
+      correlationId,
+      sNumber,
+      date,
+      removed: ids.length
+    });
+
+    return successResult({ removed: ids.length }, correlationId);
+  } catch (error) {
+    logError('clear_meeting_override_failed', {
+      correlationId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return errorResult(correlationId, 'UNKNOWN_ERROR', 'Failed to clear meeting override.');
   }
 }
 
