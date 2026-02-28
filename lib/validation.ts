@@ -92,6 +92,49 @@ export const EmployeeLoginCredentialsSchema = z.object({
   password: z.string().min(8).max(256)
 });
 
+export const CFAItemIdSchema = z
+  .string()
+  .trim()
+  .regex(/^[a-z0-9_]+$/, 'item_id must be lowercase alphanumeric or underscore only');
+
+export const CFAItemCreateSchema = z.object({
+  item_id: CFAItemIdSchema,
+  name: z.string().trim().min(1).max(200),
+  buy_cost_cents: z.number().int().min(0),
+  sell_price_cents: z.number().int().min(0),
+  active: z.boolean().optional()
+});
+
+export const CFAItemUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  buy_cost_cents: z.number().int().min(0),
+  sell_price_cents: z.number().int().min(0),
+  active: z.boolean()
+});
+
+export const CFADailyLogLineInputSchema = z
+  .object({
+    item_id: CFAItemIdSchema,
+    received_qty: z.number().int().min(0),
+    leftover_qty: z.number().int().min(0),
+    missed_demand_qty: z.number().int().min(0)
+  })
+  .superRefine((value, ctx) => {
+    if (value.leftover_qty > value.received_qty) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['leftover_qty'],
+        message: 'leftover_qty cannot be greater than received_qty'
+      });
+    }
+  });
+
+export const CFADailyLogUpsertSchema = z.object({
+  log_date: DateStringSchema,
+  day_type: z.enum(['A', 'B']),
+  lines: z.array(CFADailyLogLineInputSchema).min(1)
+});
+
 export const ShiftAttendanceSchema = z.object({
   shift_date: DateStringSchema,
   shift_period: z.number().int().min(0).max(8),

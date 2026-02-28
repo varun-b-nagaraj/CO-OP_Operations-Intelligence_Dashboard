@@ -123,31 +123,38 @@ export function applyApprovedShiftExchanges(
   schedule: NormalizedScheduleResponse,
   exchanges: ShiftChangeRequest[]
 ): NormalizedScheduleResponse {
-  const exchangeMap = new Map<string, string>();
-
+  const approvedBySlot = new Map<string, ShiftChangeRequest[]>();
   for (const exchange of exchanges) {
     if (exchange.status !== 'approved') continue;
-    const key = [
-      exchange.shift_date,
-      exchange.shift_period,
-      exchange.shift_slot_key,
-      exchange.from_employee_s_number
-    ].join('|');
-    exchangeMap.set(key, exchange.to_employee_s_number);
+    const slotKey = [exchange.shift_date, exchange.shift_period, exchange.shift_slot_key].join('|');
+    const bucket = approvedBySlot.get(slotKey) ?? [];
+    bucket.push(exchange);
+    approvedBySlot.set(slotKey, bucket);
+  }
+
+  for (const bucket of approvedBySlot.values()) {
+    bucket.sort((left, right) => {
+      if (left.requested_at === right.requested_at) return left.id.localeCompare(right.id);
+      return left.requested_at.localeCompare(right.requested_at);
+    });
   }
 
   return {
     ...schedule,
     schedule: schedule.schedule.map((assignment) => {
-      const key = [
-        assignment.date,
-        assignment.period,
-        assignment.shiftSlotKey,
-        assignment.studentSNumber
-      ].join('|');
-      const toSNumber = exchangeMap.get(key);
-      if (!toSNumber) return assignment;
-      return { ...assignment, effectiveWorkerSNumber: toSNumber };
+      const slotKey = [assignment.date, assignment.period, assignment.shiftSlotKey].join('|');
+      const slotExchanges = approvedBySlot.get(slotKey);
+      if (!slotExchanges || slotExchanges.length === 0) return assignment;
+
+      let effectiveWorker = assignment.studentSNumber;
+      for (const exchange of slotExchanges) {
+        if (exchange.from_employee_s_number === effectiveWorker) {
+          effectiveWorker = exchange.to_employee_s_number;
+        }
+      }
+
+      if (effectiveWorker === assignment.effectiveWorkerSNumber) return assignment;
+      return { ...assignment, effectiveWorkerSNumber: effectiveWorker };
     })
   };
 }

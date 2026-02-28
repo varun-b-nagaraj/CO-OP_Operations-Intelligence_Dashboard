@@ -170,24 +170,38 @@ export async function submitShiftExchange(
     }
 
     const toClassPeriod = toValidNumber((toStudentRow as Record<string, unknown>).Schedule);
-    const { data: toSettingsRow } = await supabase
-      .from('employee_settings')
-      .select('off_periods')
-      .eq('employee_s_number', parsed.data.to_employee_s_number)
-      .maybeSingle();
+    const [{ data: toSettingsRow }, { data: fromSettingsRow }] = await Promise.all([
+      supabase
+        .from('employee_settings')
+        .select('off_periods')
+        .eq('employee_s_number', parsed.data.to_employee_s_number)
+        .maybeSingle(),
+      supabase
+        .from('employee_settings')
+        .select('off_periods')
+        .eq('employee_s_number', parsed.data.from_employee_s_number)
+        .maybeSingle()
+    ]);
+
     const toOffPeriods = Array.isArray(toSettingsRow?.off_periods)
       ? toSettingsRow.off_periods.filter((value) => Number.isInteger(value) && value >= 1 && value <= 8)
       : [4, 8];
+    const fromOffPeriods = Array.isArray(fromSettingsRow?.off_periods)
+      ? fromSettingsRow.off_periods.filter((value) => Number.isInteger(value) && value >= 1 && value <= 8)
+      : [4, 8];
 
+    const shiftIsMorning = parsed.data.shift_period === 0;
+    const shiftIsOffPeriodForCurrentWorker = fromOffPeriods.includes(parsed.data.shift_period);
     const toEligibleForPeriod =
-      parsed.data.shift_period === 0 ||
+      shiftIsMorning ||
+      shiftIsOffPeriodForCurrentWorker ||
       toClassPeriod === parsed.data.shift_period ||
       toOffPeriods.includes(parsed.data.shift_period);
     if (!toEligibleForPeriod) {
       return errorResult(
         correlationId,
         'VALIDATION_ERROR',
-        'Target employee is not eligible for this period (must be class period or configured off period).',
+        'Target employee is not eligible for this period (unless the shift is morning or off-period).',
         { to_employee_s_number: 'employee is not eligible for this period' }
       );
     }

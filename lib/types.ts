@@ -6,7 +6,12 @@ export type PermissionFlag =
   | 'hr.attendance.override'
   | 'hr.requests.view'
   | 'hr.audit.view'
-  | 'hr.settings.edit';
+  | 'hr.settings.edit'
+  | 'cfa.logs.read'
+  | 'cfa.logs.write'
+  | 'cfa.menu.manage'
+  | 'cfa.day_type.override'
+  | 'cfa.exports';
 
 export type Role = 'employee' | 'manager' | 'HR_lead' | 'exec';
 
@@ -306,4 +311,51 @@ export interface ShiftAttendanceFilters {
 export interface PointsBreakdown {
   total: number;
   byType: Record<PointType, number>;
+}
+
+export type CFADayType = 'A' | 'B';
+
+export interface CFAItem {
+  item_id: string;
+  name: string;
+  buy_cost_cents: number;
+  sell_price_cents: number;
+  active: boolean;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CFADailyLog {
+  id: string;
+  log_date: string;
+  day_type: CFADayType;
+  period: number;
+  total_revenue_cents: number;
+  total_cogs_cents: number;
+  total_profit_cents: number;
+  stockout_flag: boolean;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CFADailyLogLine {
+  id: string;
+  log_id: string;
+  item_id: string;
+  received_qty: number;
+  leftover_qty: number;
+  missed_demand_qty: number;
+  sold_qty: number;
+  true_demand_qty: number;
+  sell_price_cents: number;
+  buy_cost_cents: number;
+  revenue_cents: number;
+  cogs_cents: number;
+  profit_cents: number;
+  margin_pct: number | null;
+  created_at: string;
+  updated_at: string;
 }

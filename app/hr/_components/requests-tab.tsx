@@ -247,11 +247,14 @@ export function RequestsTab() {
 
   const eligibleToOptions = useMemo(() => {
     const options: Array<{ value: string; label: string }> = [];
+    const selectedFromOffPeriods = settingsBySNumber.get(selectedFromSNumber) ?? [4, 8];
+    const selectedShiftIsMorning = selectedShiftPeriod === 0;
+    const selectedShiftIsOffPeriodForCurrentWorker = selectedFromOffPeriods.includes(selectedShiftPeriod);
 
     const canWorkSelectedPeriod = (sNumber: string): boolean => {
       const eligibility = studentEligibilityBySNumber.get(sNumber);
       if (!eligibility || !eligibility.scheduleable) return false;
-      if (selectedShiftPeriod === 0) return true;
+      if (selectedShiftIsMorning || selectedShiftIsOffPeriodForCurrentWorker) return true;
       const offPeriods = settingsBySNumber.get(sNumber) ?? [4, 8];
       return eligibility.classPeriod === selectedShiftPeriod || offPeriods.includes(selectedShiftPeriod);
     };

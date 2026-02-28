@@ -1,7 +1,8 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { DragEvent, useEffect, useMemo, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import { approveShiftExchange, submitShiftExchange } from '@/app/actions/shift-requests';
 import { excuseShiftAbsence, markShiftAbsent, markShiftPresent } from '@/app/actions/shift-attendance';
@@ -12,7 +13,25 @@ import { ScheduleAssignment, ScheduleParams, ShiftAttendanceStatus } from '@/lib
 import { getTodayDateKey, isDateTodayOrPast, useBrowserSupabase } from './utils';
 
 type GenericRow = Record<string, unknown>;
-type GenerationSelection = { year: number; month: number };
+type YearMonthSelection = { year: number; month: number };
+type GenerationSelection = {
+  year: number;
+  month: number;
+  anchorDate: string;
+  anchorDay: 'A' | 'B';
+  seed: number;
+};
+type AccessMode = 'employee' | 'manager';
+type ShiftActionChoice = 'volunteer' | 'remove';
+
+type StoredScheduleTableRow = {
+  year: number;
+  month: number;
+  anchor_date: string;
+  anchor_day: 'A' | 'B';
+  seed: number;
+  generated_at: string;
+};
 
 type CalendarDayCell = {
   dateKey: string;
@@ -109,12 +128,8 @@ function buildMonthWeeks(year: number, month: number): CalendarDayCell[][] {
   return weeks;
 }
 
-function getDefaultGenerationSelection(): GenerationSelection {
-  const now = new Date();
-  return {
-    year: now.getUTCFullYear(),
-    month: now.getUTCMonth() + 1
-  };
+function toYearMonthKey(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}`;
 }
 
 function getFirstMondayOfMonth(year: number, month: number): string {
@@ -125,14 +140,33 @@ function getFirstMondayOfMonth(year: number, month: number): string {
   return first.toISOString().slice(0, 10);
 }
 
+function buildGenerationSelection(year: number, month: number, anchorDay: 'A' | 'B' = 'A'): GenerationSelection {
+  return {
+    year,
+    month,
+    anchorDate: getFirstMondayOfMonth(year, month),
+    anchorDay,
+    seed: Number(`${year}${String(month).padStart(2, '0')}`)
+  };
+}
+
+function getDefaultGenerationSelection(): GenerationSelection {
+  const now = new Date();
+  return buildGenerationSelection(now.getUTCFullYear(), now.getUTCMonth() + 1);
+}
+
 function buildScheduleParams(selection: GenerationSelection): ScheduleParams {
   return {
     year: selection.year,
     month: selection.month,
-    anchorDate: getFirstMondayOfMonth(selection.year, selection.month),
-    anchorDay: 'A',
-    seed: Number(`${selection.year}${String(selection.month).padStart(2, '0')}`)
+    anchorDate: selection.anchorDate,
+    anchorDay: selection.anchorDay,
+    seed: selection.seed
   };
+}
+
+function isOpenVolunteerPeriod(period: number): boolean {
+  return period === 0 || period === 4 || period === 8;
 }
 
 function isAlternateAssignment(assignment: Pick<ScheduleAssignment, 'role' | 'type'>): boolean {
@@ -210,10 +244,17 @@ function buildSummaryFromAssignments(
 }
 
 export function ScheduleTab() {
-  const canApproveRequests = usePermission('hr.schedule.edit');
+  const hasScheduleEditPermission = usePermission('hr.schedule.edit');
+  const canChangeAccessMode = hasScheduleEditPermission;
+  const searchParams = useSearchParams();
   const defaultGenerationSelection = useMemo(() => getDefaultGenerationSelection(), []);
   const [generationSelection, setGenerationSelection] = useState<GenerationSelection>(defaultGenerationSelection);
+  const [monthSelection, setMonthSelection] = useState<YearMonthSelection>({
+    year: defaultGenerationSelection.year,
+    month: defaultGenerationSelection.month
+  });
   const [params, setParams] = useState<ScheduleParams>(() => buildScheduleParams(defaultGenerationSelection));
+  const [scheduleAccessMode, setScheduleAccessMode] = useState<AccessMode>('employee');
   const [message, setMessage] = useState<string | null>(null);
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [editableAssignments, setEditableAssignments] = useState<EditableAssignment[]>([]);
@@ -221,12 +262,16 @@ export function ScheduleTab() {
   const [isSwapModeEnabled, setIsSwapModeEnabled] = useState(false);
   const [isGenerateConfirmOpen, setIsGenerateConfirmOpen] = useState(false);
   const [actingEmployeeSNumber, setActingEmployeeSNumber] = useState('');
+  const [shiftActionModalUid, setShiftActionModalUid] = useState<string | null>(null);
+  const [shiftActionChoice, setShiftActionChoice] = useState<ShiftActionChoice>('volunteer');
+  const [assignmentTargetSNumber, setAssignmentTargetSNumber] = useState('');
   const [dragSourceUid, setDragSourceUid] = useState<string | null>(null);
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
   const [attendanceModalUid, setAttendanceModalUid] = useState<string | null>(null);
   const [attendanceReason, setAttendanceReason] = useState('');
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
+  const isManagerMode = hasScheduleEditPermission && scheduleAccessMode === 'manager';
 
   const scheduleQuery = useQuery({
     queryKey: ['hr-schedule', params],
@@ -263,6 +308,19 @@ export function ScheduleTab() {
     }
   });
 
+  const storedTablesQuery = useQuery({
+    queryKey: ['hr-schedule-table-index'],
+    staleTime: 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('schedules')
+        .select('year, month, anchor_date, anchor_day, seed, generated_at')
+        .order('generated_at', { ascending: false });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as StoredScheduleTableRow[];
+    }
+  });
+
   const selectedMonthRange = useMemo(() => toMonthRange(params.year, params.month), [params.month, params.year]);
 
   const shiftAttendanceQuery = useQuery({
@@ -287,7 +345,10 @@ export function ScheduleTab() {
     },
     onSuccess: (data, variables) => {
       queryClient.setQueryData(['hr-schedule', variables], data);
-      setMessage('Generated a new schedule table from the live API.');
+      queryClient.invalidateQueries({ queryKey: ['hr-schedule-table-index'] });
+      setMessage(
+        `Generated table for ${variables.year}-${String(variables.month).padStart(2, '0')} using reference ${variables.anchorDate} (${variables.anchorDay} day).`
+      );
     },
     onError: (error) => {
       setMessage(error instanceof Error ? error.message : 'Unable to generate a new table.');
@@ -362,36 +423,55 @@ export function ScheduleTab() {
   });
 
   const volunteerForShiftMutation = useMutation({
-    mutationFn: async (payload: { assignment: EditableAssignment; volunteerSNumber: string }) => {
-      const reason = 'Self-volunteered for shift';
+    mutationFn: async (payload: {
+      assignment: EditableAssignment;
+      targetSNumber: string;
+      reason: string;
+      autoApprove: boolean;
+      mode: 'volunteer' | 'remove' | 'assign';
+    }) => {
       const submitResult = await submitShiftExchange(
         payload.assignment.date,
         payload.assignment.period,
         payload.assignment.shiftSlotKey,
         payload.assignment.effectiveWorkerSNumber,
-        payload.volunteerSNumber,
-        reason
+        payload.targetSNumber,
+        payload.reason
       );
       if (!submitResult.ok) throw new Error(`${submitResult.error.message} (${submitResult.correlationId})`);
 
-      if (canApproveRequests) {
+      if (payload.autoApprove) {
         const approveResult = await approveShiftExchange(submitResult.data.id);
         if (!approveResult.ok) throw new Error(`${approveResult.error.message} (${approveResult.correlationId})`);
       }
 
       return submitResult.data;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['hr-schedule'] });
       queryClient.invalidateQueries({
         queryKey: ['hr-schedule-shift-attendance', selectedMonthRange.from, selectedMonthRange.to]
       });
       queryClient.invalidateQueries({ queryKey: ['hr-shift-requests'] });
-      setMessage(
-        canApproveRequests
-          ? 'Volunteer assignment confirmed.'
-          : 'Volunteer request submitted for approval.'
-      );
+      queryClient.invalidateQueries({ queryKey: ['hr-schedule-table-index'] });
+      setShiftActionModalUid(null);
+      setAssignmentTargetSNumber('');
+      if (!variables.autoApprove) {
+        setMessage('Volunteer request submitted for approval.');
+        return;
+      }
+
+      if (variables.mode === 'remove') {
+        setMessage('Removed you from this shift.');
+      } else if (variables.mode === 'volunteer') {
+        setMessage('You are now signed up for this shift.');
+      } else {
+        setMessage(
+          variables.targetSNumber === variables.assignment.effectiveWorkerSNumber
+            ? 'No change: this employee is already assigned.'
+            : 'Shift assignment confirmed.'
+        );
+      }
     },
     onError: (error) => {
       setMessage(error instanceof Error ? error.message : 'Unable to volunteer for this shift.');
@@ -406,10 +486,44 @@ export function ScheduleTab() {
     return map;
   }, [settingsQuery.data]);
 
+  const latestStoredTableByMonth = useMemo(() => {
+    const map = new Map<string, GenerationSelection>();
+    for (const row of storedTablesQuery.data ?? []) {
+      const year = Number(row.year);
+      const month = Number(row.month);
+      const seed = Number(row.seed);
+      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(seed)) continue;
+      const key = toYearMonthKey(year, month);
+      if (map.has(key)) continue;
+      map.set(key, {
+        year,
+        month,
+        anchorDate: String(row.anchor_date),
+        anchorDay: row.anchor_day === 'B' ? 'B' : 'A',
+        seed
+      });
+    }
+    return map;
+  }, [storedTablesQuery.data]);
+
+  const resolveMonthConfig = (selection: YearMonthSelection): GenerationSelection => {
+    const key = toYearMonthKey(selection.year, selection.month);
+    return latestStoredTableByMonth.get(key) ?? buildGenerationSelection(selection.year, selection.month);
+  };
+
   const schedule = scheduleQuery.data;
 
   useEffect(() => {
     if (!schedule) return;
+    const loadedConfig: GenerationSelection = {
+      year: schedule.meta.year,
+      month: schedule.meta.month,
+      anchorDate: schedule.meta.anchorDate,
+      anchorDay: schedule.meta.anchorDay,
+      seed: schedule.meta.seed
+    };
+    setMonthSelection({ year: loadedConfig.year, month: loadedConfig.month });
+    setGenerationSelection(loadedConfig);
     setEditableAssignments(
       schedule.schedule.map((assignment, index) => ({
         ...assignment,
@@ -419,6 +533,7 @@ export function ScheduleTab() {
     setActiveWeekIndex(0);
     setDragSourceUid(null);
     setDragTargetUid(null);
+    setShiftActionModalUid(null);
     setAttendanceModalUid(null);
   }, [schedule]);
 
@@ -505,16 +620,46 @@ export function ScheduleTab() {
         })),
     [editableRoster]
   );
+  const requestedEmployeeSNumber = (searchParams.get('employee') ?? '').trim();
+  const requestedAccessMode = (searchParams.get('access') ?? '').trim().toLowerCase();
+
+  useEffect(() => {
+    if (!canChangeAccessMode) {
+      if (scheduleAccessMode !== 'employee') setScheduleAccessMode('employee');
+      return;
+    }
+
+    if (requestedAccessMode === 'manager' || requestedAccessMode === 'employee') {
+      const nextMode = requestedAccessMode as AccessMode;
+      if (scheduleAccessMode !== nextMode) setScheduleAccessMode(nextMode);
+    }
+  }, [canChangeAccessMode, requestedAccessMode, scheduleAccessMode]);
+
+  useEffect(() => {
+    if (isManagerMode || !isSwapModeEnabled) return;
+    setIsSwapModeEnabled(false);
+    setDragSourceUid(null);
+    setDragTargetUid(null);
+  }, [isManagerMode, isSwapModeEnabled]);
+
   useEffect(() => {
     if (actingEmployeeOptions.length === 0) {
       if (actingEmployeeSNumber) setActingEmployeeSNumber('');
       return;
     }
+
     const allowedValues = new Set(actingEmployeeOptions.map((item) => item.value));
+    if (requestedEmployeeSNumber && allowedValues.has(requestedEmployeeSNumber)) {
+      if (actingEmployeeSNumber !== requestedEmployeeSNumber) {
+        setActingEmployeeSNumber(requestedEmployeeSNumber);
+      }
+      return;
+    }
+
     if (!actingEmployeeSNumber || !allowedValues.has(actingEmployeeSNumber)) {
       setActingEmployeeSNumber(actingEmployeeOptions[0].value);
     }
-  }, [actingEmployeeOptions, actingEmployeeSNumber]);
+  }, [actingEmployeeOptions, actingEmployeeSNumber, requestedEmployeeSNumber]);
 
   const canEmployeeWorkPeriod = (employeeSNumber: string, period: number): boolean => {
     const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
@@ -523,6 +668,16 @@ export function ScheduleTab() {
     const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
     return rosterMeta.classPeriod === period || offPeriods.includes(period);
   };
+
+  const canEmployeeTakeAssignment = useCallback((employeeSNumber: string, assignment: EditableAssignment): boolean => {
+    const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
+    if (!rosterMeta || !rosterMeta.scheduleable) return false;
+    if (isOpenVolunteerPeriod(assignment.period)) {
+      return true;
+    }
+    const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
+    return rosterMeta.classPeriod === assignment.period || offPeriods.includes(assignment.period);
+  }, [rosterMetaBySNumber, settingsMap]);
 
   const canSwapAssignments = (sourceUid: string, targetUid: string): boolean => {
     if (!sourceUid || !targetUid || sourceUid === targetUid) return false;
@@ -554,6 +709,95 @@ export function ScheduleTab() {
     return map;
   }, [shiftAttendanceQuery.data]);
 
+  const selectedShiftActionAssignment = useMemo(
+    () => editableAssignments.find((assignment) => assignment.uid === shiftActionModalUid) ?? null,
+    [shiftActionModalUid, editableAssignments]
+  );
+  const selectedShiftActionAttendanceStatus = useMemo(() => {
+    if (!selectedShiftActionAssignment) return 'expected' as ShiftAttendanceStatus;
+    const key = [
+      selectedShiftActionAssignment.date,
+      selectedShiftActionAssignment.period,
+      selectedShiftActionAssignment.shiftSlotKey,
+      selectedShiftActionAssignment.effectiveWorkerSNumber
+    ].join('|');
+    return normalizeAttendanceStatus(attendanceByAssignmentKey.get(key)?.status);
+  }, [attendanceByAssignmentKey, selectedShiftActionAssignment]);
+  const managerAssignableOptions = useMemo(() => {
+    if (!selectedShiftActionAssignment) return [];
+    return actingEmployeeOptions.filter((option) => canEmployeeTakeAssignment(option.value, selectedShiftActionAssignment));
+  }, [actingEmployeeOptions, canEmployeeTakeAssignment, selectedShiftActionAssignment]);
+  const selectedShiftSupportsOpenVolunteer = Boolean(
+    selectedShiftActionAssignment && isOpenVolunteerPeriod(selectedShiftActionAssignment.period)
+  );
+  const currentEmployeeCanVolunteerSelectedShift = Boolean(
+    selectedShiftActionAssignment &&
+      actingEmployeeSNumber &&
+      selectedShiftSupportsOpenVolunteer &&
+      selectedShiftActionAttendanceStatus === 'expected' &&
+      actingEmployeeSNumber !== selectedShiftActionAssignment.effectiveWorkerSNumber &&
+      canEmployeeTakeAssignment(actingEmployeeSNumber, selectedShiftActionAssignment)
+  );
+  const currentEmployeeOwnsSelectedShift = Boolean(
+    selectedShiftActionAssignment &&
+      actingEmployeeSNumber &&
+      actingEmployeeSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber
+  );
+  const currentEmployeeCanRemoveSelfSelectedShift = Boolean(
+    selectedShiftActionAssignment &&
+      currentEmployeeOwnsSelectedShift &&
+      selectedShiftActionAttendanceStatus === 'expected' &&
+      selectedShiftActionAssignment.effectiveWorkerSNumber !== selectedShiftActionAssignment.studentSNumber
+  );
+
+  useEffect(() => {
+    if (!selectedShiftActionAssignment) {
+      if (assignmentTargetSNumber) setAssignmentTargetSNumber('');
+      return;
+    }
+
+    if (!isManagerMode) {
+      setAssignmentTargetSNumber(actingEmployeeSNumber);
+      return;
+    }
+
+    const available = new Set(managerAssignableOptions.map((option) => option.value));
+    if (available.size === 0) {
+      if (assignmentTargetSNumber) setAssignmentTargetSNumber('');
+      return;
+    }
+
+    if (available.has(assignmentTargetSNumber)) return;
+    if (available.has(selectedShiftActionAssignment.effectiveWorkerSNumber)) {
+      setAssignmentTargetSNumber(selectedShiftActionAssignment.effectiveWorkerSNumber);
+      return;
+    }
+    setAssignmentTargetSNumber(managerAssignableOptions[0].value);
+  }, [
+    actingEmployeeSNumber,
+    assignmentTargetSNumber,
+    isManagerMode,
+    managerAssignableOptions,
+    selectedShiftActionAssignment
+  ]);
+
+  useEffect(() => {
+    if (!selectedShiftActionAssignment || isManagerMode) return;
+    if (currentEmployeeCanVolunteerSelectedShift) {
+      if (shiftActionChoice !== 'volunteer') setShiftActionChoice('volunteer');
+      return;
+    }
+    if (currentEmployeeCanRemoveSelfSelectedShift && shiftActionChoice !== 'remove') {
+      setShiftActionChoice('remove');
+    }
+  }, [
+    currentEmployeeCanRemoveSelfSelectedShift,
+    currentEmployeeCanVolunteerSelectedShift,
+    isManagerMode,
+    selectedShiftActionAssignment,
+    shiftActionChoice
+  ]);
+
   const selectedAssignment = useMemo(
     () => editableAssignments.find((assignment) => assignment.uid === attendanceModalUid) ?? null,
     [attendanceModalUid, editableAssignments]
@@ -564,6 +808,19 @@ export function ScheduleTab() {
     : false;
 
   const targetYearMonthLabel = `${generationSelection.year}-${String(generationSelection.month).padStart(2, '0')}`;
+  const openMonthLabel = `${monthSelection.year}-${String(monthSelection.month).padStart(2, '0')}`;
+
+  const handleApplyMonthSelection = () => {
+    const nextConfig = resolveMonthConfig(monthSelection);
+    setGenerationSelection(nextConfig);
+    setParams(buildScheduleParams(nextConfig));
+    setMessage(`Opened schedule table for ${openMonthLabel}.`);
+  };
+
+  const handleGenerationMonthOrYearChange = (nextSelection: YearMonthSelection) => {
+    const resolved = resolveMonthConfig(nextSelection);
+    setGenerationSelection(resolved);
+  };
 
   const handleSwapWorkers = (sourceUid: string, targetUid: string) => {
     if (!sourceUid || !targetUid || sourceUid === targetUid) return;
@@ -589,6 +846,66 @@ export function ScheduleTab() {
     });
     setDragSourceUid(null);
     setDragTargetUid(null);
+  };
+
+  const handleSubmitShiftAction = () => {
+    if (!selectedShiftActionAssignment) return;
+
+    if (!isManagerMode) {
+      if (!actingEmployeeSNumber) {
+        setMessage('No active employee context was found for sign-up.');
+        return;
+      }
+
+      if (shiftActionChoice === 'volunteer') {
+        if (!currentEmployeeCanVolunteerSelectedShift) {
+          setMessage('You can only sign up for open morning/off-period shifts that you are allowed to take.');
+          return;
+        }
+        volunteerForShiftMutation.mutate({
+          assignment: selectedShiftActionAssignment,
+          targetSNumber: actingEmployeeSNumber,
+          reason: 'Self-volunteered for shift',
+          autoApprove: hasScheduleEditPermission,
+          mode: 'volunteer'
+        });
+        return;
+      }
+
+      if (!currentEmployeeCanRemoveSelfSelectedShift) {
+        setMessage('You can only remove yourself from a shift you currently volunteered for.');
+        return;
+      }
+      volunteerForShiftMutation.mutate({
+        assignment: selectedShiftActionAssignment,
+        targetSNumber: selectedShiftActionAssignment.studentSNumber,
+        reason: 'Self-removed from volunteered shift',
+        autoApprove: hasScheduleEditPermission,
+        mode: 'remove'
+      });
+      return;
+    }
+
+    if (selectedShiftActionAttendanceStatus !== 'expected') {
+      setMessage('Only expected shifts can be reassigned.');
+      return;
+    }
+
+    if (!assignmentTargetSNumber) {
+      setMessage('Select an employee to assign.');
+      return;
+    }
+    if (assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber) {
+      setMessage('No change: this employee is already assigned.');
+      return;
+    }
+    volunteerForShiftMutation.mutate({
+      assignment: selectedShiftActionAssignment,
+      targetSNumber: assignmentTargetSNumber,
+      reason: 'Assigned from schedule tab',
+      autoApprove: true,
+      mode: 'assign'
+    });
   };
 
   return (
@@ -621,44 +938,100 @@ export function ScheduleTab() {
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3 border border-neutral-300 bg-neutral-50 p-2">
               <h3 className="text-sm font-semibold">Schedule — {monthTitle}</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  className={`min-h-[44px] border px-3 text-sm ${
-                    isSwapModeEnabled
-                      ? 'border-brand-maroon bg-brand-maroon text-white'
-                      : 'border-neutral-500 bg-white text-neutral-900'
-                  }`}
-                  onClick={() => {
-                    setIsSwapModeEnabled((previous) => {
-                      const next = !previous;
-                      if (!next) {
-                        setDragSourceUid(null);
-                        setDragTargetUid(null);
-                      }
-                      return next;
-                    });
-                  }}
-                  type="button"
-                >
-                  {isSwapModeEnabled ? 'Drag employees to switch' : 'Enable Drag Mode'}
-                </button>
-                <label className="text-sm">
-                  Volunteer As
-                  <select
-                    className="ml-2 min-h-[44px] border border-neutral-500 px-2"
-                    disabled={actingEmployeeOptions.length === 0}
-                    onChange={(event) => setActingEmployeeSNumber(event.target.value)}
-                    value={actingEmployeeSNumber}
+              <div className="flex flex-wrap items-center gap-2">
+                {isManagerMode && (
+                  <button
+                    className={`min-h-[44px] border px-3 text-sm ${
+                      isSwapModeEnabled
+                        ? 'border-brand-maroon bg-brand-maroon text-white'
+                        : 'border-neutral-500 bg-white text-neutral-900'
+                    }`}
+                    onClick={() => {
+                      setIsSwapModeEnabled((previous) => {
+                        const next = !previous;
+                        if (!next) {
+                          setDragSourceUid(null);
+                          setDragTargetUid(null);
+                        }
+                        return next;
+                      });
+                    }}
+                    type="button"
                   >
-                    {actingEmployeeOptions.length === 0 && (
-                      <option value="">No schedulable employees</option>
-                    )}
-                    {actingEmployeeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    {isSwapModeEnabled ? 'Drag employees to switch' : 'Enable Drag Mode'}
+                  </button>
+                )}
+                {canChangeAccessMode && (
+                  <label className="text-xs text-neutral-700">
+                    Access
+                    <select
+                      className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setScheduleAccessMode(event.target.value as AccessMode)}
+                      value={scheduleAccessMode}
+                    >
+                      <option value="employee">Employee</option>
+                      <option value="manager">Manager</option>
+                    </select>
+                  </label>
+                )}
+                {!isManagerMode && (
+                  <label className="text-xs text-neutral-700">
+                    Acting employee
+                    <select
+                      className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                      disabled={actingEmployeeOptions.length === 0}
+                      onChange={(event) => setActingEmployeeSNumber(event.target.value)}
+                      value={actingEmployeeSNumber}
+                    >
+                      {actingEmployeeOptions.length === 0 && <option value="">No schedulable employees</option>}
+                      {actingEmployeeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="text-xs text-neutral-700">
+                  Open month
+                  <span className="ml-2 inline-flex items-center gap-2">
+                    <input
+                      className="min-h-[36px] w-24 border border-neutral-300 px-2 text-sm"
+                      max={2100}
+                      min={2000}
+                      onChange={(event) =>
+                        setMonthSelection((previous) => ({
+                          ...previous,
+                          year: Number(event.target.value) || previous.year
+                        }))
+                      }
+                      type="number"
+                      value={monthSelection.year}
+                    />
+                    <select
+                      className="min-h-[36px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) =>
+                        setMonthSelection((previous) => ({
+                          ...previous,
+                          month: Number(event.target.value)
+                        }))
+                      }
+                      value={monthSelection.month}
+                    >
+                      {MONTH_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="min-h-[36px] border border-neutral-500 px-2 text-xs"
+                      onClick={handleApplyMonthSelection}
+                      type="button"
+                    >
+                      Open
+                    </button>
+                  </span>
                 </label>
                 <button
                   className="min-h-[44px] border border-neutral-500 px-3 disabled:cursor-not-allowed disabled:opacity-50"
@@ -763,18 +1136,6 @@ export function ScheduleTab() {
                                   const attendanceStatus = normalizeAttendanceStatus(
                                     attendanceByAssignmentKey.get(attendanceKey)?.status
                                   );
-                                  const actingEmployeeCanVolunteer = Boolean(
-                                    actingEmployeeSNumber &&
-                                      actingEmployeeSNumber !== assignment.effectiveWorkerSNumber &&
-                                      attendanceStatus === 'expected' &&
-                                      (assignment.period === 0 ||
-                                        (settingsMap.get(actingEmployeeSNumber) ?? [4, 8]).includes(assignment.period))
-                                  );
-                                  const actingEmployeeOwnsThisShift = Boolean(
-                                    actingEmployeeSNumber &&
-                                      actingEmployeeSNumber === assignment.effectiveWorkerSNumber &&
-                                      attendanceStatus === 'expected'
-                                  );
                                   const isDragTarget = dragTargetUid === assignment.uid;
                                   const isValidDropTarget = dragSourceUid
                                     ? canSwapAssignments(dragSourceUid, assignment.uid)
@@ -788,8 +1149,8 @@ export function ScheduleTab() {
                                       draggable={isSwapModeEnabled}
                                       key={assignment.uid}
                                       onClick={() => {
-                                        setAttendanceModalUid(assignment.uid);
-                                        setAttendanceReason('');
+                                        if (isSwapModeEnabled) return;
+                                        setShiftActionModalUid(assignment.uid);
                                       }}
                                       onDragEnd={() => {
                                         if (!isSwapModeEnabled) return;
@@ -863,36 +1224,18 @@ export function ScheduleTab() {
                                           Drag to another employee to swap.
                                         </p>
                                       )}
-                                      {actingEmployeeCanVolunteer && (
+                                      {isManagerMode && (
                                         <button
-                                          className="mt-1 min-h-[30px] border border-neutral-500 px-2 text-[10px] disabled:opacity-40"
-                                          disabled={volunteerForShiftMutation.isPending}
+                                          className="mt-1 min-h-[30px] border border-neutral-500 px-2 text-[10px]"
                                           onClick={(event) => {
                                             event.preventDefault();
                                             event.stopPropagation();
-                                            volunteerForShiftMutation.mutate({
-                                              assignment,
-                                              volunteerSNumber: actingEmployeeSNumber
-                                            });
+                                            setAttendanceReason('');
+                                            setAttendanceModalUid(assignment.uid);
                                           }}
                                           type="button"
                                         >
-                                          Assign/Volunteer for this shift
-                                        </button>
-                                      )}
-                                      {actingEmployeeOwnsThisShift && (
-                                        <button
-                                          className="mt-1 min-h-[30px] border border-neutral-400 px-2 text-[10px]"
-                                          onClick={(event) => {
-                                            event.preventDefault();
-                                            event.stopPropagation();
-                                            setMessage(
-                                              'To remove yourself from this shift, submit a shift change request from the Requests tab.'
-                                            );
-                                          }}
-                                          type="button"
-                                        >
-                                          Request to unassign
+                                          Edit attendance
                                         </button>
                                       )}
                                     </div>
@@ -1018,7 +1361,7 @@ export function ScheduleTab() {
           </div>
 
           <section className="space-y-3 border border-neutral-300 bg-neutral-50 p-3">
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-5">
               <label className="text-sm">
                 Year
                 <input
@@ -1026,10 +1369,10 @@ export function ScheduleTab() {
                   max={2100}
                   min={2000}
                   onChange={(event) =>
-                    setGenerationSelection((previous) => ({
-                      ...previous,
-                      year: Number(event.target.value) || previous.year
-                    }))
+                    handleGenerationMonthOrYearChange({
+                      year: Number(event.target.value) || generationSelection.year,
+                      month: generationSelection.month
+                    })
                   }
                   type="number"
                   value={generationSelection.year}
@@ -1040,10 +1383,10 @@ export function ScheduleTab() {
                 <select
                   className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
                   onChange={(event) =>
-                    setGenerationSelection((previous) => ({
-                      ...previous,
+                    handleGenerationMonthOrYearChange({
+                      year: generationSelection.year,
                       month: Number(event.target.value)
-                    }))
+                    })
                   }
                   value={generationSelection.month}
                 >
@@ -1053,6 +1396,50 @@ export function ScheduleTab() {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="text-sm">
+                Reference date
+                <input
+                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setGenerationSelection((previous) => ({
+                      ...previous,
+                      anchorDate: event.target.value || previous.anchorDate
+                    }))
+                  }
+                  type="date"
+                  value={generationSelection.anchorDate}
+                />
+              </label>
+              <label className="text-sm">
+                Reference day
+                <select
+                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setGenerationSelection((previous) => ({
+                      ...previous,
+                      anchorDay: event.target.value === 'B' ? 'B' : 'A'
+                    }))
+                  }
+                  value={generationSelection.anchorDay}
+                >
+                  <option value="A">A Day</option>
+                  <option value="B">B Day</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                Seed
+                <input
+                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setGenerationSelection((previous) => ({
+                      ...previous,
+                      seed: Number(event.target.value) || previous.seed
+                    }))
+                  }
+                  type="number"
+                  value={generationSelection.seed}
+                />
               </label>
             </div>
             <button
@@ -1064,9 +1451,159 @@ export function ScheduleTab() {
               Generate New Table
             </button>
             <p className="text-xs text-neutral-600">
-              Seed is auto-generated and anchor date defaults to the first Monday of the selected month.
+              Generation is month-specific. Creating a new month table does not delete other months; use Open month to switch.
             </p>
           </section>
+        </div>
+      )}
+
+      {selectedShiftActionAssignment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+          <div className="w-full max-w-lg border border-neutral-400 bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900">{isManagerMode ? 'Assign Shift' : 'Shift Sign-Up'}</h3>
+                <p className="mt-1 text-sm text-neutral-700">
+                  {rosterNameBySNumber.get(selectedShiftActionAssignment.effectiveWorkerSNumber) ??
+                    selectedShiftActionAssignment.effectiveWorkerSNumber}{' '}
+                  • {selectedShiftActionAssignment.date} • P{selectedShiftActionAssignment.period}
+                </p>
+              </div>
+              <button
+                className="min-h-[36px] border border-neutral-500 px-2 text-sm"
+                onClick={() => setShiftActionModalUid(null)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="mt-3 text-sm text-neutral-700">
+              Current status:{' '}
+              <span className="font-medium">
+                {selectedShiftActionAttendanceStatus === 'excused'
+                  ? 'pardoned'
+                  : selectedShiftActionAttendanceStatus}
+              </span>
+            </p>
+            {selectedShiftSupportsOpenVolunteer && (
+              <p className="mt-2 text-xs text-neutral-600">
+                Morning / period 4 / period 8 shift: schedulable employees can volunteer.
+              </p>
+            )}
+
+            {isManagerMode ? (
+              <div className="mt-3 space-y-3">
+                <label className="block text-sm">
+                  Assign to employee
+                  <select
+                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                    disabled={managerAssignableOptions.length === 0 || volunteerForShiftMutation.isPending}
+                    onChange={(event) => setAssignmentTargetSNumber(event.target.value)}
+                    value={assignmentTargetSNumber}
+                  >
+                    {managerAssignableOptions.length === 0 && (
+                      <option value="">No eligible employees</option>
+                    )}
+                    {managerAssignableOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex justify-end gap-2">
+                  <button
+                    className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                    onClick={() => setShiftActionModalUid(null)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
+                    disabled={
+                      volunteerForShiftMutation.isPending ||
+                      selectedShiftActionAttendanceStatus !== 'expected' ||
+                      !assignmentTargetSNumber ||
+                      assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber
+                    }
+                    onClick={handleSubmitShiftAction}
+                    type="button"
+                  >
+                    Assign
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {!actingEmployeeSNumber && (
+                  <p className="text-sm text-neutral-700">No active employee context is set for self sign-up.</p>
+                )}
+                {actingEmployeeSNumber && (
+                  <>
+                    <label className="block text-sm">
+                      Action
+                      <select
+                        className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                        onChange={(event) => setShiftActionChoice(event.target.value as ShiftActionChoice)}
+                        value={shiftActionChoice}
+                      >
+                        <option disabled={!currentEmployeeCanVolunteerSelectedShift} value="volunteer">
+                          Volunteer me for this shift
+                        </option>
+                        <option disabled={!currentEmployeeCanRemoveSelfSelectedShift} value="remove">
+                          Remove me from this shift
+                        </option>
+                      </select>
+                    </label>
+                    {!currentEmployeeCanVolunteerSelectedShift && shiftActionChoice === 'volunteer' && (
+                      <p className="text-sm text-neutral-700">
+                        Volunteer is only available for expected morning/period 4/period 8 shifts you are eligible to cover.
+                      </p>
+                    )}
+                    {!currentEmployeeCanRemoveSelfSelectedShift && shiftActionChoice === 'remove' && (
+                      <p className="text-sm text-neutral-700">
+                        Remove is only available when you are the current volunteer on this shift.
+                      </p>
+                    )}
+                    <div className="flex justify-end gap-2">
+                      <button
+                        className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                        onClick={() => setShiftActionModalUid(null)}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
+                        disabled={
+                          volunteerForShiftMutation.isPending ||
+                          (shiftActionChoice === 'volunteer' && !currentEmployeeCanVolunteerSelectedShift) ||
+                          (shiftActionChoice === 'remove' && !currentEmployeeCanRemoveSelfSelectedShift)
+                        }
+                        onClick={handleSubmitShiftAction}
+                        type="button"
+                      >
+                        {shiftActionChoice === 'remove' ? 'Remove me' : 'Sign me up'}
+                      </button>
+                    </div>
+                  </>
+                )}
+                {!actingEmployeeSNumber && (
+                    <div className="flex justify-end">
+                      <button
+                        className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                        onClick={() => setShiftActionModalUid(null)}
+                        type="button"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1169,11 +1706,14 @@ export function ScheduleTab() {
           <div className="w-full max-w-lg border border-neutral-400 bg-white p-4">
             <h3 className="text-base font-semibold text-neutral-900">Confirm Table Generation</h3>
             <p className="mt-2 text-sm text-neutral-700">
-              Are you sure? Generating a new table can overwrite expected shift data for the selected month and replace
-              what is currently staged.
+              Generate a fresh table for this month and reference point. Other month tables are kept and can still be opened.
             </p>
             <p className="mt-2 text-sm text-neutral-700">
               Target month: <span className="font-medium">{targetYearMonthLabel}</span>
+            </p>
+            <p className="mt-2 text-sm text-neutral-700">
+              Reference: <span className="font-medium">{generationSelection.anchorDate}</span> (
+              <span className="font-medium">{generationSelection.anchorDay}</span> day)
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
@@ -1189,6 +1729,7 @@ export function ScheduleTab() {
                 onClick={() => {
                   const nextParams = buildScheduleParams(generationSelection);
                   setParams(nextParams);
+                  setMonthSelection({ year: generationSelection.year, month: generationSelection.month });
                   manualRefresh.mutate(nextParams);
                   setIsGenerateConfirmOpen(false);
                 }}
