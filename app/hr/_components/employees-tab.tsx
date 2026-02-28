@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 
 import {
   clearMeetingOverride,
@@ -58,9 +58,41 @@ interface EmployeeMetric {
   points: number;
 }
 
+interface EmployeeRecordDraft {
+  id: string;
+  name: string;
+  sNumber: string;
+  scheduleable: boolean;
+  assignedPeriods: string;
+}
+
 function toNumber(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function readBooleanField(row: StudentRow, keys: string[], fallback: boolean): boolean {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      if (value.toLowerCase() === 'true') return true;
+      if (value.toLowerCase() === 'false') return false;
+    }
+    if (typeof value === 'number') return value !== 0;
+  }
+  return fallback;
+}
+
+function buildEmployeeRecordDraft(row: StudentRow): EmployeeRecordDraft {
+  return {
+    id: getStudentId(row),
+    name: getStudentDisplayName(row),
+    sNumber: getStudentSNumber(row),
+    scheduleable: readBooleanField(row, ['scheduleable', 'schedulable'], true),
+    assignedPeriods:
+      ((row.assigned_periods as string | undefined) ?? String(row.Schedule ?? row.schedule ?? '')).trim()
+  };
 }
 
 function shiftRowKey(row: GenericRow): string {
@@ -84,6 +116,13 @@ export function EmployeesTab() {
   const [selectedShiftDrafts, setSelectedShiftDrafts] = useState<Record<string, string>>({});
   const [loginUsernameDrafts, setLoginUsernameDrafts] = useState<Record<string, string>>({});
   const [loginPasswordDrafts, setLoginPasswordDrafts] = useState<Record<string, string>>({});
+  const [employeeRecordDrafts, setEmployeeRecordDrafts] = useState<Record<string, EmployeeRecordDraft>>({});
+  const [newEmployeeDraft, setNewEmployeeDraft] = useState({
+    name: '',
+    sNumber: '',
+    scheduleable: true,
+    assignedPeriods: ''
+  });
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const studentsQuery = useQuery({
@@ -95,6 +134,19 @@ export function EmployeesTab() {
       return (data ?? []) as StudentRow[];
     }
   });
+
+  useEffect(() => {
+    if (!studentsQuery.data) return;
+    setEmployeeRecordDrafts((previous) => {
+      const next: Record<string, EmployeeRecordDraft> = {};
+      for (const student of studentsQuery.data) {
+        const id = getStudentId(student);
+        if (!id) continue;
+        next[id] = previous[id] ?? buildEmployeeRecordDraft(student);
+      }
+      return next;
+    });
+  }, [studentsQuery.data]);
 
   const strikesQuery = useQuery({
     queryKey: ['hr-strikes-active'],
@@ -233,6 +285,175 @@ export function EmployeesTab() {
     },
     onError: (error) => {
       setStatusMessage(error instanceof Error ? error.message : 'Unable to update login credentials.');
+    }
+  });
+
+  const invalidateEmployeeViews = () => {
+    queryClient.invalidateQueries({ queryKey: ['hr-students'] });
+    queryClient.invalidateQueries({ queryKey: ['hr-settings-employee-overview'] });
+    queryClient.invalidateQueries({ queryKey: ['hr-shift-attendance-for-employees'] });
+    queryClient.invalidateQueries({ queryKey: ['hr-meeting-data-for-employees'] });
+    queryClient.invalidateQueries({ queryKey: ['hr-meeting-overrides'] });
+    queryClient.invalidateQueries({ queryKey: ['hr-points-ledger'] });
+    queryClient.invalidateQueries({ queryKey: ['hr-strikes-active'] });
+    queryClient.invalidateQueries({ queryKey: ['hr-login-profiles'] });
+  };
+
+  const saveEmployeeRecordMutation = useMutation({
+    mutationFn: async (employeeId: string) => {
+      const sourceRow = (studentsQuery.data ?? []).find((row) => getStudentId(row) === employeeId);
+      if (!sourceRow) {
+        throw new Error('Employee record not found.');
+      }
+      const draft = employeeRecordDrafts[employeeId];
+      if (!draft) {
+        throw new Error('No draft found for employee.');
+      }
+
+      const previousSNumber = getStudentSNumber(sourceRow);
+      const updatePayload: GenericRow = {};
+      const normalizedName = draft.name.trim();
+      const normalizedSNumber = draft.sNumber.trim();
+
+      if ('name' in sourceRow || !('full_name' in sourceRow)) updatePayload.name = normalizedName;
+      if ('full_name' in sourceRow) updatePayload.full_name = normalizedName;
+      if ('student_name' in sourceRow) updatePayload.student_name = normalizedName;
+      if ('s_number' in sourceRow || !('student_number' in sourceRow)) updatePayload.s_number = normalizedSNumber;
+      if ('student_number' in sourceRow) updatePayload.student_number = normalizedSNumber;
+      if ('scheduleable' in sourceRow) updatePayload.scheduleable = draft.scheduleable;
+      if ('schedulable' in sourceRow) updatePayload.schedulable = draft.scheduleable;
+      if ('assigned_periods' in sourceRow) updatePayload.assigned_periods = draft.assignedPeriods;
+      if ('Schedule' in sourceRow) updatePayload.Schedule = draft.assignedPeriods;
+
+      const { error: updateError } = await supabase.from('students').update(updatePayload).eq('id', employeeId);
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      if (previousSNumber && normalizedSNumber && previousSNumber !== normalizedSNumber) {
+        await supabase
+          .from('employee_settings')
+          .update({ employee_s_number: normalizedSNumber })
+          .eq('employee_id', employeeId);
+        await supabase.from('shift_attendance').update({ employee_s_number: normalizedSNumber }).eq(
+          'employee_s_number',
+          previousSNumber
+        );
+        await supabase.from('attendance_overrides').update({ s_number: normalizedSNumber }).eq(
+          's_number',
+          previousSNumber
+        );
+        await supabase.from('shift_change_requests').update({ from_employee_s_number: normalizedSNumber }).eq(
+          'from_employee_s_number',
+          previousSNumber
+        );
+        await supabase.from('shift_change_requests').update({ to_employee_s_number: normalizedSNumber }).eq(
+          'to_employee_s_number',
+          previousSNumber
+        );
+      }
+    },
+    onSuccess: () => {
+      invalidateEmployeeViews();
+      setStatusMessage('Employee record saved.');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to save employee record.');
+    }
+  });
+
+  const addEmployeeRecordMutation = useMutation({
+    mutationFn: async (payload: { name: string; sNumber: string; scheduleable: boolean; assignedPeriods: string }) => {
+      const referenceRow = (studentsQuery.data ?? [])[0] ?? {};
+      const normalizedName = payload.name.trim();
+      const normalizedSNumber = payload.sNumber.trim();
+      const insertPayload: GenericRow = {};
+
+      if ('name' in referenceRow || !('full_name' in referenceRow)) insertPayload.name = normalizedName;
+      if ('full_name' in referenceRow) insertPayload.full_name = normalizedName;
+      if ('student_name' in referenceRow) insertPayload.student_name = normalizedName;
+      if ('s_number' in referenceRow || !('student_number' in referenceRow)) insertPayload.s_number = normalizedSNumber;
+      if ('student_number' in referenceRow) insertPayload.student_number = normalizedSNumber;
+      if ('scheduleable' in referenceRow || Object.keys(referenceRow).length === 0) {
+        insertPayload.scheduleable = payload.scheduleable;
+      }
+      if ('schedulable' in referenceRow) insertPayload.schedulable = payload.scheduleable;
+      if ('assigned_periods' in referenceRow || Object.keys(referenceRow).length === 0) {
+        insertPayload.assigned_periods = payload.assignedPeriods;
+      }
+      if ('Schedule' in referenceRow) insertPayload.Schedule = payload.assignedPeriods;
+
+      const { data, error } = await supabase.from('students').insert(insertPayload).select('*').single();
+      if (error || !data) {
+        throw new Error(error?.message ?? 'Unable to add employee.');
+      }
+
+      const insertedRow = data as StudentRow;
+      const employeeId = getStudentId(insertedRow);
+      const employeeSNumber = getStudentSNumber(insertedRow) || normalizedSNumber;
+      if (employeeId && employeeSNumber) {
+        await supabase.from('employee_settings').upsert(
+          {
+            employee_id: employeeId,
+            employee_s_number: employeeSNumber,
+            off_periods: [4, 8]
+          },
+          {
+            onConflict: 'employee_id'
+          }
+        );
+      }
+    },
+    onSuccess: () => {
+      invalidateEmployeeViews();
+      setNewEmployeeDraft({
+        name: '',
+        sNumber: '',
+        scheduleable: true,
+        assignedPeriods: ''
+      });
+      setStatusMessage('Employee added.');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to add employee.');
+    }
+  });
+
+  const removeEmployeeRecordMutation = useMutation({
+    mutationFn: async (employeeId: string) => {
+      const sourceRow = (studentsQuery.data ?? []).find((row) => getStudentId(row) === employeeId);
+      if (!sourceRow) {
+        throw new Error('Employee record not found.');
+      }
+      const employeeSNumber = getStudentSNumber(sourceRow);
+
+      await supabase.from('employee_login_credentials').delete().eq('employee_id', employeeId);
+      await supabase.from('employee_settings').delete().eq('employee_id', employeeId);
+      await supabase.from('strikes').delete().eq('employee_id', employeeId);
+      await supabase.from('points_ledger').delete().eq('employee_id', employeeId);
+      if (employeeSNumber) {
+        await supabase.from('shift_attendance').delete().eq('employee_s_number', employeeSNumber);
+        await supabase.from('attendance_overrides').delete().eq('s_number', employeeSNumber);
+        await supabase.from('shift_change_requests').delete().eq('from_employee_s_number', employeeSNumber);
+        await supabase.from('shift_change_requests').delete().eq('to_employee_s_number', employeeSNumber);
+      }
+
+      const { error: deleteError } = await supabase.from('students').delete().eq('id', employeeId);
+      if (deleteError) {
+        throw new Error(deleteError.message);
+      }
+    },
+    onSuccess: (_, employeeId) => {
+      invalidateEmployeeViews();
+      setEmployeeRecordDrafts((previous) => {
+        const next = { ...previous };
+        delete next[employeeId];
+        return next;
+      });
+      setStatusMessage('Employee removed.');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to remove employee.');
     }
   });
 
@@ -553,12 +774,175 @@ export function EmployeesTab() {
     });
   };
 
+  const employeeRecordRows = useMemo(
+    () =>
+      Object.values(employeeRecordDrafts).sort((left, right) =>
+        left.name.localeCompare(right.name)
+      ),
+    [employeeRecordDrafts]
+  );
+
   if (!canViewAttendance && !canOverrideAttendance && !canEditSettings && !canManageStrikes) {
     return <p className="text-sm text-neutral-700">You do not have permission to view employee management.</p>;
   }
 
   return (
     <section className="space-y-4">
+      <div className="space-y-3 border border-neutral-300 bg-neutral-50 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-neutral-900">Editable Employee Records</h3>
+          <p className="text-xs text-neutral-600">
+            Add/remove employees and edit name, s-number, schedulable status, and assigned periods.
+          </p>
+        </div>
+        <div className="grid gap-2 border border-neutral-300 bg-white p-2 md:grid-cols-5">
+          <input
+            className="min-h-[44px] border border-neutral-300 px-2 text-sm"
+            onChange={(event) =>
+              setNewEmployeeDraft((previous) => ({ ...previous, name: event.target.value }))
+            }
+            placeholder="Name"
+            value={newEmployeeDraft.name}
+          />
+          <input
+            className="min-h-[44px] border border-neutral-300 px-2 text-sm"
+            onChange={(event) =>
+              setNewEmployeeDraft((previous) => ({ ...previous, sNumber: event.target.value }))
+            }
+            placeholder="s_number"
+            value={newEmployeeDraft.sNumber}
+          />
+          <input
+            className="min-h-[44px] border border-neutral-300 px-2 text-sm"
+            onChange={(event) =>
+              setNewEmployeeDraft((previous) => ({ ...previous, assignedPeriods: event.target.value }))
+            }
+            placeholder="Assigned periods"
+            value={newEmployeeDraft.assignedPeriods}
+          />
+          <label className="flex min-h-[44px] items-center gap-2 border border-neutral-300 px-2 text-sm">
+            <input
+              checked={newEmployeeDraft.scheduleable}
+              onChange={(event) =>
+                setNewEmployeeDraft((previous) => ({ ...previous, scheduleable: event.target.checked }))
+              }
+              type="checkbox"
+            />
+            Schedulable
+          </label>
+          <button
+            className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={
+              !canEditSettings ||
+              addEmployeeRecordMutation.isPending ||
+              !newEmployeeDraft.name.trim() ||
+              !newEmployeeDraft.sNumber.trim()
+            }
+            onClick={() =>
+              addEmployeeRecordMutation.mutate({
+                name: newEmployeeDraft.name,
+                sNumber: newEmployeeDraft.sNumber,
+                scheduleable: newEmployeeDraft.scheduleable,
+                assignedPeriods: newEmployeeDraft.assignedPeriods
+              })
+            }
+            type="button"
+          >
+            Add Employee
+          </button>
+        </div>
+        <div className="overflow-x-auto border border-neutral-300 bg-white">
+          <table className="min-w-full text-sm">
+            <thead className="bg-neutral-100">
+              <tr>
+                <th className="border-b border-neutral-300 p-2 text-left">Name</th>
+                <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Schedulable</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Assigned</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {employeeRecordRows.map((record) => (
+                <tr className="border-b border-neutral-200" key={`employee-record-${record.id}`}>
+                  <td className="p-2">
+                    <input
+                      className="min-h-[40px] w-full border border-neutral-300 px-2"
+                      onChange={(event) =>
+                        setEmployeeRecordDrafts((previous) => ({
+                          ...previous,
+                          [record.id]: { ...record, name: event.target.value }
+                        }))
+                      }
+                      value={record.name}
+                    />
+                  </td>
+                  <td className="p-2">
+                    <input
+                      className="min-h-[40px] w-full border border-neutral-300 px-2"
+                      onChange={(event) =>
+                        setEmployeeRecordDrafts((previous) => ({
+                          ...previous,
+                          [record.id]: { ...record, sNumber: event.target.value }
+                        }))
+                      }
+                      value={record.sNumber}
+                    />
+                  </td>
+                  <td className="p-2">
+                    <label className="flex min-h-[40px] items-center gap-2">
+                      <input
+                        checked={record.scheduleable}
+                        onChange={(event) =>
+                          setEmployeeRecordDrafts((previous) => ({
+                            ...previous,
+                            [record.id]: { ...record, scheduleable: event.target.checked }
+                          }))
+                        }
+                        type="checkbox"
+                      />
+                      <span>{record.scheduleable ? 'Yes' : 'No'}</span>
+                    </label>
+                  </td>
+                  <td className="p-2">
+                    <input
+                      className="min-h-[40px] w-full border border-neutral-300 px-2"
+                      onChange={(event) =>
+                        setEmployeeRecordDrafts((previous) => ({
+                          ...previous,
+                          [record.id]: { ...record, assignedPeriods: event.target.value }
+                        }))
+                      }
+                      value={record.assignedPeriods}
+                    />
+                  </td>
+                  <td className="p-2">
+                    <div className="flex gap-2">
+                      <button
+                        className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!canEditSettings || saveEmployeeRecordMutation.isPending}
+                        onClick={() => saveEmployeeRecordMutation.mutate(record.id)}
+                        type="button"
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="min-h-[40px] border border-neutral-500 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!canEditSettings || removeEmployeeRecordMutation.isPending}
+                        onClick={() => removeEmployeeRecordMutation.mutate(record.id)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-4">
         <label className="text-sm">
           From

@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 export default function HomePage() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl items-center justify-center p-6">
+    <main className="min-h-screen w-full p-6">
       <div className="w-full border border-neutral-300 bg-white p-8 text-center">
         <h1 className="text-2xl font-semibold">CO-OP Operations &amp; Intelligence Portal</h1>
         <p className="mt-3 text-sm text-neutral-700">

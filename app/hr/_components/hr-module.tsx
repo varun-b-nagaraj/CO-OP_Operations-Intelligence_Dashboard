@@ -56,7 +56,7 @@ export function HRModule() {
   };
 
   return (
-    <main className="mx-auto min-h-screen max-w-[1400px] p-3 md:p-6">
+    <main className="min-h-screen w-full p-3 md:p-6">
       <section className="border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-4">
           <h1 className="text-xl font-semibold text-neutral-900">HR Module</h1>

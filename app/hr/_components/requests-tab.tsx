@@ -2,7 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
@@ -18,7 +18,6 @@ import { getStudentDisplayName, getStudentSNumber, StudentRow, useBrowserSupabas
 const ShiftRequestFormSchema = z.object({
   shift_date: z.string().min(10),
   shift_period: z.number().int().min(0).max(8),
-  shift_slot_key: z.string().trim().min(1).max(200),
   from_employee_s_number: z.string().trim().min(1),
   to_employee_s_number: z.string().trim().min(1),
   reason: z.string().trim().min(1).max(500)
@@ -26,6 +25,24 @@ const ShiftRequestFormSchema = z.object({
 
 type ShiftRequestFormValues = z.infer<typeof ShiftRequestFormSchema>;
 type StatusFilter = 'all' | 'pending' | 'approved' | 'denied';
+type ShiftAttendanceSlotRow = {
+  employee_s_number: string | null;
+  shift_slot_key: string | null;
+};
+type EmployeeSettingsRow = {
+  employee_s_number: string | null;
+  off_periods: number[] | null;
+};
+type CachedScheduleAssignment = {
+  date?: string;
+  period?: number;
+  shiftSlotKey?: string;
+  studentSNumber?: string;
+};
+type CachedScheduleData = {
+  schedule?: CachedScheduleAssignment[];
+};
+
 const PAGE_SIZE = 50;
 
 export function RequestsTab() {
@@ -42,12 +59,16 @@ export function RequestsTab() {
     defaultValues: {
       shift_date: new Date().toISOString().slice(0, 10),
       shift_period: 1,
-      shift_slot_key: '',
       from_employee_s_number: '',
       to_employee_s_number: '',
       reason: ''
     }
   });
+
+  const selectedShiftDate = form.watch('shift_date');
+  const selectedShiftPeriod = form.watch('shift_period');
+  const selectedFromSNumber = form.watch('from_employee_s_number');
+  const selectedToSNumber = form.watch('to_employee_s_number');
 
   const studentsQuery = useQuery({
     queryKey: ['hr-requests-students'],
@@ -55,6 +76,59 @@ export function RequestsTab() {
       const { data, error } = await supabase.from('students').select('*');
       if (error) throw new Error(error.message);
       return (data ?? []) as StudentRow[];
+    }
+  });
+
+  const employeeSettingsQuery = useQuery({
+    queryKey: ['hr-requests-employee-settings'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('employee_settings')
+        .select('employee_s_number, off_periods');
+      if (error) throw new Error(error.message);
+      return (data ?? []) as EmployeeSettingsRow[];
+    }
+  });
+
+  const selectedYearMonth = useMemo(() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedShiftDate ?? '')) return null;
+    return {
+      year: Number(selectedShiftDate.slice(0, 4)),
+      month: Number(selectedShiftDate.slice(5, 7))
+    };
+  }, [selectedShiftDate]);
+
+  const scheduleMonthQuery = useQuery({
+    queryKey: ['hr-requests-schedule-month', selectedYearMonth?.year, selectedYearMonth?.month],
+    enabled: Boolean(selectedYearMonth),
+    queryFn: async () => {
+      if (!selectedYearMonth) return null;
+      const { data, error } = await supabase
+        .from('schedules')
+        .select('schedule_data')
+        .eq('year', selectedYearMonth.year)
+        .eq('month', selectedYearMonth.month)
+        .order('generated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return (data?.schedule_data as CachedScheduleData | null) ?? null;
+    }
+  });
+
+  const attendanceSlotsQuery = useQuery({
+    queryKey: ['hr-requests-shift-attendance-slot', selectedShiftDate, selectedShiftPeriod],
+    enabled: Boolean(selectedShiftDate) && Number.isInteger(selectedShiftPeriod),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('shift_attendance')
+        .select('employee_s_number, shift_slot_key')
+        .eq('shift_date', selectedShiftDate)
+        .eq('shift_period', selectedShiftPeriod)
+        .in('status', ['expected', 'present', 'absent', 'excused'])
+        .order('shift_slot_key', { ascending: true });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as ShiftAttendanceSlotRow[];
     }
   });
 
@@ -84,12 +158,162 @@ export function RequestsTab() {
     return map;
   }, [studentsQuery.data]);
 
+  const settingsBySNumber = useMemo(() => {
+    const map = new Map<string, number[]>();
+    for (const row of employeeSettingsQuery.data ?? []) {
+      if (!row.employee_s_number) continue;
+      const offPeriods = Array.isArray(row.off_periods)
+        ? row.off_periods.filter((value) => Number.isInteger(value) && value >= 1 && value <= 8)
+        : [];
+      map.set(row.employee_s_number, offPeriods);
+    }
+    return map;
+  }, [employeeSettingsQuery.data]);
+
+  const scheduleAssignmentsForSelection = useMemo(() => {
+    const allRows = scheduleMonthQuery.data?.schedule ?? [];
+    return allRows.filter(
+      (row) =>
+        row.date === selectedShiftDate &&
+        row.period === selectedShiftPeriod &&
+        typeof row.studentSNumber === 'string' &&
+        row.studentSNumber.trim() &&
+        typeof row.shiftSlotKey === 'string' &&
+        row.shiftSlotKey.trim()
+    ) as Array<Required<Pick<CachedScheduleAssignment, 'date' | 'period' | 'studentSNumber' | 'shiftSlotKey'>>>;
+  }, [scheduleMonthQuery.data, selectedShiftDate, selectedShiftPeriod]);
+
+  const attendanceRows = useMemo(
+    () => attendanceSlotsQuery.data ?? [],
+    [attendanceSlotsQuery.data]
+  );
+
+  const currentWorkers = useMemo(() => {
+    if (attendanceRows.length > 0) {
+      const workers = new Set<string>();
+      for (const row of attendanceRows) {
+        if (!row.employee_s_number) continue;
+        workers.add(row.employee_s_number);
+      }
+      return Array.from(workers);
+    }
+
+    const workers = new Set<string>();
+    for (const row of scheduleAssignmentsForSelection) {
+      workers.add(row.studentSNumber);
+    }
+    return Array.from(workers);
+  }, [attendanceRows, scheduleAssignmentsForSelection]);
+
+  const fromOptions = useMemo(() => {
+    const options = currentWorkers.map((sNumber) => ({
+      value: sNumber,
+      label: `${studentNameBySNumber.get(sNumber) ?? sNumber} (${sNumber})`
+    }));
+    options.sort((left, right) => left.label.localeCompare(right.label));
+    return options;
+  }, [currentWorkers, studentNameBySNumber]);
+
+  const busySNumbers = useMemo(() => {
+    const busy = new Set<string>();
+    if (attendanceRows.length > 0) {
+      for (const row of attendanceRows) {
+        if (row.employee_s_number) busy.add(row.employee_s_number);
+      }
+      return busy;
+    }
+
+    for (const row of scheduleAssignmentsForSelection) {
+      busy.add(row.studentSNumber);
+    }
+    return busy;
+  }, [attendanceRows, scheduleAssignmentsForSelection]);
+
+  const eligibleToOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string }> = [];
+
+    for (const student of studentsQuery.data ?? []) {
+      const sNumber = getStudentSNumber(student);
+      if (!sNumber || sNumber === selectedFromSNumber) continue;
+      if (busySNumbers.has(sNumber)) continue;
+
+      const offPeriods = settingsBySNumber.get(sNumber) ?? [4, 8];
+      const canWorkSelectedPeriod =
+        selectedShiftPeriod === 0 ||
+        (Array.isArray(offPeriods) && offPeriods.includes(selectedShiftPeriod));
+
+      if (!canWorkSelectedPeriod) continue;
+
+      options.push({
+        value: sNumber,
+        label: `${studentNameBySNumber.get(sNumber) ?? sNumber} (${sNumber})`
+      });
+    }
+
+    options.sort((left, right) => left.label.localeCompare(right.label));
+    return options;
+  }, [
+    busySNumbers,
+    selectedFromSNumber,
+    selectedShiftPeriod,
+    settingsBySNumber,
+    studentNameBySNumber,
+    studentsQuery.data
+  ]);
+
+  useEffect(() => {
+    const values = new Set(fromOptions.map((option) => option.value));
+    if (fromOptions.length === 0) {
+      if (selectedFromSNumber) {
+        form.setValue('from_employee_s_number', '', { shouldDirty: true, shouldValidate: true });
+      }
+      return;
+    }
+    if (!selectedFromSNumber || !values.has(selectedFromSNumber)) {
+      form.setValue('from_employee_s_number', fromOptions[0].value, {
+        shouldDirty: true,
+        shouldValidate: true
+      });
+    }
+  }, [form, fromOptions, selectedFromSNumber]);
+
+  useEffect(() => {
+    const values = new Set(eligibleToOptions.map((option) => option.value));
+    if (eligibleToOptions.length === 0) {
+      if (selectedToSNumber) {
+        form.setValue('to_employee_s_number', '', { shouldDirty: true, shouldValidate: true });
+      }
+      return;
+    }
+    if (!selectedToSNumber || !values.has(selectedToSNumber)) {
+      form.setValue('to_employee_s_number', eligibleToOptions[0].value, {
+        shouldDirty: true,
+        shouldValidate: true
+      });
+    }
+  }, [eligibleToOptions, form, selectedToSNumber]);
+
+  const resolvedShiftSlotKey = useMemo(() => {
+    if (!selectedFromSNumber) return null;
+
+    const fromAttendance = attendanceRows.find(
+      (row) => row.employee_s_number === selectedFromSNumber && row.shift_slot_key
+    );
+    if (fromAttendance?.shift_slot_key) return fromAttendance.shift_slot_key;
+
+    const fromSchedule = scheduleAssignmentsForSelection.find(
+      (row) => row.studentSNumber === selectedFromSNumber
+    );
+    return fromSchedule?.shiftSlotKey ?? null;
+  }, [attendanceRows, scheduleAssignmentsForSelection, selectedFromSNumber]);
+
   const submitMutation = useMutation({
-    mutationFn: async (values: ShiftRequestFormValues) => {
+    mutationFn: async (input: { values: ShiftRequestFormValues; shiftSlotKey: string }) => {
+      const { values, shiftSlotKey } = input;
       const result = await submitShiftExchange(
         values.shift_date,
         values.shift_period,
-        values.shift_slot_key,
+        shiftSlotKey,
         values.from_employee_s_number,
         values.to_employee_s_number,
         values.reason
@@ -102,7 +326,6 @@ export function RequestsTab() {
       queryClient.invalidateQueries({ queryKey: ['hr-shift-requests'] });
       form.reset({
         ...form.getValues(),
-        shift_slot_key: '',
         reason: ''
       });
     },
@@ -146,7 +369,15 @@ export function RequestsTab() {
     <section className="space-y-4">
       <form
         className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-3"
-        onSubmit={form.handleSubmit((values) => submitMutation.mutate(values))}
+        onSubmit={form.handleSubmit((values) => {
+          if (!resolvedShiftSlotKey) {
+            setStatusMessage(
+              'Unable to find a shift slot for the selected date, period, and from employee.'
+            );
+            return;
+          }
+          submitMutation.mutate({ values, shiftSlotKey: resolvedShiftSlotKey });
+        })}
       >
         <label className="text-sm">
           Shift Date
@@ -157,27 +388,66 @@ export function RequestsTab() {
           <input
             className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
             type="number"
+            min={0}
+            max={8}
             {...form.register('shift_period', { valueAsNumber: true })}
           />
         </label>
         <label className="text-sm">
-          Shift Slot Key
-          <input className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2" {...form.register('shift_slot_key')} />
-        </label>
-        <label className="text-sm">
           From s_number
-          <input className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2" {...form.register('from_employee_s_number')} />
+          <select
+            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+            disabled={fromOptions.length === 0}
+            {...form.register('from_employee_s_number')}
+          >
+            {fromOptions.length === 0 ? (
+              <option value="">No workers scheduled in this slot</option>
+            ) : (
+              fromOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))
+            )}
+          </select>
         </label>
         <label className="text-sm">
-          To s_number
-          <input className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2" {...form.register('to_employee_s_number')} />
+          To s_number (eligible)
+          <select
+            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+            disabled={eligibleToOptions.length === 0}
+            {...form.register('to_employee_s_number')}
+          >
+            {eligibleToOptions.length === 0 ? (
+              <option value="">No eligible employees for this period</option>
+            ) : (
+              eligibleToOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))
+            )}
+          </select>
         </label>
         <label className="text-sm md:col-span-2">
           Reason
           <textarea className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2" {...form.register('reason')} />
         </label>
+        <p className="text-xs text-neutral-600 md:col-span-3">
+          Shift slot key is resolved automatically from the selected date, period, and from employee.
+          {resolvedShiftSlotKey ? ` Slot: ${resolvedShiftSlotKey}` : ' Slot: not found yet.'}
+        </p>
         <div className="flex items-end">
-          <button className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-white" type="submit">
+          <button
+            className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-white disabled:opacity-40"
+            disabled={
+              submitMutation.isPending ||
+              fromOptions.length === 0 ||
+              eligibleToOptions.length === 0 ||
+              !resolvedShiftSlotKey
+            }
+            type="submit"
+          >
             Submit Request
           </button>
         </div>
