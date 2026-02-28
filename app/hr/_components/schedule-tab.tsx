@@ -43,7 +43,7 @@ type EditableRosterRow = {
   Schedule: number;
 };
 
-type EditableSummaryRow = {
+type SummaryRow = {
   localId: string;
   student: string;
   studentSNumber: string;
@@ -129,7 +129,7 @@ function normalizeAttendanceStatus(value: unknown): ShiftAttendanceStatus {
 function buildSummaryFromAssignments(
   assignments: EditableAssignment[],
   rosterNameBySNumber: Map<string, string>
-): EditableSummaryRow[] {
+): SummaryRow[] {
   type Aggregate = {
     student: string;
     studentSNumber: string;
@@ -184,7 +184,6 @@ export function ScheduleTab() {
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [editableAssignments, setEditableAssignments] = useState<EditableAssignment[]>([]);
   const [editableRoster, setEditableRoster] = useState<EditableRosterRow[]>([]);
-  const [editableSummary, setEditableSummary] = useState<EditableSummaryRow[]>([]);
   const [dragSourceUid, setDragSourceUid] = useState<string | null>(null);
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
   const [attendanceModalUid, setAttendanceModalUid] = useState<string | null>(null);
@@ -344,19 +343,6 @@ export function ScheduleTab() {
         Schedule: typeof entry.Schedule === 'number' ? entry.Schedule : 0
       }))
     );
-    setEditableSummary(
-      schedule.summary.map((entry, index) => ({
-        localId: `summary-${entry.studentSNumber}-${entry.group}-${index}`,
-        student: entry.student,
-        studentSNumber: entry.studentSNumber,
-        role: entry.role,
-        group: entry.group,
-        regularShifts: entry.regularShifts,
-        alternateShifts: entry.alternateShifts,
-        totalShifts: entry.totalShifts,
-        periodsWorked: entry.periodsWorked
-      }))
-    );
     setActiveWeekIndex(0);
     setDragSourceUid(null);
     setDragTargetUid(null);
@@ -403,6 +389,10 @@ export function ScheduleTab() {
     }
     return map;
   }, [editableAssignments]);
+  const summaryRows = useMemo(
+    () => buildSummaryFromAssignments(editableAssignments, rosterNameBySNumber),
+    [editableAssignments, rosterNameBySNumber]
+  );
 
   const attendanceByAssignmentKey = useMemo(() => {
     const map = new Map<string, GenericRow>();
@@ -447,10 +437,6 @@ export function ScheduleTab() {
     });
     setDragSourceUid(null);
     setDragTargetUid(null);
-  };
-
-  const applyGeneratedSummary = () => {
-    setEditableSummary(buildSummaryFromAssignments(editableAssignments, rosterNameBySNumber));
   };
 
   return (
@@ -806,39 +792,8 @@ export function ScheduleTab() {
               </table>
             </div>
             <div className="overflow-x-auto border border-neutral-300">
-              <div className="flex items-center justify-between gap-2 border-b border-neutral-300 bg-neutral-50 p-2">
-                <h3 className="text-sm font-semibold">Summary (Editable)</h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="min-h-[36px] border border-neutral-500 px-2 text-xs"
-                    onClick={applyGeneratedSummary}
-                    type="button"
-                  >
-                    Recalculate
-                  </button>
-                  <button
-                    className="min-h-[36px] border border-neutral-500 px-2 text-xs"
-                    onClick={() =>
-                      setEditableSummary((previous) => [
-                        ...previous,
-                        {
-                          localId: `summary-new-${Date.now()}`,
-                          student: '',
-                          studentSNumber: '',
-                          role: '',
-                          group: '',
-                          regularShifts: 0,
-                          alternateShifts: 0,
-                          totalShifts: 0,
-                          periodsWorked: ''
-                        }
-                      ])
-                    }
-                    type="button"
-                  >
-                    Add Row
-                  </button>
-                </div>
+              <div className="border-b border-neutral-300 bg-neutral-50 p-2">
+                <h3 className="text-sm font-semibold">Summary</h3>
               </div>
               <table className="min-w-full text-sm">
                 <thead className="bg-neutral-100">
@@ -849,116 +804,17 @@ export function ScheduleTab() {
                     <th className="border-b border-neutral-300 p-2 text-left">Alternate</th>
                     <th className="border-b border-neutral-300 p-2 text-left">Total</th>
                     <th className="border-b border-neutral-300 p-2 text-left">Periods</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {editableSummary.map((entry) => (
+                  {summaryRows.map((entry) => (
                     <tr className="border-b border-neutral-200" key={entry.localId}>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableSummary((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId ? { ...item, student: event.target.value } : item
-                              )
-                            )
-                          }
-                          value={entry.student}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableSummary((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId
-                                  ? { ...item, studentSNumber: event.target.value }
-                                  : item
-                              )
-                            )
-                          }
-                          value={entry.studentSNumber}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableSummary((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId
-                                  ? { ...item, regularShifts: Number(event.target.value) || 0 }
-                                  : item
-                              )
-                            )
-                          }
-                          type="number"
-                          value={entry.regularShifts}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableSummary((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId
-                                  ? { ...item, alternateShifts: Number(event.target.value) || 0 }
-                                  : item
-                              )
-                            )
-                          }
-                          type="number"
-                          value={entry.alternateShifts}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableSummary((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId
-                                  ? { ...item, totalShifts: Number(event.target.value) || 0 }
-                                  : item
-                              )
-                            )
-                          }
-                          type="number"
-                          value={entry.totalShifts}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableSummary((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId
-                                  ? { ...item, periodsWorked: event.target.value }
-                                  : item
-                              )
-                            )
-                          }
-                          value={entry.periodsWorked}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <button
-                          className="min-h-[36px] border border-neutral-500 px-2 text-xs"
-                          onClick={() =>
-                            setEditableSummary((previous) =>
-                              previous.filter((item) => item.localId !== entry.localId)
-                            )
-                          }
-                          type="button"
-                        >
-                          Remove
-                        </button>
-                      </td>
+                      <td className="p-2">{entry.student}</td>
+                      <td className="p-2">{entry.studentSNumber}</td>
+                      <td className="p-2">{entry.regularShifts}</td>
+                      <td className="p-2">{entry.alternateShifts}</td>
+                      <td className="p-2">{entry.totalShifts}</td>
+                      <td className="p-2">{entry.periodsWorked}</td>
                     </tr>
                   ))}
                 </tbody>
