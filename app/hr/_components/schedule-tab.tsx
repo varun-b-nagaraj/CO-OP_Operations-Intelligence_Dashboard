@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import { buildExpectedShifts } from '@/app/actions/expected-shifts';
 import { fetchSchedule } from '@/lib/api-client';
+import { ScheduleAssignment } from '@/lib/types';
 
 import { useBrowserSupabase } from './utils';
 
@@ -20,6 +21,52 @@ const ScheduleFormSchema = z.object({
 });
 
 type ScheduleFormValues = z.infer<typeof ScheduleFormSchema>;
+
+type CalendarDayCell = {
+  dateKey: string;
+  dayNumber: number;
+  inCurrentMonth: boolean;
+};
+
+const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const PERIOD_BANDS: Array<{ id: string; label: string; periods: number[] }> = [
+  { id: 'morning', label: '8:20 - 9 AM', periods: [0] },
+  { id: 'p1-5', label: 'Period 1 / 5', periods: [1, 5] },
+  { id: 'p2-6', label: 'Period 2 / 6', periods: [2, 6] },
+  { id: 'p3-7', label: 'Period 3 / 7', periods: [3, 7] },
+  { id: 'p4-8', label: 'Period 4 / 8', periods: [4, 8] }
+];
+
+function toDateKey(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function buildMonthWeeks(year: number, month: number): CalendarDayCell[][] {
+  const monthStart = new Date(Date.UTC(year, month - 1, 1));
+  const monthEnd = new Date(Date.UTC(year, month, 0));
+
+  const gridStart = new Date(monthStart);
+  gridStart.setUTCDate(monthStart.getUTCDate() - monthStart.getUTCDay());
+
+  const gridEnd = new Date(monthEnd);
+  gridEnd.setUTCDate(monthEnd.getUTCDate() + (6 - monthEnd.getUTCDay()));
+
+  const days: CalendarDayCell[] = [];
+  for (let cursor = new Date(gridStart); cursor <= gridEnd; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    days.push({
+      dateKey: toDateKey(cursor),
+      dayNumber: cursor.getUTCDate(),
+      inCurrentMonth: cursor.getUTCMonth() + 1 === month
+    });
+  }
+
+  const weeks: CalendarDayCell[][] = [];
+  for (let index = 0; index < days.length; index += 7) {
+    weeks.push(days.slice(index, index + 7));
+  }
+  return weeks;
+}
 
 function getDefaultValues(): ScheduleFormValues {
   const now = new Date();
@@ -108,12 +155,47 @@ export function ScheduleTab() {
     return map;
   }, [settingsQuery.data]);
 
+  const schedule = scheduleQuery.data;
+
+  const monthTitle = useMemo(() => {
+    if (!schedule) return '';
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(new Date(Date.UTC(schedule.meta.year, schedule.meta.month - 1, 1)));
+  }, [schedule]);
+
+  const calendarWeeks = useMemo(() => {
+    if (!schedule) return [];
+    return buildMonthWeeks(schedule.meta.year, schedule.meta.month);
+  }, [schedule]);
+
+  const rosterNameBySNumber = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!schedule) return map;
+    for (const employee of schedule.roster) {
+      map.set(employee.s_number, employee.name);
+    }
+    return map;
+  }, [schedule]);
+
+  const assignmentMap = useMemo(() => {
+    const map = new Map<string, ScheduleAssignment[]>();
+    if (!schedule) return map;
+    for (const assignment of schedule.schedule) {
+      const key = `${assignment.date}|${assignment.period}`;
+      const bucket = map.get(key) ?? [];
+      bucket.push(assignment);
+      map.set(key, bucket);
+    }
+    return map;
+  }, [schedule]);
+
   const onSubmit = (values: ScheduleFormValues) => {
     setParams(values);
     setMessage(null);
   };
-
-  const schedule = scheduleQuery.data;
 
   return (
     <section className="space-y-4">
@@ -199,60 +281,138 @@ export function ScheduleTab() {
             </div>
           </div>
 
-          <div className="overflow-x-auto border border-neutral-300">
-            <table className="min-w-full text-sm">
-              <thead className="bg-neutral-100">
-                <tr>
-                  <th className="border-b border-neutral-300 p-2 text-left">Date</th>
-                  <th className="border-b border-neutral-300 p-2 text-left">Period</th>
-                  <th className="border-b border-neutral-300 p-2 text-left">Slot</th>
-                  <th className="border-b border-neutral-300 p-2 text-left">Original</th>
-                  <th className="border-b border-neutral-300 p-2 text-left">Effective Worker</th>
-                  <th className="border-b border-neutral-300 p-2 text-left">Flags</th>
-                </tr>
-              </thead>
-              <tbody>
-                {schedule.schedule.slice(0, 300).map((assignment) => {
-                  const offPeriods = settingsMap.get(assignment.effectiveWorkerSNumber) ?? [4, 8];
-                  const isOffPeriod = offPeriods.includes(assignment.period);
-                  const exchanged = assignment.studentSNumber !== assignment.effectiveWorkerSNumber;
-                  return (
-                    <tr className="border-b border-neutral-200" key={`${assignment.date}-${assignment.shiftSlotKey}-${assignment.studentSNumber}`}>
-                      <td className="p-2">{assignment.date}</td>
-                      <td className="p-2">{assignment.period}</td>
-                      <td className="p-2">{assignment.shiftSlotKey}</td>
-                      <td className="p-2">{assignment.studentName}</td>
-                      <td className="p-2">{assignment.effectiveWorkerSNumber}</td>
-                      <td className="p-2">
-                        {exchanged && <span className="mr-2 border border-brand-maroon px-1 text-xs text-brand-maroon">Exchanged</span>}
-                        {isOffPeriod && <span className="border border-neutral-500 px-1 text-xs">Off-period</span>}
-                      </td>
+          <div className="space-y-3">
+            <h3 className="border border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">
+              Calendar View — {monthTitle}
+            </h3>
+            {calendarWeeks.map((week, weekIndex) => (
+              <div className="overflow-x-auto border border-neutral-300" key={`week-${weekIndex}`}>
+                <table className="min-w-[1150px] w-full text-xs md:text-sm">
+                  <thead className="bg-neutral-100">
+                    <tr>
+                      <th className="border-b border-r border-neutral-300 p-2 text-left">Week {weekIndex + 1}</th>
+                      {WEEKDAY_LABELS.map((label) => (
+                        <th className="border-b border-neutral-300 p-2 text-left" key={label}>
+                          {label}
+                        </th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                    <tr>
+                      <th className="border-b border-r border-neutral-300 p-2 text-left">Date</th>
+                      {week.map((day) => {
+                        const dayType = schedule.calendar[day.dateKey];
+                        const dateCellClass = day.inCurrentMonth
+                          ? 'bg-white text-neutral-900'
+                          : 'bg-neutral-100 text-neutral-400';
+                        return (
+                          <th className={`border-b border-neutral-300 p-2 text-left ${dateCellClass}`} key={`${day.dateKey}-date`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span>{day.dayNumber}</span>
+                              {dayType && (
+                                <span className="border border-neutral-400 px-1 text-[10px] uppercase tracking-wide">
+                                  {dayType}
+                                </span>
+                              )}
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {PERIOD_BANDS.map((periodBand) => (
+                      <tr key={`${weekIndex}-${periodBand.id}`}>
+                        <th className="border-b border-r border-neutral-300 bg-blue-50 p-2 text-left font-medium text-neutral-800">
+                          {periodBand.label}
+                        </th>
+                        {week.map((day) => {
+                          const dayType = schedule.calendar[day.dateKey];
+                          const baseCellTone = !day.inCurrentMonth
+                            ? 'bg-neutral-100'
+                            : dayType === 'A'
+                              ? 'bg-amber-50'
+                              : dayType === 'B'
+                                ? 'bg-violet-50'
+                                : 'bg-white';
+
+                          const assignments = periodBand.periods
+                            .flatMap((period) => assignmentMap.get(`${day.dateKey}|${period}`) ?? [])
+                            .sort((left, right) => {
+                              if (left.period !== right.period) return left.period - right.period;
+                              return left.shiftSlotKey.localeCompare(right.shiftSlotKey);
+                            });
+
+                          return (
+                            <td className={`border-b border-neutral-300 p-2 align-top ${baseCellTone}`} key={`${day.dateKey}-${periodBand.id}`}>
+                              {!day.inCurrentMonth && <span className="text-[11px] text-neutral-400">—</span>}
+                              {day.inCurrentMonth && assignments.length === 0 && (
+                                <span className="text-[11px] text-neutral-500">No assignment</span>
+                              )}
+                              {day.inCurrentMonth && assignments.length > 0 && (
+                                <div className="space-y-1">
+                                  {assignments.map((assignment) => {
+                                    const offPeriods = settingsMap.get(assignment.effectiveWorkerSNumber) ?? [4, 8];
+                                    const isOffPeriod = offPeriods.includes(assignment.period);
+                                    const exchanged = assignment.studentSNumber !== assignment.effectiveWorkerSNumber;
+                                    const effectiveName =
+                                      rosterNameBySNumber.get(assignment.effectiveWorkerSNumber) ??
+                                      assignment.effectiveWorkerSNumber;
+
+                                    return (
+                                      <div className="border border-neutral-300 bg-white/90 p-1" key={`${assignment.shiftSlotKey}-${assignment.studentSNumber}`}>
+                                        <p className="font-medium leading-tight">
+                                          {periodBand.periods.length > 1 && (
+                                            <span className="mr-1 text-[10px] text-neutral-500">P{assignment.period}</span>
+                                          )}
+                                          {effectiveName}
+                                        </p>
+                                        {(exchanged || isOffPeriod) && (
+                                          <div className="mt-1 flex flex-wrap gap-1">
+                                            {exchanged && (
+                                              <span className="border border-brand-maroon px-1 text-[10px] text-brand-maroon">
+                                                Exchanged
+                                              </span>
+                                            )}
+                                            {isOffPeriod && (
+                                              <span className="border border-neutral-500 px-1 text-[10px] text-neutral-700">
+                                                Off-period
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="border border-neutral-300">
-              <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Calendar</h3>
-              <div className="max-h-60 overflow-auto p-2 text-sm">
-                {Object.entries(schedule.calendar)
-                  .slice(0, 80)
-                  .map(([date, day]) => (
-                    <p key={date}>
-                      {date}: {day}
-                    </p>
-                  ))}
-              </div>
-            </div>
             <div className="border border-neutral-300">
               <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Statistics</h3>
               <div className="max-h-60 overflow-auto p-2 text-sm">
                 {schedule.statistics.map((stat) => (
                   <p key={stat.metric}>
                     {stat.metric}: {stat.value}
+                  </p>
+                ))}
+              </div>
+            </div>
+            <div className="border border-neutral-300">
+              <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Balance Analysis</h3>
+              <div className="max-h-60 overflow-auto p-2 text-sm">
+                {schedule.balanceAnalysis.map((item) => (
+                  <p key={`${item.category}-${item.metric}`}>
+                    {item.category} — {item.metric}: {item.value}
                   </p>
                 ))}
               </div>
