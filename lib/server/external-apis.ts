@@ -11,10 +11,22 @@ import {
 } from '@/lib/types';
 import { MeetingAttendanceApiResponseSchema, ScheduleApiResponseSchema } from '@/lib/validation';
 
-const SCHEDULE_API_URL =
-  process.env.SCHEDULING_API_URL ?? 'https://scheduler-v2-gules.vercel.app/api/schedule';
-const MEETING_API_URL =
-  process.env.MEETING_ATTENDANCE_API_URL ?? 'https://hr-check-in-hnrx.vercel.app/api/report';
+function resolveApiUrl(rawValue: string | undefined, fallback: string, endpointPath: string): string {
+  const candidate = (rawValue?.trim() || fallback).replace(/\/+$/, '');
+  if (candidate.endsWith(endpointPath)) return candidate;
+  return `${candidate}${endpointPath}`;
+}
+
+const SCHEDULE_API_URL = resolveApiUrl(
+  process.env.SCHEDULING_API_URL,
+  'https://scheduler-v2-gules.vercel.app/api/schedule',
+  '/api/schedule'
+);
+const MEETING_API_URL = resolveApiUrl(
+  process.env.MEETING_ATTENDANCE_API_URL,
+  'https://hr-check-in-hnrx.vercel.app/api/report',
+  '/api/report'
+);
 
 export async function fetchScheduleWithCache(
   supabase: SupabaseClient,

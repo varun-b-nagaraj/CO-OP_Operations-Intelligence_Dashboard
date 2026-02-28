@@ -19,6 +19,8 @@ Production-ready HR module implemented as a single-page route at `/hr` with tab 
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `SCHEDULING_API_URL`
+   - `MEETING_ATTENDANCE_API_URL`
 4. Run dev server:
    - `npm run dev`
 5. Open:

@@ -22,3 +22,44 @@ export function currentMonthRange(): { from: string; to: string } {
     to: to.toISOString().slice(0, 10)
   };
 }
+
+export type StudentRow = Record<string, unknown>;
+
+function getFirstStringField(row: StudentRow, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+export function getStudentId(row: StudentRow): string {
+  return (
+    getFirstStringField(row, ['id', 'student_id', 'studentId']) ?? ''
+  );
+}
+
+export function getStudentSNumber(row: StudentRow): string {
+  return (
+    getFirstStringField(row, ['s_number', 'sNumber', 'student_number', 'studentNumber']) ?? ''
+  );
+}
+
+export function getStudentDisplayName(row: StudentRow): string {
+  const directName = getFirstStringField(row, [
+    'name',
+    'full_name',
+    'fullName',
+    'student_name',
+    'studentName'
+  ]);
+  if (directName) return directName;
+
+  const firstName = getFirstStringField(row, ['first_name', 'firstName']);
+  const lastName = getFirstStringField(row, ['last_name', 'lastName']);
+  const combined = [firstName, lastName].filter(Boolean).join(' ').trim();
+  if (combined) return combined;
+
+  return getStudentSNumber(row) || getStudentId(row) || 'Unknown';
+}

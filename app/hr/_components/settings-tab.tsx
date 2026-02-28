@@ -9,7 +9,13 @@ import { z } from 'zod';
 import { updateEmployeeOffPeriods } from '@/app/actions/employee-settings';
 import { usePermission } from '@/lib/permissions';
 
-import { useBrowserSupabase } from './utils';
+import {
+  getStudentDisplayName,
+  getStudentId,
+  getStudentSNumber,
+  StudentRow,
+  useBrowserSupabase
+} from './utils';
 
 const SettingsFormSchema = z.object({
   employee_id: z.string().trim().regex(/^\d+$/),
@@ -17,13 +23,6 @@ const SettingsFormSchema = z.object({
 });
 
 type SettingsFormValues = z.infer<typeof SettingsFormSchema>;
-
-type StudentRow = {
-  id: string;
-  name?: string;
-  full_name?: string;
-  s_number?: string;
-};
 
 export function SettingsTab() {
   const canEdit = usePermission('hr.settings.edit');
@@ -34,7 +33,7 @@ export function SettingsTab() {
   const studentsQuery = useQuery({
     queryKey: ['hr-settings-students'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('students').select('id,name,full_name,s_number');
+      const { data, error } = await supabase.from('students').select('*');
       if (error) throw new Error(error.message);
       return (data ?? []) as StudentRow[];
     }
@@ -49,7 +48,7 @@ export function SettingsTab() {
     }
   });
 
-  const firstEmployeeId = studentsQuery.data?.[0]?.id ?? '';
+  const firstEmployeeId = studentsQuery.data?.[0] ? getStudentId(studentsQuery.data[0]) : '';
   const form = useForm<SettingsFormValues>({
     resolver: zodResolver(SettingsFormSchema),
     defaultValues: {
@@ -66,7 +65,7 @@ export function SettingsTab() {
   const settingsByEmployee = useMemo(() => {
     const map = new Map<string, number[]>();
     for (const row of settingsQuery.data ?? []) {
-      map.set(row.employee_id as string, (row.off_periods as number[]) ?? [4, 8]);
+      map.set(String(row.employee_id), (row.off_periods as number[]) ?? [4, 8]);
     }
     return map;
   }, [settingsQuery.data]);
@@ -115,8 +114,8 @@ export function SettingsTab() {
           Employee
           <select className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2" {...form.register('employee_id')}>
             {(studentsQuery.data ?? []).map((student) => (
-              <option key={student.id} value={student.id}>
-                {(student.name ?? student.full_name ?? 'Unknown') + ` (${student.s_number ?? 'N/A'})`}
+              <option key={getStudentId(student)} value={getStudentId(student)}>
+                {`${getStudentDisplayName(student)} (${getStudentSNumber(student) || 'N/A'})`}
               </option>
             ))}
           </select>
@@ -167,11 +166,12 @@ export function SettingsTab() {
           </thead>
           <tbody>
             {(studentsQuery.data ?? []).map((student) => {
-              const offPeriods = settingsByEmployee.get(student.id) ?? [4, 8];
+              const studentId = getStudentId(student);
+              const offPeriods = settingsByEmployee.get(studentId) ?? [4, 8];
               return (
-                <tr className="border-b border-neutral-200" key={student.id}>
-                  <td className="p-2">{student.name ?? student.full_name ?? 'Unknown'}</td>
-                  <td className="p-2">{student.s_number ?? 'N/A'}</td>
+                <tr className="border-b border-neutral-200" key={studentId}>
+                  <td className="p-2">{getStudentDisplayName(student)}</td>
+                  <td className="p-2">{getStudentSNumber(student) || 'N/A'}</td>
                   <td className="p-2">{offPeriods.join(', ')}</td>
                 </tr>
               );

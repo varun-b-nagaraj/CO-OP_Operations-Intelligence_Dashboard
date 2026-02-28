@@ -176,7 +176,7 @@ export interface ScheduleAPIResponse {
     alternatesPerShift: number;
   };
   roster: Array<{
-    id: number;
+    id: number | string;
     name: string;
     s_number: string;
     scheduleable: boolean;
@@ -201,8 +201,8 @@ export interface ScheduleAPIResponse {
     'Total Shifts': number;
     'Periods Worked': string;
   }>;
-  statistics: Array<{ Metric: string; Value: number }>;
-  balanceAnalysis: Array<{ Category: string; Metric: string; Value: number }>;
+  statistics: Array<{ Metric: string; Value: number | string }>;
+  balanceAnalysis: Array<{ Category: string; Metric: string; Value: number | string }>;
 }
 
 export interface ScheduleAssignment {
@@ -233,8 +233,8 @@ export interface NormalizedScheduleResponse {
     totalShifts: number;
     periodsWorked: string;
   }>;
-  statistics: Array<{ metric: string; value: number }>;
-  balanceAnalysis: Array<{ category: string; metric: string; value: number }>;
+  statistics: Array<{ metric: string; value: number | string }>;
+  balanceAnalysis: Array<{ category: string; metric: string; value: number | string }>;
 }
 
 export interface MeetingAttendanceParams {
@@ -260,7 +260,7 @@ export interface MeetingAttendanceResponse {
       date?: string;
       from?: string;
       to?: string;
-      exclude?: string;
+      exclude?: string | string[];
     };
   };
   analytics: {

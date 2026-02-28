@@ -13,7 +13,7 @@ import {
 } from '@/app/actions/shift-requests';
 import { usePermission } from '@/lib/permissions';
 
-import { useBrowserSupabase } from './utils';
+import { getStudentDisplayName, getStudentSNumber, StudentRow, useBrowserSupabase } from './utils';
 
 const ShiftRequestFormSchema = z.object({
   shift_date: z.string().min(10),
@@ -52,9 +52,9 @@ export function RequestsTab() {
   const studentsQuery = useQuery({
     queryKey: ['hr-requests-students'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('students').select('name,full_name,s_number');
+      const { data, error } = await supabase.from('students').select('*');
       if (error) throw new Error(error.message);
-      return data ?? [];
+      return (data ?? []) as StudentRow[];
     }
   });
 
@@ -77,10 +77,9 @@ export function RequestsTab() {
   const studentNameBySNumber = useMemo(() => {
     const map = new Map<string, string>();
     for (const student of studentsQuery.data ?? []) {
-      map.set(
-        student.s_number as string,
-        (student.name as string) ?? (student.full_name as string) ?? (student.s_number as string)
-      );
+      const sNumber = getStudentSNumber(student);
+      if (!sNumber) continue;
+      map.set(sNumber, getStudentDisplayName(student));
     }
     return map;
   }, [studentsQuery.data]);

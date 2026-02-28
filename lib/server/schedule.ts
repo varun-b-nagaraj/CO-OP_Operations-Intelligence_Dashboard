@@ -12,14 +12,25 @@ type WorkingScheduleRow = {
   role: string;
 };
 
+function normalizeStudentName(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 export function normalizeScheduleResponse(raw: ScheduleAPIResponse): NormalizedScheduleResponse {
   const nameToSNumber = new Map<string, string>();
+  const normalizedNameToSNumber = new Map<string, string>();
   raw.roster.forEach((entry) => {
     nameToSNumber.set(entry.name, entry.s_number);
+    const normalized = normalizeStudentName(entry.name);
+    if (!normalizedNameToSNumber.has(normalized)) {
+      normalizedNameToSNumber.set(normalized, entry.s_number);
+    }
   });
 
   const rows: WorkingScheduleRow[] = raw.schedule.map((assignment) => {
-    const studentSNumber = nameToSNumber.get(assignment.Student);
+    const studentSNumber =
+      nameToSNumber.get(assignment.Student) ??
+      normalizedNameToSNumber.get(normalizeStudentName(assignment.Student));
     if (!studentSNumber) {
       throw new Error(`Schedule normalization failed: missing s_number for "${assignment.Student}"`);
     }
@@ -69,7 +80,9 @@ export function normalizeScheduleResponse(raw: ScheduleAPIResponse): NormalizedS
   });
 
   const summary = raw.summary.map((entry) => {
-    const studentSNumber = nameToSNumber.get(entry.Student);
+    const studentSNumber =
+      nameToSNumber.get(entry.Student) ??
+      normalizedNameToSNumber.get(normalizeStudentName(entry.Student));
     if (!studentSNumber) {
       throw new Error(
         `Schedule normalization failed: missing s_number for summary "${entry.Student}"`

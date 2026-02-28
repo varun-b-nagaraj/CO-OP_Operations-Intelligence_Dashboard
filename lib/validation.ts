@@ -131,6 +131,8 @@ export const MeetingAttendanceParamsSchema = z
     }
   });
 
+const OptionalDateOrEmptySchema = z.union([DateStringSchema, z.literal('')]).optional();
+
 const RawScheduleMetaSchema = z.object({
   year: z.number().int(),
   month: z.number().int(),
@@ -146,7 +148,7 @@ export const ScheduleApiResponseSchema = z.object({
   meta: RawScheduleMetaSchema,
   roster: z.array(
     z.object({
-      id: z.number(),
+      id: z.union([z.number(), z.string()]),
       name: z.string(),
       s_number: SNumberSchema,
       scheduleable: z.boolean(),
@@ -179,14 +181,14 @@ export const ScheduleApiResponseSchema = z.object({
   statistics: z.array(
     z.object({
       Metric: z.string(),
-      Value: z.number()
+      Value: z.union([z.number(), z.string()])
     })
   ),
   balanceAnalysis: z.array(
     z.object({
       Category: z.string(),
       Metric: z.string(),
-      Value: z.number()
+      Value: z.union([z.number(), z.string()])
     })
   )
 });
@@ -198,10 +200,10 @@ export const MeetingAttendanceApiResponseSchema = z.object({
     timezone: z.string(),
     generated_at: z.string(),
     filters: z.object({
-      date: DateStringSchema.optional(),
-      from: DateStringSchema.optional(),
-      to: DateStringSchema.optional(),
-      exclude: z.string().optional()
+      date: OptionalDateOrEmptySchema,
+      from: OptionalDateOrEmptySchema,
+      to: OptionalDateOrEmptySchema,
+      exclude: z.union([z.string(), z.array(z.string())]).optional()
     })
   }),
   analytics: z.object({

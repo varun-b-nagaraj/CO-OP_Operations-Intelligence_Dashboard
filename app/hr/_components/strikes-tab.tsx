@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { addStrike, removeStrike } from '@/app/actions/strikes';
 import { usePermission } from '@/lib/permissions';
 
-import { useBrowserSupabase } from './utils';
+import { getStudentDisplayName, getStudentId, getStudentSNumber, StudentRow, useBrowserSupabase } from './utils';
 
 const StrikeFormSchema = z.object({
   employee_id: z.string().trim().regex(/^\d+$/),
@@ -16,8 +16,6 @@ const StrikeFormSchema = z.object({
 });
 
 type StrikeFormValues = z.infer<typeof StrikeFormSchema>;
-
-type StudentRow = { id: string; name?: string; full_name?: string; s_number?: string };
 
 export function StrikesTab() {
   const canManage = usePermission('hr.strikes.manage');
@@ -27,7 +25,7 @@ export function StrikesTab() {
   const studentsQuery = useQuery({
     queryKey: ['hr-strikes-students'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('students').select('id,name,full_name,s_number');
+      const { data, error } = await supabase.from('students').select('*');
       if (error) throw new Error(error.message);
       return (data ?? []) as StudentRow[];
     }
@@ -89,8 +87,8 @@ export function StrikesTab() {
           <select className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2" {...form.register('employee_id')}>
             <option value="">Select employee</option>
             {(studentsQuery.data ?? []).map((student) => (
-              <option key={student.id} value={student.id}>
-                {(student.name ?? student.full_name ?? 'Unknown') + ` (${student.s_number ?? 'N/A'})`}
+              <option key={getStudentId(student)} value={getStudentId(student)}>
+                {`${getStudentDisplayName(student)} (${getStudentSNumber(student) || 'N/A'})`}
               </option>
             ))}
           </select>
@@ -118,10 +116,12 @@ export function StrikesTab() {
           </thead>
           <tbody>
             {(strikesQuery.data ?? []).map((strike) => {
-              const employee = (studentsQuery.data ?? []).find((student) => student.id === strike.employee_id);
+              const employee = (studentsQuery.data ?? []).find(
+                (student) => getStudentId(student) === String(strike.employee_id)
+              );
               return (
                 <tr className="border-b border-neutral-200" key={strike.id}>
-                  <td className="p-2">{employee?.name ?? employee?.full_name ?? strike.employee_id}</td>
+                  <td className="p-2">{employee ? getStudentDisplayName(employee) : strike.employee_id}</td>
                   <td className="p-2">{strike.reason}</td>
                   <td className="p-2">{new Date(strike.issued_at).toLocaleDateString()}</td>
                   <td className="p-2">{strike.issued_by ?? 'open_access'}</td>

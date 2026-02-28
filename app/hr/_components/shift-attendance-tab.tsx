@@ -7,7 +7,14 @@ import { excuseShiftAbsence, markShiftAbsent, markShiftPresent } from '@/app/act
 import { calculateShiftAttendanceRate } from '@/lib/server/attendance';
 import { usePermission } from '@/lib/permissions';
 
-import { currentMonthRange, formatRate, useBrowserSupabase } from './utils';
+import {
+  currentMonthRange,
+  formatRate,
+  getStudentDisplayName,
+  getStudentSNumber,
+  StudentRow,
+  useBrowserSupabase
+} from './utils';
 
 export function ShiftAttendanceTab() {
   const canView = usePermission('hr.attendance.view');
@@ -42,9 +49,9 @@ export function ShiftAttendanceTab() {
   const studentsQuery = useQuery({
     queryKey: ['hr-shift-attendance-students'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('students').select('name,full_name,s_number');
+      const { data, error } = await supabase.from('students').select('*');
       if (error) throw new Error(error.message);
-      return data ?? [];
+      return (data ?? []) as StudentRow[];
     }
   });
 
@@ -111,10 +118,10 @@ export function ShiftAttendanceTab() {
           status: row.status as 'expected' | 'present' | 'absent' | 'excused'
         }))
       });
-      const student = (studentsQuery.data ?? []).find((item) => item.s_number === sNumber);
+      const student = (studentsQuery.data ?? []).find((item) => getStudentSNumber(item) === sNumber);
       return {
         sNumber,
-        name: student?.name ?? student?.full_name ?? sNumber,
+        name: student ? getStudentDisplayName(student) : sNumber,
         expected: rates.expected_shifts,
         present: rows.filter((row) => row.status === 'present').length,
         absent: rows.filter((row) => row.status === 'absent').length,
