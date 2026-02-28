@@ -7,8 +7,10 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 import { buildExpectedShifts } from '@/app/actions/expected-shifts';
+import { approveShiftExchange, submitShiftExchange } from '@/app/actions/shift-requests';
 import { excuseShiftAbsence, markShiftAbsent, markShiftPresent } from '@/app/actions/shift-attendance';
 import { fetchSchedule } from '@/lib/api-client';
+import { usePermission } from '@/lib/permissions';
 import { ScheduleAssignment, ShiftAttendanceStatus } from '@/lib/types';
 
 import { getTodayDateKey, isDateTodayOrPast, useBrowserSupabase } from './utils';
@@ -190,6 +192,7 @@ function buildSummaryFromAssignments(
 }
 
 export function ScheduleTab() {
+  const canApproveRequests = usePermission('hr.schedule.edit');
   const defaultValues = useMemo(() => getDefaultValues(), []);
   const [params, setParams] = useState(defaultValues);
   const [message, setMessage] = useState<string | null>(null);
@@ -197,6 +200,8 @@ export function ScheduleTab() {
   const [editableAssignments, setEditableAssignments] = useState<EditableAssignment[]>([]);
   const [editableRoster, setEditableRoster] = useState<EditableRosterRow[]>([]);
   const [isSwapModeEnabled, setIsSwapModeEnabled] = useState(false);
+  const [isGenerateConfirmOpen, setIsGenerateConfirmOpen] = useState(false);
+  const [actingEmployeeSNumber, setActingEmployeeSNumber] = useState('');
   const [dragSourceUid, setDragSourceUid] = useState<string | null>(null);
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
   const [attendanceModalUid, setAttendanceModalUid] = useState<string | null>(null);
@@ -361,6 +366,43 @@ export function ScheduleTab() {
     }
   });
 
+  const volunteerForShiftMutation = useMutation({
+    mutationFn: async (payload: { assignment: EditableAssignment; volunteerSNumber: string }) => {
+      const reason = 'Self-volunteered for shift';
+      const submitResult = await submitShiftExchange(
+        payload.assignment.date,
+        payload.assignment.period,
+        payload.assignment.shiftSlotKey,
+        payload.assignment.effectiveWorkerSNumber,
+        payload.volunteerSNumber,
+        reason
+      );
+      if (!submitResult.ok) throw new Error(`${submitResult.error.message} (${submitResult.correlationId})`);
+
+      if (canApproveRequests) {
+        const approveResult = await approveShiftExchange(submitResult.data.id);
+        if (!approveResult.ok) throw new Error(`${approveResult.error.message} (${approveResult.correlationId})`);
+      }
+
+      return submitResult.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hr-schedule'] });
+      queryClient.invalidateQueries({
+        queryKey: ['hr-schedule-shift-attendance', selectedMonthRange.from, selectedMonthRange.to]
+      });
+      queryClient.invalidateQueries({ queryKey: ['hr-shift-requests'] });
+      setMessage(
+        canApproveRequests
+          ? 'Volunteer assignment confirmed.'
+          : 'Volunteer request submitted for approval.'
+      );
+    },
+    onError: (error) => {
+      setMessage(error instanceof Error ? error.message : 'Unable to volunteer for this shift.');
+    }
+  });
+
   const settingsMap = useMemo(() => {
     const map = new Map<string, number[]>();
     for (const row of settingsQuery.data ?? []) {
@@ -457,6 +499,27 @@ export function ScheduleTab() {
     }
     return map;
   }, [editableRoster]);
+  const actingEmployeeOptions = useMemo(
+    () =>
+      editableRoster
+        .filter((employee) => employee.scheduleable && employee.s_number)
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((employee) => ({
+          value: employee.s_number,
+          label: `${employee.name} (${employee.s_number})`
+        })),
+    [editableRoster]
+  );
+  useEffect(() => {
+    if (actingEmployeeOptions.length === 0) {
+      if (actingEmployeeSNumber) setActingEmployeeSNumber('');
+      return;
+    }
+    const allowedValues = new Set(actingEmployeeOptions.map((item) => item.value));
+    if (!actingEmployeeSNumber || !allowedValues.has(actingEmployeeSNumber)) {
+      setActingEmployeeSNumber(actingEmployeeOptions[0].value);
+    }
+  }, [actingEmployeeOptions, actingEmployeeSNumber]);
 
   const canEmployeeWorkPeriod = (employeeSNumber: string, period: number): boolean => {
     const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
@@ -509,6 +572,7 @@ export function ScheduleTab() {
     setParams(values);
     setMessage(null);
   };
+  const targetYearMonthLabel = `${form.watch('year')}-${String(form.watch('month')).padStart(2, '0')}`;
 
   const handleSwapWorkers = (sourceUid: string, targetUid: string) => {
     if (!sourceUid || !targetUid || sourceUid === targetUid) return;
@@ -587,6 +651,24 @@ export function ScheduleTab() {
                 >
                   {isSwapModeEnabled ? 'Drag employees to switch' : 'Enable Drag Mode'}
                 </button>
+                <label className="text-sm">
+                  Volunteer As
+                  <select
+                    className="ml-2 min-h-[44px] border border-neutral-500 px-2"
+                    disabled={actingEmployeeOptions.length === 0}
+                    onChange={(event) => setActingEmployeeSNumber(event.target.value)}
+                    value={actingEmployeeSNumber}
+                  >
+                    {actingEmployeeOptions.length === 0 && (
+                      <option value="">No schedulable employees</option>
+                    )}
+                    {actingEmployeeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   className="min-h-[44px] border border-neutral-500 px-3 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={activeWeekIndex <= 0}
@@ -690,6 +772,18 @@ export function ScheduleTab() {
                                   const attendanceStatus = normalizeAttendanceStatus(
                                     attendanceByAssignmentKey.get(attendanceKey)?.status
                                   );
+                                  const actingEmployeeCanVolunteer = Boolean(
+                                    actingEmployeeSNumber &&
+                                      actingEmployeeSNumber !== assignment.effectiveWorkerSNumber &&
+                                      attendanceStatus === 'expected' &&
+                                      (assignment.period === 0 ||
+                                        (settingsMap.get(actingEmployeeSNumber) ?? [4, 8]).includes(assignment.period))
+                                  );
+                                  const actingEmployeeOwnsThisShift = Boolean(
+                                    actingEmployeeSNumber &&
+                                      actingEmployeeSNumber === assignment.effectiveWorkerSNumber &&
+                                      attendanceStatus === 'expected'
+                                  );
                                   const isDragTarget = dragTargetUid === assignment.uid;
                                   const isValidDropTarget = dragSourceUid
                                     ? canSwapAssignments(dragSourceUid, assignment.uid)
@@ -777,6 +871,38 @@ export function ScheduleTab() {
                                         <p className="mt-1 text-[10px] text-neutral-500">
                                           Drag to another employee to swap.
                                         </p>
+                                      )}
+                                      {actingEmployeeCanVolunteer && (
+                                        <button
+                                          className="mt-1 min-h-[30px] border border-neutral-500 px-2 text-[10px] disabled:opacity-40"
+                                          disabled={volunteerForShiftMutation.isPending}
+                                          onClick={(event) => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            volunteerForShiftMutation.mutate({
+                                              assignment,
+                                              volunteerSNumber: actingEmployeeSNumber
+                                            });
+                                          }}
+                                          type="button"
+                                        >
+                                          Assign/Volunteer for this shift
+                                        </button>
+                                      )}
+                                      {actingEmployeeOwnsThisShift && (
+                                        <button
+                                          className="mt-1 min-h-[30px] border border-neutral-400 px-2 text-[10px]"
+                                          onClick={(event) => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            setMessage(
+                                              'To remove yourself from this shift, submit a shift change request from the Requests tab.'
+                                            );
+                                          }}
+                                          type="button"
+                                        >
+                                          Request to unassign
+                                        </button>
                                       )}
                                     </div>
                                   );
@@ -961,15 +1087,14 @@ export function ScheduleTab() {
             <button
               className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={manualRefresh.isPending}
-              onClick={() => {
-                const values = form.getValues();
-                setParams(values);
-                manualRefresh.mutate(values);
-              }}
+              onClick={() => setIsGenerateConfirmOpen(true)}
               type="button"
             >
               Generate New Table
             </button>
+            <p className="text-xs text-neutral-600">
+              Future month generation is supported. Set year/month above (for example, `{targetYearMonthLabel}`) and generate.
+            </p>
           </section>
         </div>
       )}
@@ -1064,6 +1189,43 @@ export function ScheduleTab() {
                 Present and excused overrides are only allowed on the shift date or after.
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {isGenerateConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+          <div className="w-full max-w-lg border border-neutral-400 bg-white p-4">
+            <h3 className="text-base font-semibold text-neutral-900">Confirm Table Generation</h3>
+            <p className="mt-2 text-sm text-neutral-700">
+              Are you sure? Generating a new table can overwrite expected shift data for the selected month and replace
+              what is currently staged.
+            </p>
+            <p className="mt-2 text-sm text-neutral-700">
+              Target month: <span className="font-medium">{targetYearMonthLabel}</span>
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                onClick={() => setIsGenerateConfirmOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
+                disabled={manualRefresh.isPending}
+                onClick={() => {
+                  const values = form.getValues();
+                  setParams(values);
+                  manualRefresh.mutate(values);
+                  setIsGenerateConfirmOpen(false);
+                }}
+                type="button"
+              >
+                I Understand, Generate
+              </button>
+            </div>
           </div>
         </div>
       )}
