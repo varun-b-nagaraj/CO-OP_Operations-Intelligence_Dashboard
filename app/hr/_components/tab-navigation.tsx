@@ -4,8 +4,6 @@ export interface HRTabItem {
   id:
     | 'schedule'
     | 'employees'
-    | 'settings'
-    | 'strikes'
     | 'meeting-attendance'
     | 'shift-attendance'
     | 'requests'

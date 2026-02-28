@@ -11,8 +11,6 @@ import { HRTabItem, TabNavigation } from './tab-navigation';
 
 const ScheduleTab = dynamic(() => import('./schedule-tab').then((module) => module.ScheduleTab));
 const EmployeesTab = dynamic(() => import('./employees-tab').then((module) => module.EmployeesTab));
-const SettingsTab = dynamic(() => import('./settings-tab').then((module) => module.SettingsTab));
-const StrikesTab = dynamic(() => import('./strikes-tab').then((module) => module.StrikesTab));
 const MeetingAttendanceTab = dynamic(() =>
   import('./meeting-attendance-tab').then((module) => module.MeetingAttendanceTab)
 );
@@ -24,9 +22,7 @@ const AuditTab = dynamic(() => import('./audit-tab').then((module) => module.Aud
 
 const tabs: Array<HRTabItem & { permission: PermissionFlag }> = [
   { id: 'schedule', label: 'Schedule', permission: 'hr.schedule.view' },
-  { id: 'employees', label: 'Employees', permission: 'hr.attendance.view' },
-  { id: 'settings', label: 'Settings', permission: 'hr.settings.edit' },
-  { id: 'strikes', label: 'Strikes', permission: 'hr.strikes.manage' },
+  { id: 'employees', label: 'Employee Management', permission: 'hr.attendance.view' },
   { id: 'meeting-attendance', label: 'Meeting Attendance', permission: 'hr.attendance.view' },
   { id: 'shift-attendance', label: 'Shift Attendance', permission: 'hr.attendance.view' },
   { id: 'requests', label: 'Requests', permission: 'hr.requests.view' },
@@ -44,7 +40,11 @@ export function HRModule() {
 
   const visibleTabs = tabs.filter((tab) => hasPermission(tab.permission));
 
-  const requestedTab = searchParams.get('tab');
+  const requestedTabRaw = searchParams.get('tab');
+  const requestedTab =
+    requestedTabRaw === 'settings' || requestedTabRaw === 'strikes'
+      ? 'employees'
+      : requestedTabRaw;
   const activeTab = isTab(requestedTab) ? requestedTab : 'schedule';
   const resolvedTab = visibleTabs.some((tab) => tab.id === activeTab) ? activeTab : visibleTabs[0]?.id;
 
@@ -75,8 +75,6 @@ export function HRModule() {
         >
           {resolvedTab === 'schedule' && <ScheduleTab />}
           {resolvedTab === 'employees' && <EmployeesTab />}
-          {resolvedTab === 'settings' && <SettingsTab />}
-          {resolvedTab === 'strikes' && <StrikesTab />}
           {resolvedTab === 'meeting-attendance' && <MeetingAttendanceTab />}
           {resolvedTab === 'shift-attendance' && <ShiftAttendanceTab />}
           {resolvedTab === 'requests' && <RequestsTab />}
