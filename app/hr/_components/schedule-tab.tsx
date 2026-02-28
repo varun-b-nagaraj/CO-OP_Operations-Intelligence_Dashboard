@@ -131,6 +131,13 @@ function toValidNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function attendanceStatusClasses(status: ShiftAttendanceStatus): string {
+  if (status === 'absent') return 'border-red-400 bg-red-100 text-red-700';
+  if (status === 'excused') return 'border-blue-400 bg-blue-100 text-blue-700';
+  if (status === 'present') return 'border-green-400 bg-green-100 text-green-700';
+  return 'border-neutral-500 bg-white text-neutral-700';
+}
+
 function buildSummaryFromAssignments(
   assignments: EditableAssignment[],
   rosterNameBySNumber: Map<string, string>
@@ -189,6 +196,7 @@ export function ScheduleTab() {
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [editableAssignments, setEditableAssignments] = useState<EditableAssignment[]>([]);
   const [editableRoster, setEditableRoster] = useState<EditableRosterRow[]>([]);
+  const [isSwapModeEnabled, setIsSwapModeEnabled] = useState(false);
   const [dragSourceUid, setDragSourceUid] = useState<string | null>(null);
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
   const [attendanceModalUid, setAttendanceModalUid] = useState<string | null>(null);
@@ -560,6 +568,26 @@ export function ScheduleTab() {
               <h3 className="text-sm font-semibold">Schedule — {monthTitle}</h3>
               <div className="flex items-center gap-2">
                 <button
+                  className={`min-h-[44px] border px-3 text-sm ${
+                    isSwapModeEnabled
+                      ? 'border-brand-maroon bg-brand-maroon text-white'
+                      : 'border-neutral-500 bg-white text-neutral-900'
+                  }`}
+                  onClick={() => {
+                    setIsSwapModeEnabled((previous) => {
+                      const next = !previous;
+                      if (!next) {
+                        setDragSourceUid(null);
+                        setDragTargetUid(null);
+                      }
+                      return next;
+                    });
+                  }}
+                  type="button"
+                >
+                  {isSwapModeEnabled ? 'Drag employees to switch' : 'Enable Drag Mode'}
+                </button>
+                <button
                   className="min-h-[44px] border border-neutral-500 px-3 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={activeWeekIndex <= 0}
                   onClick={() => setActiveWeekIndex((previous) => Math.max(0, previous - 1))}
@@ -669,20 +697,22 @@ export function ScheduleTab() {
 
                                   return (
                                     <div
-                                      className={`cursor-grab border p-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
+                                      className={`${isSwapModeEnabled ? 'cursor-grab' : 'cursor-pointer'} border p-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
                                         isDragTarget ? 'ring-2 ring-brand-maroon' : ''
                                       } ${dragSourceUid && !isValidDropTarget ? 'opacity-60' : ''}`}
-                                      draggable
+                                      draggable={isSwapModeEnabled}
                                       key={assignment.uid}
                                       onClick={() => {
                                         setAttendanceModalUid(assignment.uid);
                                         setAttendanceReason('');
                                       }}
                                       onDragEnd={() => {
+                                        if (!isSwapModeEnabled) return;
                                         setDragSourceUid(null);
                                         setDragTargetUid(null);
                                       }}
                                       onDragOver={(event: DragEvent<HTMLDivElement>) => {
+                                        if (!isSwapModeEnabled) return;
                                         event.preventDefault();
                                         if (dragSourceUid && dragSourceUid !== assignment.uid) {
                                           setDragTargetUid(
@@ -691,11 +721,13 @@ export function ScheduleTab() {
                                         }
                                       }}
                                       onDragStart={(event: DragEvent<HTMLDivElement>) => {
+                                        if (!isSwapModeEnabled) return;
                                         setDragSourceUid(assignment.uid);
                                         event.dataTransfer.effectAllowed = 'move';
                                         event.dataTransfer.setData('text/plain', assignment.uid);
                                       }}
                                       onDrop={(event: DragEvent<HTMLDivElement>) => {
+                                        if (!isSwapModeEnabled) return;
                                         event.preventDefault();
                                         const sourceUid = event.dataTransfer.getData('text/plain') || dragSourceUid;
                                         if (sourceUid) {
@@ -735,11 +767,17 @@ export function ScheduleTab() {
                                             Off-period
                                           </span>
                                         )}
-                                        <span className="border border-neutral-500 px-1 text-[10px] uppercase text-neutral-700">
-                                          {attendanceStatus}
+                                        <span
+                                          className={`border px-1 text-[10px] uppercase ${attendanceStatusClasses(attendanceStatus)}`}
+                                        >
+                                          {attendanceStatus === 'excused' ? 'pardoned' : attendanceStatus}
                                         </span>
                                       </div>
-                                      <p className="mt-1 text-[10px] text-neutral-500">Drag to another employee to swap.</p>
+                                      {isSwapModeEnabled && (
+                                        <p className="mt-1 text-[10px] text-neutral-500">
+                                          Drag to another employee to swap.
+                                        </p>
+                                      )}
                                     </div>
                                   );
                                 })}
