@@ -31,7 +31,8 @@ Production-ready HR module implemented as a single-page route at `/hr` with tab 
 1. Ensure existing `public.students` and `public.attendance` remain unchanged.
 2. Apply migration:
    - `supabase/migrations/20260228150000_hr_module.sql`
-3. Verify new HR tables exist with RLS enabled and open-access v1 policies.
+   - `supabase/migrations/20260228180000_employee_login_credentials.sql`
+3. Verify new HR tables exist with RLS enabled (`employee_login_credentials` is server-action only).
 
 ## Security Notes
 

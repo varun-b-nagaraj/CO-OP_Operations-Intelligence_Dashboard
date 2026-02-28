@@ -86,6 +86,12 @@ export const EmployeeSettingsSchema = z.object({
   off_periods: z.array(z.number().int().min(1).max(8)).max(8)
 });
 
+export const EmployeeLoginCredentialsSchema = z.object({
+  employee_id: EmployeeIdSchema,
+  username: z.string().trim().min(3).max(120),
+  password: z.string().min(8).max(256)
+});
+
 export const ShiftAttendanceSchema = z.object({
   shift_date: DateStringSchema,
   shift_period: z.number().int().min(0).max(8),

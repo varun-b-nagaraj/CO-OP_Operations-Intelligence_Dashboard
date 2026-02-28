@@ -127,6 +127,12 @@ export interface EmployeeSettings {
   updated_at: string;
 }
 
+export interface EmployeeLoginProfile {
+  employee_id: string;
+  username: string;
+  password_updated_at: string;
+}
+
 export type ShiftAttendanceStatus = 'expected' | 'present' | 'absent' | 'excused';
 export type ShiftAttendanceSource = 'scheduler' | 'manual' | 'shift_exchange' | 'rebuild';
 

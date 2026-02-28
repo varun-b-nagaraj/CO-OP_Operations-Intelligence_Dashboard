@@ -3,8 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useMemo, useState } from 'react';
 
+import { overrideMeetingAttendance, pardonMeetingAbsence } from '@/app/actions/attendance';
+import {
+  getEmployeeLoginProfiles,
+  updateEmployeeLoginCredentials
+} from '@/app/actions/employee-login';
 import { addStrike, removeStrike } from '@/app/actions/strikes';
 import { updateEmployeeOffPeriods } from '@/app/actions/employee-settings';
+import { excuseShiftAbsence, markShiftPresent } from '@/app/actions/shift-attendance';
 import { fetchMeetingAttendance } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
 import { calculateMeetingAttendanceRate, calculateShiftAttendanceRate } from '@/lib/server/attendance';
@@ -53,8 +59,13 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function shiftRowKey(row: GenericRow): string {
+  return `${String(row.shift_date ?? '')}|${String(row.shift_period ?? '')}|${String(row.shift_slot_key ?? '')}`;
+}
+
 export function EmployeesTab() {
   const canViewAttendance = usePermission('hr.attendance.view');
+  const canOverrideAttendance = usePermission('hr.attendance.override');
   const canEditSettings = usePermission('hr.settings.edit');
   const canManageStrikes = usePermission('hr.strikes.manage');
   const supabase = useBrowserSupabase();
@@ -63,6 +74,12 @@ export function EmployeesTab() {
   const [expandedEmployeeId, setExpandedEmployeeId] = useState<string | null>(null);
   const [offPeriodDrafts, setOffPeriodDrafts] = useState<Record<string, number[]>>({});
   const [strikeReasonDrafts, setStrikeReasonDrafts] = useState<Record<string, string>>({});
+  const [meetingReasonDrafts, setMeetingReasonDrafts] = useState<Record<string, string>>({});
+  const [meetingDateDrafts, setMeetingDateDrafts] = useState<Record<string, string>>({});
+  const [shiftReasonDrafts, setShiftReasonDrafts] = useState<Record<string, string>>({});
+  const [selectedShiftDrafts, setSelectedShiftDrafts] = useState<Record<string, string>>({});
+  const [loginUsernameDrafts, setLoginUsernameDrafts] = useState<Record<string, string>>({});
+  const [loginPasswordDrafts, setLoginPasswordDrafts] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const studentsQuery = useQuery({
@@ -139,6 +156,16 @@ export function EmployeesTab() {
     }
   });
 
+  const loginProfilesQuery = useQuery({
+    queryKey: ['hr-login-profiles'],
+    enabled: canEditSettings,
+    queryFn: async () => {
+      const result = await getEmployeeLoginProfiles();
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    }
+  });
+
   const saveOffPeriodsMutation = useMutation({
     mutationFn: async (payload: { employeeId: string; offPeriods: number[] }) => {
       const result = await updateEmployeeOffPeriods(payload.employeeId, payload.offPeriods);
@@ -185,6 +212,110 @@ export function EmployeesTab() {
     }
   });
 
+  const saveLoginMutation = useMutation({
+    mutationFn: async (payload: { employeeId: string; username: string; password: string }) => {
+      const result = await updateEmployeeLoginCredentials(
+        payload.employeeId,
+        payload.username,
+        payload.password
+      );
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    },
+    onSuccess: (_, payload) => {
+      queryClient.invalidateQueries({ queryKey: ['hr-login-profiles'] });
+      setLoginPasswordDrafts((previous) => ({ ...previous, [payload.employeeId]: '' }));
+      setStatusMessage(`Updated login credentials for employee ${payload.employeeId}.`);
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to update login credentials.');
+    }
+  });
+
+  const pardonMeetingMutation = useMutation({
+    mutationFn: async (payload: { sNumber: string; date: string; reason: string }) => {
+      const result = await pardonMeetingAbsence(payload.sNumber, payload.date, payload.reason);
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-data-for-employees'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-overrides'] });
+      setStatusMessage('Meeting absence pardoned.');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to pardon meeting absence.');
+    }
+  });
+
+  const markMeetingPresentMutation = useMutation({
+    mutationFn: async (payload: { sNumber: string; date: string; reason: string }) => {
+      const result = await overrideMeetingAttendance(payload.sNumber, payload.date, payload.reason);
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-data-for-employees'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-overrides'] });
+      setStatusMessage('Meeting attendance marked present.');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to mark meeting present.');
+    }
+  });
+
+  const pardonShiftMutation = useMutation({
+    mutationFn: async (payload: {
+      sNumber: string;
+      date: string;
+      period: number;
+      shiftSlotKey: string;
+      reason: string;
+    }) => {
+      const result = await excuseShiftAbsence(
+        payload.sNumber,
+        payload.date,
+        payload.period,
+        payload.shiftSlotKey,
+        payload.reason
+      );
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hr-shift-attendance-for-employees'] });
+      setStatusMessage('Shift attendance pardoned (excused).');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to pardon shift attendance.');
+    }
+  });
+
+  const markShiftPresentMutation = useMutation({
+    mutationFn: async (payload: {
+      sNumber: string;
+      date: string;
+      period: number;
+      shiftSlotKey: string;
+    }) => {
+      const result = await markShiftPresent(
+        payload.sNumber,
+        payload.date,
+        payload.period,
+        payload.shiftSlotKey
+      );
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hr-shift-attendance-for-employees'] });
+      setStatusMessage('Shift marked present.');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to mark shift present.');
+    }
+  });
+
   const derived = useMemo(() => {
     const strikesByEmployee = new Map<string, GenericRow[]>();
     for (const row of strikesQuery.data ?? []) {
@@ -216,6 +347,14 @@ export function EmployeesTab() {
       bucket.push(row);
       shiftBySNumber.set(key, bucket);
     }
+    for (const [key, rows] of shiftBySNumber.entries()) {
+      rows.sort((left, right) => {
+        const byDate = String(right.shift_date ?? '').localeCompare(String(left.shift_date ?? ''));
+        if (byDate !== 0) return byDate;
+        return toNumber(right.shift_period) - toNumber(left.shift_period);
+      });
+      shiftBySNumber.set(key, rows);
+    }
 
     const pointsByEmployee = new Map<string, number>();
     for (const row of pointsQuery.data ?? []) {
@@ -232,6 +371,31 @@ export function EmployeesTab() {
       const bucket = overridesBySNumber.get(key) ?? [];
       bucket.push(row);
       overridesBySNumber.set(key, bucket);
+    }
+
+    const meetingStatusBySNumberDate = new Map<string, Map<string, 'present' | 'absent'>>();
+    for (const record of meetingAttendanceQuery.data?.records ?? []) {
+      const bucket = meetingStatusBySNumberDate.get(record.s_number) ?? new Map();
+      bucket.set(record.date, record.status);
+      meetingStatusBySNumberDate.set(record.s_number, bucket);
+    }
+
+    const recentMeetingDatesBySNumber = new Map<string, string[]>();
+    const globalMeetingDates = [...(meetingAttendanceQuery.data?.dates ?? [])].sort((left, right) =>
+      right.localeCompare(left)
+    );
+    for (const student of studentsQuery.data ?? []) {
+      const sNumber = getStudentSNumber(student);
+      const statusMap = meetingStatusBySNumberDate.get(sNumber);
+      const dates = statusMap
+        ? [...statusMap.keys()].sort((left, right) => right.localeCompare(left))
+        : globalMeetingDates;
+      recentMeetingDatesBySNumber.set(sNumber, dates.slice(0, 20));
+    }
+
+    const loginUsernameByEmployeeId = new Map<string, string>();
+    for (const row of loginProfilesQuery.data ?? []) {
+      loginUsernameByEmployeeId.set(String(row.employee_id), String(row.username));
     }
 
     const metrics: EmployeeMetric[] = (studentsQuery.data ?? []).map((student) => {
@@ -266,7 +430,9 @@ export function EmployeesTab() {
         id,
         name: getStudentDisplayName(student),
         sNumber,
-        username: (student.username as string | undefined) ?? null,
+        username:
+          loginUsernameByEmployeeId.get(id) ??
+          ((student.username as string | undefined) ?? null),
         assignedPeriods:
           ((student.assigned_periods as string | undefined) ?? String(student.Schedule ?? '')).trim(),
         offPeriods,
@@ -292,10 +458,15 @@ export function EmployeesTab() {
 
     return {
       metrics,
-      strikesByEmployee
+      strikesByEmployee,
+      shiftBySNumber,
+      meetingStatusBySNumberDate,
+      recentMeetingDatesBySNumber
     };
   }, [
+    loginProfilesQuery.data,
     meetingAttendanceQuery.data?.records,
+    meetingAttendanceQuery.data?.dates,
     overridesQuery.data,
     pointsQuery.data,
     settingsQuery.data,
@@ -312,6 +483,35 @@ export function EmployeesTab() {
     });
   };
 
+  const initializeEmployeeDrafts = (employee: EmployeeMetric) => {
+    setLoginUsernameDrafts((previous) => {
+      if (previous[employee.id] !== undefined) return previous;
+      return { ...previous, [employee.id]: employee.username ?? '' };
+    });
+    setLoginPasswordDrafts((previous) => {
+      if (previous[employee.id] !== undefined) return previous;
+      return { ...previous, [employee.id]: '' };
+    });
+    setMeetingReasonDrafts((previous) => {
+      if (previous[employee.id] !== undefined) return previous;
+      return { ...previous, [employee.id]: '' };
+    });
+    setMeetingDateDrafts((previous) => {
+      if (previous[employee.id] !== undefined) return previous;
+      const firstDate = derived.recentMeetingDatesBySNumber.get(employee.sNumber)?.[0] ?? '';
+      return { ...previous, [employee.id]: firstDate };
+    });
+    setShiftReasonDrafts((previous) => {
+      if (previous[employee.id] !== undefined) return previous;
+      return { ...previous, [employee.id]: '' };
+    });
+    setSelectedShiftDrafts((previous) => {
+      if (previous[employee.id] !== undefined) return previous;
+      const firstShift = (derived.shiftBySNumber.get(employee.sNumber) ?? [])[0];
+      return { ...previous, [employee.id]: firstShift ? shiftRowKey(firstShift) : '' };
+    });
+  };
+
   const toggleOffPeriodDraft = (employeeId: string, period: number, defaultOffPeriods: number[]) => {
     setOffPeriodDrafts((previous) => {
       const current = previous[employeeId] ?? defaultOffPeriods;
@@ -322,7 +522,7 @@ export function EmployeesTab() {
     });
   };
 
-  if (!canViewAttendance && !canEditSettings && !canManageStrikes) {
+  if (!canViewAttendance && !canOverrideAttendance && !canEditSettings && !canManageStrikes) {
     return <p className="text-sm text-neutral-700">You do not have permission to view employee management.</p>;
   }
 
@@ -369,20 +569,43 @@ export function EmployeesTab() {
               const isExpanded = expandedEmployeeId === employee.id;
               const draftOffPeriods = offPeriodDrafts[employee.id] ?? employee.offPeriods;
               const strikeReason = strikeReasonDrafts[employee.id] ?? '';
+              const meetingReason = meetingReasonDrafts[employee.id] ?? '';
+              const meetingDate = meetingDateDrafts[employee.id] ?? '';
+              const shiftReason = shiftReasonDrafts[employee.id] ?? '';
+              const loginUsername = loginUsernameDrafts[employee.id] ?? employee.username ?? '';
+              const loginPassword = loginPasswordDrafts[employee.id] ?? '';
               const employeeStrikes = derived.strikesByEmployee.get(employee.id) ?? [];
+              const recentMeetingDates = derived.recentMeetingDatesBySNumber.get(employee.sNumber) ?? [];
+              const recentShiftRows = (derived.shiftBySNumber.get(employee.sNumber) ?? []).slice(0, 30);
+              const selectedShiftKey = selectedShiftDrafts[employee.id] ?? '';
+              const selectedShift =
+                recentShiftRows.find((row) => shiftRowKey(row) === selectedShiftKey) ?? null;
+              const selectedMeetingStatus =
+                derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(meetingDate) ?? null;
 
               return (
                 <Fragment key={employee.id}>
-                  <tr className={`border-b border-neutral-200 ${isExpanded ? 'bg-neutral-50' : ''}`}>
+                  <tr
+                    className={`cursor-pointer border-b border-neutral-200 ${isExpanded ? 'bg-neutral-50' : ''}`}
+                    onClick={() => {
+                      initializeEmployeeDrafts(employee);
+                      toggleEmployeeExpansion(employee.id, employee.offPeriods);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        initializeEmployeeDrafts(employee);
+                        toggleEmployeeExpansion(employee.id, employee.offPeriods);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
                     <td className="p-2">
-                      <button
-                        className="flex min-h-[44px] items-center gap-2 text-left focus:outline-none focus:ring-2 focus:ring-brand-maroon"
-                        onClick={() => toggleEmployeeExpansion(employee.id, employee.offPeriods)}
-                        type="button"
-                      >
+                      <div className="flex min-h-[44px] items-center gap-2 text-left">
                         <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
                         <span>{employee.name}</span>
-                      </button>
+                      </div>
                     </td>
                     <td className="p-2">{employee.sNumber || 'N/A'}</td>
                     <td className="p-2">{employee.strikesCount}</td>
@@ -399,7 +622,7 @@ export function EmployeesTab() {
                   {isExpanded && (
                     <tr className="border-b border-neutral-200 bg-neutral-50">
                       <td className="p-3" colSpan={7}>
-                        <div className="grid gap-4 lg:grid-cols-3">
+                        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
                           <div className="space-y-2 border border-neutral-300 bg-white p-3">
                             <h3 className="text-sm font-semibold text-neutral-900">Attendance</h3>
                             <p className="text-sm text-neutral-700">Username: {employee.username ?? 'N/A'}</p>
@@ -420,6 +643,59 @@ export function EmployeesTab() {
                             <p className="text-sm text-neutral-700">
                               Off-period presents: {employee.offPeriodShifts}
                             </p>
+                          </div>
+
+                          <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                            <h3 className="text-sm font-semibold text-neutral-900">Login Credentials</h3>
+                            <label className="block text-sm">
+                              Username
+                              <input
+                                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                onChange={(event) =>
+                                  setLoginUsernameDrafts((previous) => ({
+                                    ...previous,
+                                    [employee.id]: event.target.value
+                                  }))
+                                }
+                                value={loginUsername}
+                              />
+                            </label>
+                            <label className="block text-sm">
+                              Password
+                              <input
+                                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                onChange={(event) =>
+                                  setLoginPasswordDrafts((previous) => ({
+                                    ...previous,
+                                    [employee.id]: event.target.value
+                                  }))
+                                }
+                                type="password"
+                                value={loginPassword}
+                              />
+                            </label>
+                            <button
+                              className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={!canEditSettings || saveLoginMutation.isPending}
+                              onClick={() => {
+                                if (!loginUsername.trim()) {
+                                  setStatusMessage('Username is required.');
+                                  return;
+                                }
+                                if (loginPassword.length < 8) {
+                                  setStatusMessage('Password must be at least 8 characters.');
+                                  return;
+                                }
+                                saveLoginMutation.mutate({
+                                  employeeId: employee.id,
+                                  username: loginUsername.trim(),
+                                  password: loginPassword
+                                });
+                              }}
+                              type="button"
+                            >
+                              Save Login
+                            </button>
                           </div>
 
                           <div className="space-y-3 border border-neutral-300 bg-white p-3">
@@ -460,6 +736,177 @@ export function EmployeesTab() {
                             >
                               Save Off-Periods
                             </button>
+                          </div>
+
+                          <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                            <h3 className="text-sm font-semibold text-neutral-900">Meeting Attendance Override</h3>
+                            <label className="block text-sm">
+                              Session Date
+                              <select
+                                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                onChange={(event) =>
+                                  setMeetingDateDrafts((previous) => ({
+                                    ...previous,
+                                    [employee.id]: event.target.value
+                                  }))
+                                }
+                                value={meetingDate}
+                              >
+                                {recentMeetingDates.length === 0 && <option value="">No recent sessions</option>}
+                                {recentMeetingDates.map((date) => (
+                                  <option key={`${employee.id}-meeting-${date}`} value={date}>
+                                    {date}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <p className="text-xs text-neutral-600">
+                              Current status:{' '}
+                              {selectedMeetingStatus ? selectedMeetingStatus : 'No record for selected session'}
+                            </p>
+                            <label className="block text-sm">
+                              Reason
+                              <textarea
+                                className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                                onChange={(event) =>
+                                  setMeetingReasonDrafts((previous) => ({
+                                    ...previous,
+                                    [employee.id]: event.target.value
+                                  }))
+                                }
+                                value={meetingReason}
+                              />
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={!canOverrideAttendance || !meetingDate || pardonMeetingMutation.isPending}
+                                onClick={() => {
+                                  if (!meetingReason.trim()) {
+                                    setStatusMessage('Meeting pardon reason is required.');
+                                    return;
+                                  }
+                                  pardonMeetingMutation.mutate({
+                                    sNumber: employee.sNumber,
+                                    date: meetingDate,
+                                    reason: meetingReason.trim()
+                                  });
+                                }}
+                                type="button"
+                              >
+                                Pardon Meeting
+                              </button>
+                              <button
+                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={
+                                  !canOverrideAttendance || !meetingDate || markMeetingPresentMutation.isPending
+                                }
+                                onClick={() => {
+                                  if (!meetingReason.trim()) {
+                                    setStatusMessage('Meeting present reason is required.');
+                                    return;
+                                  }
+                                  markMeetingPresentMutation.mutate({
+                                    sNumber: employee.sNumber,
+                                    date: meetingDate,
+                                    reason: meetingReason.trim()
+                                  });
+                                }}
+                                type="button"
+                              >
+                                Mark Meeting Present
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                            <h3 className="text-sm font-semibold text-neutral-900">Shift Attendance Override</h3>
+                            <label className="block text-sm">
+                              Recent Shift
+                              <select
+                                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                onChange={(event) =>
+                                  setSelectedShiftDrafts((previous) => ({
+                                    ...previous,
+                                    [employee.id]: event.target.value
+                                  }))
+                                }
+                                value={selectedShiftKey}
+                              >
+                                {recentShiftRows.length === 0 && <option value="">No recent shifts</option>}
+                                {recentShiftRows.map((row) => (
+                                  <option key={`${employee.id}-${shiftRowKey(row)}`} value={shiftRowKey(row)}>
+                                    {String(row.shift_date)} P{String(row.shift_period)} ({String(row.shift_slot_key)}) —{' '}
+                                    {String(row.status)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <p className="text-xs text-neutral-600">
+                              Selected status: {selectedShift ? String(selectedShift.status) : 'N/A'}
+                            </p>
+                            <label className="block text-sm">
+                              Reason
+                              <textarea
+                                className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                                onChange={(event) =>
+                                  setShiftReasonDrafts((previous) => ({
+                                    ...previous,
+                                    [employee.id]: event.target.value
+                                  }))
+                                }
+                                value={shiftReason}
+                              />
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={
+                                  !canOverrideAttendance || !selectedShift || pardonShiftMutation.isPending
+                                }
+                                onClick={() => {
+                                  if (!selectedShift) {
+                                    setStatusMessage('Select a shift first.');
+                                    return;
+                                  }
+                                  if (!shiftReason.trim()) {
+                                    setStatusMessage('Shift pardon reason is required.');
+                                    return;
+                                  }
+                                  pardonShiftMutation.mutate({
+                                    sNumber: employee.sNumber,
+                                    date: String(selectedShift.shift_date),
+                                    period: toNumber(selectedShift.shift_period),
+                                    shiftSlotKey: String(selectedShift.shift_slot_key),
+                                    reason: shiftReason.trim()
+                                  });
+                                }}
+                                type="button"
+                              >
+                                Pardon Shift
+                              </button>
+                              <button
+                                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={
+                                  !canOverrideAttendance || !selectedShift || markShiftPresentMutation.isPending
+                                }
+                                onClick={() => {
+                                  if (!selectedShift) {
+                                    setStatusMessage('Select a shift first.');
+                                    return;
+                                  }
+                                  markShiftPresentMutation.mutate({
+                                    sNumber: employee.sNumber,
+                                    date: String(selectedShift.shift_date),
+                                    period: toNumber(selectedShift.shift_period),
+                                    shiftSlotKey: String(selectedShift.shift_slot_key)
+                                  });
+                                }}
+                                type="button"
+                              >
+                                Mark Shift Present
+                              </button>
+                            </div>
                           </div>
 
                           <div className="space-y-3 border border-neutral-300 bg-white p-3">
