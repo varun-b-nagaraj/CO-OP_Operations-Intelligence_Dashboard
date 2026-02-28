@@ -1,30 +1,18 @@
 'use client';
 
-import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DragEvent, useEffect, useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { z } from 'zod';
 
-import { buildExpectedShifts } from '@/app/actions/expected-shifts';
 import { approveShiftExchange, submitShiftExchange } from '@/app/actions/shift-requests';
 import { excuseShiftAbsence, markShiftAbsent, markShiftPresent } from '@/app/actions/shift-attendance';
 import { fetchSchedule } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
-import { ScheduleAssignment, ShiftAttendanceStatus } from '@/lib/types';
+import { ScheduleAssignment, ScheduleParams, ShiftAttendanceStatus } from '@/lib/types';
 
 import { getTodayDateKey, isDateTodayOrPast, useBrowserSupabase } from './utils';
 
-const ScheduleFormSchema = z.object({
-  year: z.number().int().min(2000).max(2100),
-  month: z.number().int().min(1).max(12),
-  anchorDate: z.string().min(10),
-  anchorDay: z.enum(['A', 'B']),
-  seed: z.number().int()
-});
-
-type ScheduleFormValues = z.infer<typeof ScheduleFormSchema>;
 type GenericRow = Record<string, unknown>;
+type GenerationSelection = { year: number; month: number };
 
 type CalendarDayCell = {
   dateKey: string;
@@ -67,6 +55,21 @@ const PERIOD_BANDS: Array<{ id: string; label: string; periods: number[] }> = [
   { id: 'p4-8', label: 'Period 4 / 8', periods: [4, 8] }
 ];
 
+const MONTH_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 1, label: 'January' },
+  { value: 2, label: 'February' },
+  { value: 3, label: 'March' },
+  { value: 4, label: 'April' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'June' },
+  { value: 7, label: 'July' },
+  { value: 8, label: 'August' },
+  { value: 9, label: 'September' },
+  { value: 10, label: 'October' },
+  { value: 11, label: 'November' },
+  { value: 12, label: 'December' }
+];
+
 function toDateKey(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
@@ -106,14 +109,29 @@ function buildMonthWeeks(year: number, month: number): CalendarDayCell[][] {
   return weeks;
 }
 
-function getDefaultValues(): ScheduleFormValues {
+function getDefaultGenerationSelection(): GenerationSelection {
   const now = new Date();
   return {
     year: now.getUTCFullYear(),
-    month: now.getUTCMonth() + 1,
-    anchorDate: now.toISOString().slice(0, 10),
+    month: now.getUTCMonth() + 1
+  };
+}
+
+function getFirstMondayOfMonth(year: number, month: number): string {
+  const first = new Date(Date.UTC(year, month - 1, 1));
+  const day = first.getUTCDay();
+  const offsetToMonday = (8 - day) % 7;
+  first.setUTCDate(1 + offsetToMonday);
+  return first.toISOString().slice(0, 10);
+}
+
+function buildScheduleParams(selection: GenerationSelection): ScheduleParams {
+  return {
+    year: selection.year,
+    month: selection.month,
+    anchorDate: getFirstMondayOfMonth(selection.year, selection.month),
     anchorDay: 'A',
-    seed: Number(`${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}`)
+    seed: Number(`${selection.year}${String(selection.month).padStart(2, '0')}`)
   };
 }
 
@@ -193,8 +211,9 @@ function buildSummaryFromAssignments(
 
 export function ScheduleTab() {
   const canApproveRequests = usePermission('hr.schedule.edit');
-  const defaultValues = useMemo(() => getDefaultValues(), []);
-  const [params, setParams] = useState(defaultValues);
+  const defaultGenerationSelection = useMemo(() => getDefaultGenerationSelection(), []);
+  const [generationSelection, setGenerationSelection] = useState<GenerationSelection>(defaultGenerationSelection);
+  const [params, setParams] = useState<ScheduleParams>(() => buildScheduleParams(defaultGenerationSelection));
   const [message, setMessage] = useState<string | null>(null);
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [editableAssignments, setEditableAssignments] = useState<EditableAssignment[]>([]);
@@ -208,11 +227,6 @@ export function ScheduleTab() {
   const [attendanceReason, setAttendanceReason] = useState('');
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
-
-  const form = useForm<ScheduleFormValues>({
-    resolver: zodResolver(ScheduleFormSchema),
-    defaultValues
-  });
 
   const scheduleQuery = useQuery({
     queryKey: ['hr-schedule', params],
@@ -266,7 +280,7 @@ export function ScheduleTab() {
   });
 
   const manualRefresh = useMutation({
-    mutationFn: async (input: ScheduleFormValues) => {
+    mutationFn: async (input: ScheduleParams) => {
       const result = await fetchSchedule({ ...input, forceRefresh: true });
       if (!result.ok) throw new Error(result.error.message);
       return result.data;
@@ -277,25 +291,6 @@ export function ScheduleTab() {
     },
     onError: (error) => {
       setMessage(error instanceof Error ? error.message : 'Unable to generate a new table.');
-    }
-  });
-
-  const buildExpectedMutation = useMutation({
-    mutationFn: async (input: ScheduleFormValues) => {
-      const result = await buildExpectedShifts(input.year, input.month, {
-        forceRebuild: true,
-        anchorDate: input.anchorDate,
-        anchorDay: input.anchorDay,
-        seed: input.seed
-      });
-      if (!result.ok) throw new Error(result.error.message);
-      return result.data;
-    },
-    onSuccess: (data) => {
-      setMessage(`Expected shifts rebuilt. Created ${data.created}, updated ${data.updated}.`);
-    },
-    onError: (error) => {
-      setMessage(error instanceof Error ? error.message : 'Unable to build expected shifts.');
     }
   });
 
@@ -568,11 +563,7 @@ export function ScheduleTab() {
     ? !isDateTodayOrPast(selectedAssignment.date, todayKey)
     : false;
 
-  const onOptionsSubmit = (values: ScheduleFormValues) => {
-    setParams(values);
-    setMessage(null);
-  };
-  const targetYearMonthLabel = `${form.watch('year')}-${String(form.watch('month')).padStart(2, '0')}`;
+  const targetYearMonthLabel = `${generationSelection.year}-${String(generationSelection.month).padStart(2, '0')}`;
 
   const handleSwapWorkers = (sourceUid: string, targetUid: string) => {
     if (!sourceUid || !targetUid || sourceUid === targetUid) return;
@@ -1027,63 +1018,43 @@ export function ScheduleTab() {
           </div>
 
           <section className="space-y-3 border border-neutral-300 bg-neutral-50 p-3">
-            <details className="border border-neutral-300 bg-white">
-              <summary className="cursor-pointer p-3 text-sm font-medium">Extra options</summary>
-              <form className="grid gap-3 border-t border-neutral-300 p-3 md:grid-cols-6" onSubmit={form.handleSubmit(onOptionsSubmit)}>
-                <label className="text-sm">
-                  Year
-                  <input
-                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                    type="number"
-                    {...form.register('year', { valueAsNumber: true })}
-                  />
-                </label>
-                <label className="text-sm">
-                  Month
-                  <input
-                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                    type="number"
-                    {...form.register('month', { valueAsNumber: true })}
-                  />
-                </label>
-                <label className="text-sm">
-                  Anchor Date
-                  <input
-                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                    type="date"
-                    {...form.register('anchorDate')}
-                  />
-                </label>
-                <label className="text-sm">
-                  Anchor Day
-                  <select className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2" {...form.register('anchorDay')}>
-                    <option value="A">A</option>
-                    <option value="B">B</option>
-                  </select>
-                </label>
-                <label className="text-sm">
-                  Seed
-                  <input
-                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                    type="number"
-                    {...form.register('seed', { valueAsNumber: true })}
-                  />
-                </label>
-                <div className="flex flex-wrap items-end gap-2">
-                  <button className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-white" type="submit">
-                    Apply Options
-                  </button>
-                  <button
-                    className="min-h-[44px] border border-neutral-500 px-3 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={buildExpectedMutation.isPending}
-                    onClick={() => buildExpectedMutation.mutate(form.getValues())}
-                    type="button"
-                  >
-                    Rebuild Expected
-                  </button>
-                </div>
-              </form>
-            </details>
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="text-sm">
+                Year
+                <input
+                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  max={2100}
+                  min={2000}
+                  onChange={(event) =>
+                    setGenerationSelection((previous) => ({
+                      ...previous,
+                      year: Number(event.target.value) || previous.year
+                    }))
+                  }
+                  type="number"
+                  value={generationSelection.year}
+                />
+              </label>
+              <label className="text-sm">
+                Month
+                <select
+                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setGenerationSelection((previous) => ({
+                      ...previous,
+                      month: Number(event.target.value)
+                    }))
+                  }
+                  value={generationSelection.month}
+                >
+                  {MONTH_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <button
               className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={manualRefresh.isPending}
@@ -1093,7 +1064,7 @@ export function ScheduleTab() {
               Generate New Table
             </button>
             <p className="text-xs text-neutral-600">
-              Future month generation is supported. Set year/month above (for example, `{targetYearMonthLabel}`) and generate.
+              Seed is auto-generated and anchor date defaults to the first Monday of the selected month.
             </p>
           </section>
         </div>
@@ -1216,9 +1187,9 @@ export function ScheduleTab() {
                 className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                 disabled={manualRefresh.isPending}
                 onClick={() => {
-                  const values = form.getValues();
-                  setParams(values);
-                  manualRefresh.mutate(values);
+                  const nextParams = buildScheduleParams(generationSelection);
+                  setParams(nextParams);
+                  manualRefresh.mutate(nextParams);
                   setIsGenerateConfirmOpen(false);
                 }}
                 type="button"

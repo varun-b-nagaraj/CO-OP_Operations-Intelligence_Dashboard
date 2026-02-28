@@ -1,6 +1,6 @@
-# HR Module (Next.js App Router)
+# Operations Dashboard (Next.js App Router)
 
-Production-ready HR module implemented as a single-page route at `/hr` with tab navigation via `?tab=`.
+Production-ready operations dashboard implemented as a single-page route at `/hr` with primary module navigation (`HR`, `Chick-fil-A`) and tab navigation via query params.
 
 ## Stack
 
@@ -29,9 +29,10 @@ Production-ready HR module implemented as a single-page route at `/hr` with tab 
 ## Supabase Setup
 
 1. Ensure existing `public.students` and `public.attendance` remain unchanged.
-2. Apply migration:
+2. Apply migrations:
    - `supabase/migrations/20260228150000_hr_module.sql`
    - `supabase/migrations/20260228180000_employee_login_credentials.sql`
+   - `supabase/migrations/20260228193000_cfa_module.sql`
 3. Verify new HR tables exist with RLS enabled (`employee_login_credentials` is server-action only).
 
 ## Security Notes
@@ -41,7 +42,9 @@ Production-ready HR module implemented as a single-page route at `/hr` with tab 
   - `/api/schedule-proxy`
   - `/api/meeting-attendance-proxy`
 
-## Delivered HR Tabs
+## Delivered Modules
 
-- `schedule` (default), `employees`, `settings`, `strikes`
-- `meeting-attendance`, `shift-attendance`, `requests`, `audit`
+- `HR`
+  - Tabs: `schedule` (default), `employees`, `meeting-attendance`, `shift-attendance`, `requests`, `audit`
+- `Chick-fil-A`
+  - Tabs: `daily-log` (default), `history`, `ab-analysis`, `forecast`, `menu`
