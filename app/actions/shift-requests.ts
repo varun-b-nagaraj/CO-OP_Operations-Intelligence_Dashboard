@@ -17,6 +17,21 @@ import {
 } from '@/lib/types';
 import { ShiftExchangeRequestSchema, ShiftExchangeReviewSchema, zodFieldErrors } from '@/lib/validation';
 
+function toValidNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value.toLowerCase() === 'true') return true;
+    if (value.toLowerCase() === 'false') return false;
+  }
+  if (typeof value === 'number') return value !== 0;
+  return null;
+}
+
 async function findScheduleAssignment(input: {
   shiftDate: string;
   shiftPeriod: number;
@@ -127,6 +142,54 @@ export async function submitShiftExchange(
         from_employee_s_number: !fromStudent ? 'from employee does not exist' : '',
         to_employee_s_number: !toStudent ? 'to employee does not exist' : ''
       });
+    }
+
+    const { data: toStudentRow, error: toStudentRowError } = await supabase
+      .from('students')
+      .select('*')
+      .eq('s_number', parsed.data.to_employee_s_number)
+      .maybeSingle();
+
+    if (toStudentRowError || !toStudentRow) {
+      return errorResult(correlationId, 'VALIDATION_ERROR', 'Target employee is invalid', {
+        to_employee_s_number: 'to employee does not exist in students table'
+      });
+    }
+
+    const toScheduleable =
+      toBoolean((toStudentRow as Record<string, unknown>).scheduleable) ??
+      toBoolean((toStudentRow as Record<string, unknown>).schedulable) ??
+      false;
+    if (!toScheduleable) {
+      return errorResult(
+        correlationId,
+        'VALIDATION_ERROR',
+        'Target employee is not schedulable and cannot be assigned as a replacement.',
+        { to_employee_s_number: 'employee must be schedulable' }
+      );
+    }
+
+    const toClassPeriod = toValidNumber((toStudentRow as Record<string, unknown>).Schedule);
+    const { data: toSettingsRow } = await supabase
+      .from('employee_settings')
+      .select('off_periods')
+      .eq('employee_s_number', parsed.data.to_employee_s_number)
+      .maybeSingle();
+    const toOffPeriods = Array.isArray(toSettingsRow?.off_periods)
+      ? toSettingsRow.off_periods.filter((value) => Number.isInteger(value) && value >= 1 && value <= 8)
+      : [4, 8];
+
+    const toEligibleForPeriod =
+      parsed.data.shift_period === 0 ||
+      toClassPeriod === parsed.data.shift_period ||
+      toOffPeriods.includes(parsed.data.shift_period);
+    if (!toEligibleForPeriod) {
+      return errorResult(
+        correlationId,
+        'VALIDATION_ERROR',
+        'Target employee is not eligible for this period (must be class period or configured off period).',
+        { to_employee_s_number: 'employee is not eligible for this period' }
+      );
     }
 
     const assignment = await findScheduleAssignment({

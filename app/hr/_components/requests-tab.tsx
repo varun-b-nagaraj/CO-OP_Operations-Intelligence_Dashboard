@@ -45,6 +45,24 @@ type CachedScheduleData = {
 
 const PAGE_SIZE = 50;
 
+function toNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readBooleanField(row: StudentRow, keys: string[], fallback: boolean): boolean {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      if (value.toLowerCase() === 'true') return true;
+      if (value.toLowerCase() === 'false') return false;
+    }
+    if (typeof value === 'number') return value !== 0;
+  }
+  return fallback;
+}
+
 export function RequestsTab() {
   const canView = usePermission('hr.requests.view');
   const canApprove = usePermission('hr.schedule.edit');
@@ -170,6 +188,19 @@ export function RequestsTab() {
     return map;
   }, [employeeSettingsQuery.data]);
 
+  const studentEligibilityBySNumber = useMemo(() => {
+    const map = new Map<string, { scheduleable: boolean; classPeriod: number | null }>();
+    for (const student of studentsQuery.data ?? []) {
+      const sNumber = getStudentSNumber(student);
+      if (!sNumber) continue;
+      map.set(sNumber, {
+        scheduleable: readBooleanField(student, ['scheduleable', 'schedulable'], false),
+        classPeriod: toNumber(student.Schedule ?? student.schedule ?? student.assigned_periods)
+      });
+    }
+    return map;
+  }, [studentsQuery.data]);
+
   const scheduleAssignmentsForSelection = useMemo(() => {
     const allRows = scheduleMonthQuery.data?.schedule ?? [];
     return allRows.filter(
@@ -214,35 +245,21 @@ export function RequestsTab() {
     return options;
   }, [currentWorkers, studentNameBySNumber]);
 
-  const busySNumbers = useMemo(() => {
-    const busy = new Set<string>();
-    if (attendanceRows.length > 0) {
-      for (const row of attendanceRows) {
-        if (row.employee_s_number) busy.add(row.employee_s_number);
-      }
-      return busy;
-    }
-
-    for (const row of scheduleAssignmentsForSelection) {
-      busy.add(row.studentSNumber);
-    }
-    return busy;
-  }, [attendanceRows, scheduleAssignmentsForSelection]);
-
   const eligibleToOptions = useMemo(() => {
     const options: Array<{ value: string; label: string }> = [];
+
+    const canWorkSelectedPeriod = (sNumber: string): boolean => {
+      const eligibility = studentEligibilityBySNumber.get(sNumber);
+      if (!eligibility || !eligibility.scheduleable) return false;
+      if (selectedShiftPeriod === 0) return true;
+      const offPeriods = settingsBySNumber.get(sNumber) ?? [4, 8];
+      return eligibility.classPeriod === selectedShiftPeriod || offPeriods.includes(selectedShiftPeriod);
+    };
 
     for (const student of studentsQuery.data ?? []) {
       const sNumber = getStudentSNumber(student);
       if (!sNumber || sNumber === selectedFromSNumber) continue;
-      if (busySNumbers.has(sNumber)) continue;
-
-      const offPeriods = settingsBySNumber.get(sNumber) ?? [4, 8];
-      const canWorkSelectedPeriod =
-        selectedShiftPeriod === 0 ||
-        (Array.isArray(offPeriods) && offPeriods.includes(selectedShiftPeriod));
-
-      if (!canWorkSelectedPeriod) continue;
+      if (!canWorkSelectedPeriod(sNumber)) continue;
 
       options.push({
         value: sNumber,
@@ -253,10 +270,10 @@ export function RequestsTab() {
     options.sort((left, right) => left.label.localeCompare(right.label));
     return options;
   }, [
-    busySNumbers,
     selectedFromSNumber,
     selectedShiftPeriod,
     settingsBySNumber,
+    studentEligibilityBySNumber,
     studentNameBySNumber,
     studentsQuery.data
   ]);

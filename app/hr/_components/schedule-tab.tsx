@@ -126,6 +126,11 @@ function normalizeAttendanceStatus(value: unknown): ShiftAttendanceStatus {
   return 'expected';
 }
 
+function toValidNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function buildSummaryFromAssignments(
   assignments: EditableAssignment[],
   rosterNameBySNumber: Map<string, string>
@@ -213,6 +218,19 @@ export function ScheduleTab() {
     staleTime: 30 * 1000,
     queryFn: async () => {
       const { data, error } = await supabase.from('employee_settings').select('employee_s_number, off_periods');
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }
+  });
+
+  const studentsRosterQuery = useQuery({
+    queryKey: ['hr-schedule-students-roster'],
+    staleTime: 30 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('students')
+        .select('id, name, s_number, scheduleable, Schedule')
+        .order('name', { ascending: true });
       if (error) throw new Error(error.message);
       return data ?? [];
     }
@@ -315,6 +333,26 @@ export function ScheduleTab() {
     }
   });
 
+  const updateRosterScheduleableMutation = useMutation({
+    mutationFn: async (payload: { id: number | string; scheduleable: boolean; name: string }) => {
+      const { error } = await supabase
+        .from('students')
+        .update({ scheduleable: payload.scheduleable })
+        .eq('id', payload.id);
+      if (error) throw new Error(error.message);
+      return payload;
+    },
+    onSuccess: (payload) => {
+      queryClient.invalidateQueries({ queryKey: ['hr-schedule-students-roster'] });
+      setMessage(
+        `${payload.name} is now ${payload.scheduleable ? 'schedulable (on roster)' : 'not schedulable (off roster)'}.`
+      );
+    },
+    onError: (error) => {
+      setMessage(error instanceof Error ? error.message : 'Unable to update schedulable status.');
+    }
+  });
+
   const settingsMap = useMemo(() => {
     const map = new Map<string, number[]>();
     for (const row of settingsQuery.data ?? []) {
@@ -333,8 +371,16 @@ export function ScheduleTab() {
         uid: `${assignment.date}|${assignment.period}|${assignment.shiftSlotKey}|${assignment.studentSNumber}|${index}`
       }))
     );
+    setActiveWeekIndex(0);
+    setDragSourceUid(null);
+    setDragTargetUid(null);
+    setAttendanceModalUid(null);
+  }, [schedule]);
+
+  useEffect(() => {
+    if (!studentsRosterQuery.data) return;
     setEditableRoster(
-      schedule.roster.map((entry, index) => ({
+      studentsRosterQuery.data.map((entry, index) => ({
         localId: `roster-${entry.s_number}-${index}`,
         id: entry.id,
         name: entry.name,
@@ -343,11 +389,7 @@ export function ScheduleTab() {
         Schedule: typeof entry.Schedule === 'number' ? entry.Schedule : 0
       }))
     );
-    setActiveWeekIndex(0);
-    setDragSourceUid(null);
-    setDragTargetUid(null);
-    setAttendanceModalUid(null);
-  }, [schedule]);
+  }, [studentsRosterQuery.data]);
 
   const monthTitle = useMemo(() => {
     if (!schedule) return '';
@@ -389,6 +431,44 @@ export function ScheduleTab() {
     }
     return map;
   }, [editableAssignments]);
+  const assignmentByUid = useMemo(() => {
+    const map = new Map<string, EditableAssignment>();
+    for (const assignment of editableAssignments) {
+      map.set(assignment.uid, assignment);
+    }
+    return map;
+  }, [editableAssignments]);
+
+  const rosterMetaBySNumber = useMemo(() => {
+    const map = new Map<string, { scheduleable: boolean; classPeriod: number | null }>();
+    for (const employee of editableRoster) {
+      map.set(employee.s_number, {
+        scheduleable: employee.scheduleable,
+        classPeriod: toValidNumber(employee.Schedule)
+      });
+    }
+    return map;
+  }, [editableRoster]);
+
+  const canEmployeeWorkPeriod = (employeeSNumber: string, period: number): boolean => {
+    const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
+    if (!rosterMeta || !rosterMeta.scheduleable) return false;
+    if (period === 0) return true;
+    const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
+    return rosterMeta.classPeriod === period || offPeriods.includes(period);
+  };
+
+  const canSwapAssignments = (sourceUid: string, targetUid: string): boolean => {
+    if (!sourceUid || !targetUid || sourceUid === targetUid) return false;
+    const source = assignmentByUid.get(sourceUid);
+    const target = assignmentByUid.get(targetUid);
+    if (!source || !target) return false;
+
+    const sourceWorkerCanTakeTarget = canEmployeeWorkPeriod(source.effectiveWorkerSNumber, target.period);
+    const targetWorkerCanTakeSource = canEmployeeWorkPeriod(target.effectiveWorkerSNumber, source.period);
+    return sourceWorkerCanTakeTarget && targetWorkerCanTakeSource;
+  };
+
   const summaryRows = useMemo(
     () => buildSummaryFromAssignments(editableAssignments, rosterNameBySNumber),
     [editableAssignments, rosterNameBySNumber]
@@ -430,6 +510,15 @@ export function ScheduleTab() {
       if (sourceIndex < 0 || targetIndex < 0) return previous;
       const source = previous[sourceIndex];
       const target = previous[targetIndex];
+      if (
+        !canEmployeeWorkPeriod(source.effectiveWorkerSNumber, target.period) ||
+        !canEmployeeWorkPeriod(target.effectiveWorkerSNumber, source.period)
+      ) {
+        setMessage(
+          'Swap blocked: employees can only be moved into periods where they are eligible (class period or off period).'
+        );
+        return previous;
+      }
       const next = [...previous];
       next[sourceIndex] = { ...source, effectiveWorkerSNumber: target.effectiveWorkerSNumber };
       next[targetIndex] = { ...target, effectiveWorkerSNumber: source.effectiveWorkerSNumber };
@@ -458,7 +547,7 @@ export function ScheduleTab() {
             </div>
             <div className="border border-neutral-300 p-3">
               <p className="text-xs text-neutral-500">Roster</p>
-              <p className="text-sm font-medium">{schedule.roster.length}</p>
+              <p className="text-sm font-medium">{editableRoster.length}</p>
             </div>
             <div className="border border-neutral-300 p-3">
               <p className="text-xs text-neutral-500">Calendar days</p>
@@ -574,12 +663,15 @@ export function ScheduleTab() {
                                     attendanceByAssignmentKey.get(attendanceKey)?.status
                                   );
                                   const isDragTarget = dragTargetUid === assignment.uid;
+                                  const isValidDropTarget = dragSourceUid
+                                    ? canSwapAssignments(dragSourceUid, assignment.uid)
+                                    : true;
 
                                   return (
                                     <div
                                       className={`cursor-grab border p-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
                                         isDragTarget ? 'ring-2 ring-brand-maroon' : ''
-                                      }`}
+                                      } ${dragSourceUid && !isValidDropTarget ? 'opacity-60' : ''}`}
                                       draggable
                                       key={assignment.uid}
                                       onClick={() => {
@@ -593,7 +685,9 @@ export function ScheduleTab() {
                                       onDragOver={(event: DragEvent<HTMLDivElement>) => {
                                         event.preventDefault();
                                         if (dragSourceUid && dragSourceUid !== assignment.uid) {
-                                          setDragTargetUid(assignment.uid);
+                                          setDragTargetUid(
+                                            canSwapAssignments(dragSourceUid, assignment.uid) ? assignment.uid : null
+                                          );
                                         }
                                       }}
                                       onDragStart={(event: DragEvent<HTMLDivElement>) => {
@@ -605,6 +699,14 @@ export function ScheduleTab() {
                                         event.preventDefault();
                                         const sourceUid = event.dataTransfer.getData('text/plain') || dragSourceUid;
                                         if (sourceUid) {
+                                          if (!canSwapAssignments(sourceUid, assignment.uid)) {
+                                            setMessage(
+                                              'Swap blocked: employees can only be moved into periods where they are eligible (class period or off period).'
+                                            );
+                                            setDragSourceUid(null);
+                                            setDragTargetUid(null);
+                                            return;
+                                          }
                                           handleSwapWorkers(sourceUid, assignment.uid);
                                         }
                                       }}
@@ -678,27 +780,11 @@ export function ScheduleTab() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="overflow-x-auto border border-neutral-300">
-              <div className="flex items-center justify-between gap-2 border-b border-neutral-300 bg-neutral-50 p-2">
-                <h3 className="text-sm font-semibold">Roster (Editable)</h3>
-                <button
-                  className="min-h-[36px] border border-neutral-500 px-2 text-xs"
-                  onClick={() =>
-                    setEditableRoster((previous) => [
-                      ...previous,
-                      {
-                        localId: `roster-new-${Date.now()}`,
-                        id: `new-${Date.now()}`,
-                        name: '',
-                        s_number: '',
-                        scheduleable: true,
-                        Schedule: 0
-                      }
-                    ])
-                  }
-                  type="button"
-                >
-                  Add Employee
-                </button>
+              <div className="border-b border-neutral-300 bg-neutral-50 p-2">
+                <h3 className="text-sm font-semibold">Roster (Students Table)</h3>
+                <p className="text-xs text-neutral-600">
+                  Comprehensive list comes from `public.students`. `Scheduleable` controls roster inclusion.
+                </p>
               </div>
               <table className="min-w-full text-sm">
                 <thead className="bg-neutral-100">
@@ -707,85 +793,39 @@ export function ScheduleTab() {
                     <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
                     <th className="border-b border-neutral-300 p-2 text-left">Scheduleable</th>
                     <th className="border-b border-neutral-300 p-2 text-left">Schedule</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {editableRoster.map((entry) => (
                     <tr className="border-b border-neutral-200" key={entry.localId}>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableRoster((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId ? { ...item, name: event.target.value } : item
-                              )
-                            )
-                          }
-                          value={entry.name}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableRoster((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId ? { ...item, s_number: event.target.value } : item
-                              )
-                            )
-                          }
-                          value={entry.s_number}
-                        />
-                      </td>
+                      <td className="p-2">{entry.name}</td>
+                      <td className="p-2">{entry.s_number}</td>
                       <td className="p-2">
                         <label className="flex items-center gap-2">
                           <input
                             checked={entry.scheduleable}
-                            onChange={(event) =>
+                            disabled={updateRosterScheduleableMutation.isPending}
+                            onChange={(event) => {
+                              const nextValue = event.target.checked;
                               setEditableRoster((previous) =>
                                 previous.map((item) =>
                                   item.localId === entry.localId
-                                    ? { ...item, scheduleable: event.target.checked }
+                                    ? { ...item, scheduleable: nextValue }
                                     : item
                                 )
-                              )
-                            }
+                              );
+                              updateRosterScheduleableMutation.mutate({
+                                id: entry.id,
+                                scheduleable: nextValue,
+                                name: entry.name
+                              });
+                            }}
                             type="checkbox"
                           />
-                          <span>{entry.scheduleable ? 'Yes' : 'No'}</span>
+                          <span>{entry.scheduleable ? 'On roster' : 'Off roster'}</span>
                         </label>
                       </td>
-                      <td className="p-2">
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) =>
-                            setEditableRoster((previous) =>
-                              previous.map((item) =>
-                                item.localId === entry.localId
-                                  ? { ...item, Schedule: Number(event.target.value) || 0 }
-                                  : item
-                              )
-                            )
-                          }
-                          type="number"
-                          value={entry.Schedule}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <button
-                          className="min-h-[36px] border border-neutral-500 px-2 text-xs"
-                          onClick={() =>
-                            setEditableRoster((previous) =>
-                              previous.filter((item) => item.localId !== entry.localId)
-                            )
-                          }
-                          type="button"
-                        >
-                          Remove
-                        </button>
-                      </td>
+                      <td className="p-2">{entry.Schedule}</td>
                     </tr>
                   ))}
                 </tbody>
