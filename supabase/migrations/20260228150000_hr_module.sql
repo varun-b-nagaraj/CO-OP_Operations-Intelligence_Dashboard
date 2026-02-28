@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS public.strikes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  employee_id UUID NOT NULL REFERENCES public.students(id),
+  employee_id BIGINT NOT NULL REFERENCES public.students(id),
   reason TEXT NOT NULL,
   issued_by TEXT,
   issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -43,7 +43,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_shift_change_one_pending_per_assignment
 
 CREATE TABLE IF NOT EXISTS public.points_ledger (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  employee_id UUID NOT NULL REFERENCES public.students(id),
+  employee_id BIGINT NOT NULL REFERENCES public.students(id),
   point_type TEXT NOT NULL CHECK (point_type IN ('meeting', 'morning_shift', 'off_period_shift', 'project', 'manual')),
   points INTEGER NOT NULL,
   description TEXT,
@@ -125,7 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_schedules_lookup
 
 CREATE TABLE IF NOT EXISTS public.employee_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  employee_id UUID NOT NULL REFERENCES public.students(id),
+  employee_id BIGINT NOT NULL REFERENCES public.students(id),
   employee_s_number TEXT NOT NULL,
   off_periods INTEGER[] NOT NULL DEFAULT '{4,8}'::integer[],
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

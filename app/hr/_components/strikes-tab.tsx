@@ -11,7 +11,7 @@ import { usePermission } from '@/lib/permissions';
 import { useBrowserSupabase } from './utils';
 
 const StrikeFormSchema = z.object({
-  employee_id: z.string().uuid(),
+  employee_id: z.string().trim().regex(/^\d+$/),
   reason: z.string().trim().min(1).max(500)
 });
 

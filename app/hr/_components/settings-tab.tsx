@@ -12,7 +12,7 @@ import { usePermission } from '@/lib/permissions';
 import { useBrowserSupabase } from './utils';
 
 const SettingsFormSchema = z.object({
-  employee_id: z.string().uuid(),
+  employee_id: z.string().trim().regex(/^\d+$/),
   off_periods: z.array(z.number().int().min(1).max(8)).min(1)
 });
 

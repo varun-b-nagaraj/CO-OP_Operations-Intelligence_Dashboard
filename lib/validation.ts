@@ -14,11 +14,12 @@ export const DateStringSchema = z
   .refine(isValidDateString, 'Date must be a valid calendar date');
 
 export const SNumberSchema = z.string().trim().min(1).max(50);
+export const EmployeeIdSchema = z.string().trim().regex(/^\d+$/, 'employee_id must be a numeric student id');
 
 export const ShiftSlotKeySchema = z.string().trim().min(1).max(200);
 
 export const StrikeSchema = z.object({
-  employee_id: z.string().uuid(),
+  employee_id: EmployeeIdSchema,
   reason: z.string().trim().min(1).max(500)
 });
 
@@ -73,14 +74,14 @@ export const ShiftExchangeReviewSchema = z.object({
 });
 
 export const PointsEntrySchema = z.object({
-  employee_id: z.string().uuid(),
+  employee_id: EmployeeIdSchema,
   point_type: z.enum(['meeting', 'morning_shift', 'off_period_shift', 'project', 'manual']),
   points: z.number().int(),
   description: z.string().trim().max(500).nullable().optional()
 });
 
 export const EmployeeSettingsSchema = z.object({
-  employee_id: z.string().uuid(),
+  employee_id: EmployeeIdSchema,
   employee_s_number: SNumberSchema,
   off_periods: z.array(z.number().int().min(1).max(8)).max(8)
 });
