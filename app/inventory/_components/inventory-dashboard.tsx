@@ -443,7 +443,7 @@ export function InventoryDashboard() {
           item_name: item?.item_name ?? '(Unmatched item)'
         };
       })
-      .sort((a, b) => b.qty - a.qty);
+      .sort((a, b) => a.item_name.localeCompare(b.item_name));
   }, [catalog, displayedTotals, scanCatalog]);
 
   const uploadRows = useMemo(() => {
@@ -505,7 +505,7 @@ export function InventoryDashboard() {
       for (const item of [...localCandidates, ...backendCandidates]) {
         mergedMap.set(item.row_id, item);
       }
-      const merged = Array.from(mergedMap.values());
+      const merged = Array.from(mergedMap.values()).sort((a, b) => a.item_name.localeCompare(b.item_name));
       setLookupCandidates(merged);
 
       if (merged.length === 1) {
