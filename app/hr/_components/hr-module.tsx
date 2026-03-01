@@ -77,7 +77,7 @@ export function HRModule() {
   };
 
   return (
-    <main className="min-h-screen w-full p-3 md:p-6">
+    <main className="min-h-screen w-full">
       <section className="border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-4">
           <h1 className="text-xl font-semibold text-neutral-900">
@@ -90,18 +90,11 @@ export function HRModule() {
 
         {resolvedModule === 'hr' ? (
           <section id="module-panel-hr">
-            <header className="border-b border-neutral-300 p-4">
-              <h2 className="text-lg font-semibold text-neutral-900">HR Module</h2>
-              <p className="mt-1 text-sm text-neutral-700">
-                Single-page dashboard with separate meeting and shift attendance systems.
-              </p>
-            </header>
-
             <TabNavigation activeTab={resolvedHRTab ?? 'schedule'} onTabChange={onHRTabChange} tabs={visibleTabs} />
 
             <section
               aria-labelledby={`tab-${resolvedHRTab}`}
-              className="p-3 md:p-5"
+              className="p-0"
               id={`panel-${resolvedHRTab}`}
               role="tabpanel"
             >

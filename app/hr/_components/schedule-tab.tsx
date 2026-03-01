@@ -94,6 +94,9 @@ const MONTH_OPTIONS: Array<{ value: number; label: string }> = [
 ];
 
 const COLLAPSED_ROSTER_SUMMARY_ROWS = 12;
+const COLLAPSED_OVERVIEW_MAX_HEIGHT_CLASS = 'max-h-[560px]';
+const MAX_REGULAR_ASSIGNMENTS_PER_SHIFT = 3;
+const MAX_ALTERNATE_ASSIGNMENTS_PER_SHIFT = 1;
 
 function toDateKey(value: Date): string {
   return value.toISOString().slice(0, 10);
@@ -178,6 +181,17 @@ function buildManualShiftSlotKey(date: string, period: number, employeeSNumber: 
 
 function isManualShiftSlotKey(shiftSlotKey: string): boolean {
   return shiftSlotKey.startsWith('manual|');
+}
+
+function parseDraggedAssignmentUid(rawPayload: string): string | null {
+  if (!rawPayload) return null;
+  if (rawPayload.startsWith('assignment:')) {
+    return rawPayload.slice('assignment:'.length);
+  }
+  if (rawPayload.startsWith('roster:')) {
+    return null;
+  }
+  return rawPayload;
 }
 
 function getDefaultGenerationSelection(): GenerationSelection {
@@ -866,6 +880,53 @@ export function ScheduleTab() {
     [isEmployeeOffPeriod, rosterMetaBySNumber]
   );
 
+  const getShiftAssignments = useCallback(
+    (date: string, period: number): EditableAssignment[] => assignmentMap.get(`${date}|${period}`) ?? [],
+    [assignmentMap]
+  );
+
+  const getShiftSlotCapacity = useCallback(
+    (date: string, period: number) => {
+      const assignments = getShiftAssignments(date, period);
+      const alternateCount = assignments.filter((assignment) => isAlternateAssignment(assignment)).length;
+      const regularCount = assignments.length - alternateCount;
+      return {
+        assignments,
+        regularCount,
+        alternateCount,
+        openRegularSlots: Math.max(0, MAX_REGULAR_ASSIGNMENTS_PER_SHIFT - regularCount),
+        openAlternateSlots: Math.max(0, MAX_ALTERNATE_ASSIGNMENTS_PER_SHIFT - alternateCount)
+      };
+    },
+    [getShiftAssignments]
+  );
+
+  const canAssignEmployeeToOpenSlot = useCallback(
+    (employeeSNumber: string, date: string, period: number): boolean => {
+      if (!employeeSNumber) return false;
+      if (isWeekendDateKey(date)) return false;
+      if (!canEmployeeWorkPeriod(employeeSNumber, period)) return false;
+      const { assignments, openRegularSlots } = getShiftSlotCapacity(date, period);
+      if (openRegularSlots <= 0) return false;
+      return !assignments.some((assignment) => assignment.effectiveWorkerSNumber === employeeSNumber);
+    },
+    [canEmployeeWorkPeriod, getShiftSlotCapacity]
+  );
+
+  const getDraggedEmployeeSNumber = useCallback(
+    (rawPayload: string): string | null => {
+      if (!rawPayload) return null;
+      if (rawPayload.startsWith('roster:')) {
+        const employeeSNumber = rawPayload.slice('roster:'.length).trim();
+        return employeeSNumber || null;
+      }
+      const assignmentUid = parseDraggedAssignmentUid(rawPayload);
+      if (!assignmentUid) return null;
+      return assignmentByUid.get(assignmentUid)?.effectiveWorkerSNumber ?? null;
+    },
+    [assignmentByUid]
+  );
+
   const canSwapAssignments = (sourceUid: string, targetUid: string): boolean => {
     if (!sourceUid || !targetUid || sourceUid === targetUid) return false;
     const source = assignmentByUid.get(sourceUid);
@@ -882,23 +943,13 @@ export function ScheduleTab() {
     () => buildSummaryFromAssignments(visibleAssignments, rosterNameBySNumber),
     [rosterNameBySNumber, visibleAssignments]
   );
-  const visibleRosterRows = useMemo(
-    () =>
-      isRosterSummaryExpanded
-        ? editableRoster
-        : editableRoster.slice(0, COLLAPSED_ROSTER_SUMMARY_ROWS),
-    [editableRoster, isRosterSummaryExpanded]
+  const canExpandScheduleOverview = Boolean(
+    schedule &&
+      (editableRoster.length > COLLAPSED_ROSTER_SUMMARY_ROWS ||
+        summaryRows.length > COLLAPSED_ROSTER_SUMMARY_ROWS ||
+        schedule.statistics.length > 4 ||
+        schedule.balanceAnalysis.length > 4)
   );
-  const visibleSummaryRows = useMemo(
-    () =>
-      isRosterSummaryExpanded
-        ? summaryRows
-        : summaryRows.slice(0, COLLAPSED_ROSTER_SUMMARY_ROWS),
-    [isRosterSummaryExpanded, summaryRows]
-  );
-  const canExpandRosterSummary =
-    editableRoster.length > COLLAPSED_ROSTER_SUMMARY_ROWS ||
-    summaryRows.length > COLLAPSED_ROSTER_SUMMARY_ROWS;
 
   const attendanceByAssignmentKey = useMemo(() => {
     const map = new Map<string, GenericRow>();
@@ -943,13 +994,15 @@ export function ScheduleTab() {
       );
     }
     if (emptySlotTarget) {
-      return actingEmployeeOptions.filter((option) => canEmployeeWorkPeriod(option.value, emptySlotTarget.period));
+      return actingEmployeeOptions.filter((option) =>
+        canAssignEmployeeToOpenSlot(option.value, emptySlotTarget.date, emptySlotTarget.period)
+      );
     }
     return [];
   }, [
     actingEmployeeOptions,
+    canAssignEmployeeToOpenSlot,
     canEmployeeTakeAssignment,
-    canEmployeeWorkPeriod,
     emptySlotTarget,
     selectedActionIsWeekend,
     selectedShiftActionAssignment
@@ -1142,6 +1195,10 @@ export function ScheduleTab() {
           setMessage('You can only sign up for weekday morning shifts or your configured off-periods.');
           return;
         }
+        if (!canAssignEmployeeToOpenSlot(actingEmployeeSNumber, emptySlotTarget.date, emptySlotTarget.period)) {
+          setMessage('This shift is full (max 3 regular + 1 alternate) or you are already assigned.');
+          return;
+        }
         manualSlotMutation.mutate({
           mode: 'assign',
           date: emptySlotTarget.date,
@@ -1221,8 +1278,10 @@ export function ScheduleTab() {
     }
 
     if (!emptySlotTarget) return;
-    if (!canEmployeeWorkPeriod(assignmentTargetSNumber, emptySlotTarget.period)) {
-      setMessage('Selected employee is not eligible for this period.');
+    if (!canAssignEmployeeToOpenSlot(assignmentTargetSNumber, emptySlotTarget.date, emptySlotTarget.period)) {
+      setMessage(
+        'Selected employee is not eligible for this period, already assigned, or this shift has reached capacity (3 regular + 1 alternate).'
+      );
       return;
     }
     manualSlotMutation.mutate({
@@ -1264,7 +1323,7 @@ export function ScheduleTab() {
                     }}
                     type="button"
                   >
-                    {isSwapModeEnabled ? 'Drag employees to switch' : 'Enable Drag Mode'}
+                    {isSwapModeEnabled ? 'Drag to switch/assign' : 'Enable Drag Mode'}
                   </button>
                 )}
                 {canChangeAccessMode && (
@@ -1418,27 +1477,19 @@ export function ScheduleTab() {
                             return left.shiftSlotKey.localeCompare(right.shiftSlotKey);
                           });
                         const targetPeriod = resolvePeriodForDay(periodBand.periods, dayType);
+                        const {
+                          openRegularSlots: targetOpenRegularSlots,
+                          openAlternateSlots: targetOpenAlternateSlots
+                        } = getShiftSlotCapacity(day.dateKey, targetPeriod);
+                        const canShowOpenSlotButton = day.inCurrentMonth && !isWeekend && targetOpenRegularSlots > 0;
 
                         return (
                           <td className={`border-b border-neutral-300 p-2 align-top ${baseCellTone}`} key={`${day.dateKey}-${periodBand.id}`}>
                             {!day.inCurrentMonth && <span className="text-[11px] text-neutral-400">—</span>}
-                            {day.inCurrentMonth && assignments.length === 0 && (
-                              isWeekend ? (
-                                <p className="min-h-[44px] border border-dashed border-neutral-300 px-2 py-2 text-left text-[11px] text-neutral-500">
-                                  Weekend unavailable
-                                </p>
-                              ) : (
-                                <button
-                                  className="min-h-[44px] w-full border border-dashed border-neutral-400 px-2 py-2 text-left text-[11px] text-neutral-600 hover:border-brand-maroon hover:text-brand-maroon"
-                                  onClick={() => {
-                                    setEmptySlotTarget({ date: day.dateKey, period: targetPeriod });
-                                    setShiftActionModalUid(null);
-                                  }}
-                                  type="button"
-                                >
-                                  No assignment
-                                </button>
-                              )
+                            {day.inCurrentMonth && assignments.length === 0 && isWeekend && (
+                              <p className="min-h-[44px] border border-dashed border-neutral-300 px-2 py-2 text-left text-[11px] text-neutral-500">
+                                Weekend unavailable
+                              </p>
                             )}
                             {day.inCurrentMonth && assignments.length > 0 && (
                               <div className="space-y-1">
@@ -1495,12 +1546,14 @@ export function ScheduleTab() {
                                         if (!isSwapModeEnabled || isManualAssignment) return;
                                         setDragSourceUid(assignment.uid);
                                         event.dataTransfer.effectAllowed = 'move';
-                                        event.dataTransfer.setData('text/plain', assignment.uid);
+                                        event.dataTransfer.setData('text/plain', `assignment:${assignment.uid}`);
                                       }}
                                       onDrop={(event: DragEvent<HTMLDivElement>) => {
                                         if (!isSwapModeEnabled || isManualAssignment) return;
                                         event.preventDefault();
-                                        const sourceUid = event.dataTransfer.getData('text/plain') || dragSourceUid;
+                                        const sourceUid =
+                                          parseDraggedAssignmentUid(event.dataTransfer.getData('text/plain')) ||
+                                          dragSourceUid;
                                         if (sourceUid) {
                                           if (!canSwapAssignments(sourceUid, assignment.uid)) {
                                             setMessage(
@@ -1551,13 +1604,64 @@ export function ScheduleTab() {
                                       </div>
                                       {isSwapModeEnabled && (
                                         <p className="mt-1 text-[10px] text-neutral-500">
-                                          Drag to another employee to swap.
+                                          Drag to another employee to swap, or to an open spot to assign.
                                         </p>
                                       )}
                                     </div>
                                   );
                                 })}
                               </div>
+                            )}
+                            {canShowOpenSlotButton && (
+                              <button
+                                className="mt-1 min-h-[44px] w-full border border-dashed border-brand-maroon px-2 py-2 text-left text-[11px] text-brand-maroon hover:bg-brand-maroon/5"
+                                onClick={() => {
+                                  setEmptySlotTarget({ date: day.dateKey, period: targetPeriod });
+                                  setShiftActionModalUid(null);
+                                }}
+                                onDragOver={(event: DragEvent<HTMLButtonElement>) => {
+                                  if (!isManagerMode || !isSwapModeEnabled || manualSlotMutation.isPending) return;
+                                  const draggedEmployeeSNumber = getDraggedEmployeeSNumber(
+                                    event.dataTransfer.getData('text/plain')
+                                  );
+                                  if (
+                                    !draggedEmployeeSNumber ||
+                                    !canAssignEmployeeToOpenSlot(draggedEmployeeSNumber, day.dateKey, targetPeriod)
+                                  ) {
+                                    return;
+                                  }
+                                  event.preventDefault();
+                                }}
+                                onDrop={(event: DragEvent<HTMLButtonElement>) => {
+                                  if (!isManagerMode || !isSwapModeEnabled || manualSlotMutation.isPending) return;
+                                  event.preventDefault();
+                                  const draggedEmployeeSNumber = getDraggedEmployeeSNumber(
+                                    event.dataTransfer.getData('text/plain')
+                                  );
+                                  if (!draggedEmployeeSNumber) {
+                                    setMessage('Drop failed: unable to determine the employee.');
+                                    return;
+                                  }
+                                  if (!canAssignEmployeeToOpenSlot(draggedEmployeeSNumber, day.dateKey, targetPeriod)) {
+                                    setMessage(
+                                      'Drop blocked: employee is not eligible, already assigned, or this shift is full.'
+                                    );
+                                    return;
+                                  }
+                                  manualSlotMutation.mutate({
+                                    mode: 'assign',
+                                    date: day.dateKey,
+                                    period: targetPeriod,
+                                    employeeSNumber: draggedEmployeeSNumber
+                                  });
+                                  setDragSourceUid(null);
+                                  setDragTargetUid(null);
+                                }}
+                                type="button"
+                              >
+                                Open spot ({targetOpenRegularSlots} regular left
+                                {targetOpenAlternateSlots > 0 ? `, ${targetOpenAlternateSlots} alternate left` : ''})
+                              </button>
                             )}
                           </td>
                         );
@@ -1569,8 +1673,15 @@ export function ScheduleTab() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="overflow-x-auto border border-neutral-300">
+          <div className="relative">
+            <div
+              className={`grid gap-4 md:grid-cols-2 ${
+                !isRosterSummaryExpanded && canExpandScheduleOverview
+                  ? `${COLLAPSED_OVERVIEW_MAX_HEIGHT_CLASS} overflow-hidden`
+                  : ''
+              }`}
+            >
+              <div className="overflow-x-auto border border-neutral-300">
               <div className="border-b border-neutral-300 bg-neutral-50 p-2">
                 <h3 className="text-sm font-semibold">Roster (Students Table)</h3>
                 <p className="text-xs text-neutral-600">
@@ -1587,8 +1698,22 @@ export function ScheduleTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRosterRows.map((entry) => (
-                    <tr className="border-b border-neutral-200" key={entry.localId}>
+                  {editableRoster.map((entry) => (
+                    <tr
+                      className={`border-b border-neutral-200 ${isManagerMode && isSwapModeEnabled ? 'cursor-grab' : ''}`}
+                      draggable={isManagerMode && isSwapModeEnabled}
+                      key={entry.localId}
+                      onDragEnd={() => {
+                        if (!isManagerMode || !isSwapModeEnabled) return;
+                        setDragSourceUid(null);
+                        setDragTargetUid(null);
+                      }}
+                      onDragStart={(event: DragEvent<HTMLTableRowElement>) => {
+                        if (!isManagerMode || !isSwapModeEnabled) return;
+                        event.dataTransfer.effectAllowed = 'copyMove';
+                        event.dataTransfer.setData('text/plain', `roster:${entry.s_number}`);
+                      }}
+                    >
                       <td className="p-2">{entry.name}</td>
                       <td className="p-2">{entry.s_number}</td>
                       <td className="p-2">
@@ -1621,9 +1746,9 @@ export function ScheduleTab() {
                   ))}
                 </tbody>
               </table>
-            </div>
-            <div className="space-y-4">
-              <div className="overflow-x-auto border border-neutral-300">
+              </div>
+              <div className="space-y-4">
+                <div className="overflow-x-auto border border-neutral-300">
                 <div className="border-b border-neutral-300 bg-neutral-50 p-2">
                   <h3 className="text-sm font-semibold">Summary</h3>
                 </div>
@@ -1639,7 +1764,7 @@ export function ScheduleTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleSummaryRows.map((entry) => (
+                    {summaryRows.map((entry) => (
                       <tr className="border-b border-neutral-200" key={entry.localId}>
                         <td className="p-2">{entry.student}</td>
                         <td className="p-2">{entry.studentSNumber}</td>
@@ -1651,9 +1776,9 @@ export function ScheduleTab() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+                </div>
 
-              <div className="grid gap-3 border border-neutral-300 bg-white p-3 md:grid-cols-2">
+                <div className="grid gap-3 border border-neutral-300 bg-white p-3 md:grid-cols-2">
                 <div className="border border-neutral-300 p-3">
                   <p className="text-xs text-neutral-500">Generated at</p>
                   <p className="text-sm font-medium">{new Date(schedule.meta.generatedAt).toLocaleString()}</p>
@@ -1670,9 +1795,9 @@ export function ScheduleTab() {
                   <p className="text-xs text-neutral-500">Calendar days</p>
                   <p className="text-sm font-medium">{Object.keys(schedule.calendar).length}</p>
                 </div>
-              </div>
+                </div>
 
-              <div className="border border-neutral-300">
+                <div className="border border-neutral-300">
                 <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Statistics</h3>
                 <div className="p-2 text-sm">
                   {schedule.statistics.map((stat) => (
@@ -1681,9 +1806,9 @@ export function ScheduleTab() {
                     </p>
                   ))}
                 </div>
-              </div>
+                </div>
 
-              <div className="border border-neutral-300">
+                <div className="border border-neutral-300">
                 <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Balance Analysis</h3>
                 <div className="p-2 text-sm">
                   {schedule.balanceAnalysis.map((item) => (
@@ -1692,10 +1817,14 @@ export function ScheduleTab() {
                     </p>
                   ))}
                 </div>
+                </div>
               </div>
             </div>
+            {!isRosterSummaryExpanded && canExpandScheduleOverview && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white to-transparent" />
+            )}
           </div>
-          {canExpandRosterSummary && (
+          {canExpandScheduleOverview && (
             <div className="flex justify-end">
               <button
                 className="min-h-[44px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
