@@ -74,8 +74,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
         present: rows.filter((row) => row.status === 'present').length,
         absent: rows.filter((row) => row.status === 'absent').length,
         excused: rows.filter((row) => row.status === 'excused').length,
-        raw: rates.raw_rate,
-        adjusted: rates.adjusted_rate
+        shiftRate: rates.adjusted_rate ?? rates.raw_rate
       };
     });
   }, [attendanceQuery.data, studentsQuery.data]);
@@ -123,8 +122,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
               <th className="border-b border-neutral-300 p-2 text-left">Present</th>
               <th className="border-b border-neutral-300 p-2 text-left">Absent</th>
               <th className="border-b border-neutral-300 p-2 text-left">Excused</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Raw</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Adjusted</th>
+              <th className="border-b border-neutral-300 p-2 text-left">Shift</th>
             </tr>
           </thead>
           <tbody>
@@ -135,8 +133,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
                 <td className="p-2">{employee.present}</td>
                 <td className="p-2">{employee.absent}</td>
                 <td className="p-2">{employee.excused}</td>
-                <td className="p-2">{formatRate(employee.raw)}</td>
-                <td className="p-2">{formatRate(employee.adjusted)}</td>
+                <td className="p-2">{formatRate(employee.shiftRate)}</td>
               </tr>
             ))}
           </tbody>

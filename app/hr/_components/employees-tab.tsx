@@ -51,13 +51,11 @@ interface EmployeeMetric {
   shiftPresent: number;
   shiftAbsent: number;
   shiftExcused: number;
-  shiftRawRate: number | null;
-  shiftAdjustedRate: number | null;
+  shiftRate: number | null;
   meetingSessions: number;
   meetingAttended: number;
   meetingExcused: number;
-  meetingRawRate: number | null;
-  meetingAdjustedRate: number | null;
+  meetingRate: number | null;
   points: number;
 }
 
@@ -851,13 +849,11 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
         shiftPresent,
         shiftAbsent,
         shiftExcused,
-        shiftRawRate: shiftRates.raw_rate,
-        shiftAdjustedRate: shiftRates.adjusted_rate,
+        shiftRate: shiftRates.adjusted_rate ?? shiftRates.raw_rate,
         meetingSessions: meetingRates.total_sessions,
         meetingAttended: meetingRates.attended,
         meetingExcused: meetingRates.excused,
-        meetingRawRate: meetingRates.raw_rate,
-        meetingAdjustedRate: meetingRates.adjusted_rate,
+        meetingRate: meetingRates.adjusted_rate ?? meetingRates.raw_rate,
         points: basePoints + (pointsByEmployee.get(id) ?? 0)
       };
     });
@@ -966,8 +962,8 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
               <th className="border-b border-neutral-300 p-2 text-left">Employee</th>
               <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
               <th className="border-b border-neutral-300 p-2 text-left">Strikes</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Meeting (Raw/Adj)</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Shift (Raw/Adj)</th>
+              <th className="border-b border-neutral-300 p-2 text-left">Meeting</th>
+              <th className="border-b border-neutral-300 p-2 text-left">Shift</th>
               <th className="border-b border-neutral-300 p-2 text-left">Off Periods</th>
               <th className="border-b border-neutral-300 p-2 text-left">Points</th>
             </tr>
@@ -1034,10 +1030,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                     <td className="p-2">{employee.sNumber || 'N/A'}</td>
                     <td className="p-2">{employee.strikesCount}</td>
                     <td className="p-2">
-                      {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
+                      {formatRate(employee.meetingRate)}
                     </td>
                     <td className="p-2">
-                      {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
+                      {formatRate(employee.shiftRate)}
                     </td>
                     <td className="p-2">{employee.offPeriods.join(', ')}</td>
                     <td className="p-2">{employee.points}</td>
@@ -1049,10 +1045,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                         <div className="space-y-2">
                           <div className="grid gap-2 md:grid-cols-4">
                             <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
-                              Meeting Raw/Adj: {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
+                              Meeting: {formatRate(employee.meetingRate)}
                             </div>
                             <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
-                              Shift Raw/Adj: {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
+                              Shift: {formatRate(employee.shiftRate)}
                             </div>
                             <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
                               Shift P/A/E: {employee.shiftPresent}/{employee.shiftAbsent}/{employee.shiftExcused}

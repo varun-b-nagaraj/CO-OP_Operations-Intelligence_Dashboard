@@ -111,8 +111,7 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
                   <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
                   <th className="border-b border-neutral-300 p-2 text-left">Present</th>
                   <th className="border-b border-neutral-300 p-2 text-left">Absent</th>
-                  <th className="border-b border-neutral-300 p-2 text-left">Raw</th>
-                  <th className="border-b border-neutral-300 p-2 text-left">Adjusted</th>
+                  <th className="border-b border-neutral-300 p-2 text-left">Meeting</th>
                   <th className="border-b border-neutral-300 p-2 text-left">Actions</th>
                 </tr>
               </thead>
@@ -123,8 +122,13 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
                     <td className="p-2">{student.s_number}</td>
                     <td className="p-2">{student.present_count}</td>
                     <td className="p-2">{student.absent_count}</td>
-                    <td className="p-2">{formatRate(student.raw_attendance_rate ?? student.attendance_rate)}</td>
-                    <td className="p-2">{formatRate(student.adjusted_attendance_rate)}</td>
+                    <td className="p-2">
+                      {formatRate(
+                        student.adjusted_attendance_rate ??
+                          student.raw_attendance_rate ??
+                          student.attendance_rate
+                      )}
+                    </td>
                     <td className="p-2">
                       {canOverride && (
                         <div className="flex flex-wrap gap-2">
