@@ -177,12 +177,22 @@ function resolvePeriodForDay(periods: number[], dayType: string | undefined): nu
   return periods[0] ?? 0;
 }
 
-function buildManualShiftSlotKey(date: string, period: number, employeeSNumber: string): string {
-  return `manual|${date}|${period}|${employeeSNumber}`;
+function buildManualShiftSlotKey(
+  date: string,
+  period: number,
+  employeeSNumber: string,
+  asAlternate = false
+): string {
+  const prefix = asAlternate ? 'manual_alt' : 'manual';
+  return `${prefix}|${date}|${period}|${employeeSNumber}`;
 }
 
 function isManualShiftSlotKey(shiftSlotKey: string): boolean {
-  return shiftSlotKey.startsWith('manual|');
+  return shiftSlotKey.startsWith('manual|') || shiftSlotKey.startsWith('manual_alt|');
+}
+
+function isManualAlternateShiftSlotKey(shiftSlotKey: string): boolean {
+  return shiftSlotKey.startsWith('manual_alt|');
 }
 
 function parseDraggedAssignmentUid(rawPayload: string): string | null {
@@ -517,6 +527,7 @@ export function ScheduleTab() {
       date: string;
       period: number;
       employeeSNumber: string;
+      asAlternate?: boolean;
       shiftSlotKey?: string;
       previousEmployeeSNumber?: string;
     }) => {
@@ -535,7 +546,12 @@ export function ScheduleTab() {
           if (deleteError) throw new Error(deleteError.message);
         }
 
-        const shiftSlotKey = buildManualShiftSlotKey(payload.date, payload.period, payload.employeeSNumber);
+        const shiftSlotKey = buildManualShiftSlotKey(
+          payload.date,
+          payload.period,
+          payload.employeeSNumber,
+          payload.asAlternate === true
+        );
         const { error } = await supabase.from('shift_attendance').upsert(
           {
             shift_date: payload.date,
@@ -724,6 +740,7 @@ export function ScheduleTab() {
 
       const dedupeKey = [shiftDate, period, shiftSlotKey, employeeSNumber].join('|');
       if (scheduledKeys.has(dedupeKey)) continue;
+      const isManualAlternate = isManualAlternateShiftSlotKey(shiftSlotKey);
 
       nextManualAssignments.push({
         uid: `manual|${dedupeKey}`,
@@ -733,9 +750,9 @@ export function ScheduleTab() {
         shiftSlotKey,
         studentName: rosterNameBySNumber.get(employeeSNumber) ?? employeeSNumber,
         studentSNumber: employeeSNumber,
-        type: 'Manual',
+        type: isManualAlternate ? 'Alternate' : 'Manual',
         group: 'Manual',
-        role: 'employee',
+        role: isManualAlternate ? 'alternate employee' : 'employee',
         effectiveWorkerSNumber: employeeSNumber
       });
     }
@@ -898,16 +915,27 @@ export function ScheduleTab() {
     [getShiftAssignments]
   );
 
+  const resolveOpenSlotMode = useCallback(
+    (date: string, period: number): 'regular' | 'alternate' | null => {
+      const { openRegularSlots, openAlternateSlots } = getShiftSlotCapacity(date, period);
+      if (openRegularSlots > 0) return 'regular';
+      if (openAlternateSlots > 0) return 'alternate';
+      return null;
+    },
+    [getShiftSlotCapacity]
+  );
+
   const canAssignEmployeeToOpenSlot = useCallback(
     (employeeSNumber: string, date: string, period: number): boolean => {
       if (!employeeSNumber) return false;
       if (isWeekendDateKey(date)) return false;
       if (!canEmployeeWorkPeriod(employeeSNumber, period)) return false;
-      const { assignments, openRegularSlots } = getShiftSlotCapacity(date, period);
-      if (openRegularSlots <= 0) return false;
+      const { assignments } = getShiftSlotCapacity(date, period);
+      const openSlotMode = resolveOpenSlotMode(date, period);
+      if (!openSlotMode) return false;
       return !assignments.some((assignment) => assignment.effectiveWorkerSNumber === employeeSNumber);
     },
-    [canEmployeeWorkPeriod, getShiftSlotCapacity]
+    [canEmployeeWorkPeriod, getShiftSlotCapacity, resolveOpenSlotMode]
   );
 
   const getDraggedEmployeeSNumber = useCallback(
@@ -930,6 +958,7 @@ export function ScheduleTab() {
     const target = assignmentByUid.get(targetUid);
     if (!source || !target) return false;
     if (isManualShiftSlotKey(source.shiftSlotKey) || isManualShiftSlotKey(target.shiftSlotKey)) return false;
+    if (source.date === target.date && source.period === target.period) return false;
 
     const sourceWorkerCanTakeTarget = canEmployeeWorkPeriod(source.effectiveWorkerSNumber, target.period);
     const targetWorkerCanTakeSource = canEmployeeWorkPeriod(target.effectiveWorkerSNumber, source.period);
@@ -948,8 +977,8 @@ export function ScheduleTab() {
         schedule.balanceAnalysis.length > 4)
   );
   const changedAssignmentRows = useMemo(
-    () =>
-      editableAssignments
+    () => {
+      const rawChanges = editableAssignments
         .map((assignment) => {
           const fromWorker = savedAssignmentWorkersByUid[assignment.uid];
           if (!fromWorker || fromWorker === assignment.effectiveWorkerSNumber) return null;
@@ -961,7 +990,40 @@ export function ScheduleTab() {
         })
         .filter((value): value is { assignment: EditableAssignment; fromWorker: string; toWorker: string } =>
           Boolean(value)
-        ),
+        );
+
+      if (rawChanges.length === 0) return rawChanges;
+
+      const byShift = new Map<string, typeof rawChanges>();
+      for (const change of rawChanges) {
+        const key = `${change.assignment.date}|${change.assignment.period}`;
+        const bucket = byShift.get(key) ?? [];
+        bucket.push(change);
+        byShift.set(key, bucket);
+      }
+
+      const ignoredUids = new Set<string>();
+      for (const [shiftKey] of byShift) {
+        const [date, periodRaw] = shiftKey.split('|');
+        const period = Number(periodRaw);
+        if (!date || !Number.isFinite(period)) continue;
+        const groupAssignments = editableAssignments.filter(
+          (assignment) => assignment.date === date && assignment.period === period
+        );
+        const currentWorkers = groupAssignments
+          .map((assignment) => assignment.effectiveWorkerSNumber)
+          .sort();
+        const savedWorkers = groupAssignments
+          .map((assignment) => savedAssignmentWorkersByUid[assignment.uid] ?? assignment.effectiveWorkerSNumber)
+          .sort();
+        if (currentWorkers.join('|') !== savedWorkers.join('|')) continue;
+        for (const assignment of groupAssignments) {
+          ignoredUids.add(assignment.uid);
+        }
+      }
+
+      return rawChanges.filter((change) => !ignoredUids.has(change.assignment.uid));
+    },
     [editableAssignments, savedAssignmentWorkersByUid]
   );
   const changedRosterRows = useMemo(
@@ -1336,11 +1398,17 @@ export function ScheduleTab() {
           setMessage('This shift is full (max 3 regular + 1 alternate) or you are already assigned.');
           return;
         }
+        const emptySlotMode = resolveOpenSlotMode(emptySlotTarget.date, emptySlotTarget.period);
+        if (!emptySlotMode) {
+          setMessage('This shift is full (max 3 regular + 1 alternate).');
+          return;
+        }
         manualSlotMutation.mutate({
           mode: 'assign',
           date: emptySlotTarget.date,
           period: emptySlotTarget.period,
-          employeeSNumber: actingEmployeeSNumber
+          employeeSNumber: actingEmployeeSNumber,
+          asAlternate: emptySlotMode === 'alternate'
         });
         return;
       }
@@ -1421,11 +1489,17 @@ export function ScheduleTab() {
       );
       return;
     }
+    const emptySlotMode = resolveOpenSlotMode(emptySlotTarget.date, emptySlotTarget.period);
+    if (!emptySlotMode) {
+      setMessage('This shift is full (max 3 regular + 1 alternate).');
+      return;
+    }
     manualSlotMutation.mutate({
       mode: 'assign',
       date: emptySlotTarget.date,
       period: emptySlotTarget.period,
-      employeeSNumber: assignmentTargetSNumber
+      employeeSNumber: assignmentTargetSNumber,
+      asAlternate: emptySlotMode === 'alternate'
     });
   };
 
@@ -1635,7 +1709,10 @@ export function ScheduleTab() {
                           openRegularSlots: targetOpenRegularSlots,
                           openAlternateSlots: targetOpenAlternateSlots
                         } = getShiftSlotCapacity(day.dateKey, targetPeriod);
-                        const canShowOpenSlotButton = day.inCurrentMonth && !isWeekend && targetOpenRegularSlots > 0;
+                        const canShowOpenSlotButton =
+                          day.inCurrentMonth &&
+                          !isWeekend &&
+                          (targetOpenRegularSlots > 0 || targetOpenAlternateSlots > 0);
 
                         return (
                           <td className={`border-b border-neutral-300 p-2 align-top ${baseCellTone}`} key={`${day.dateKey}-${periodBand.id}`}>
@@ -1712,9 +1789,20 @@ export function ScheduleTab() {
                                           dragSourceUid;
                                         if (sourceUid) {
                                           if (!canSwapAssignments(sourceUid, assignment.uid)) {
-                                            setMessage(
-                                              'Swap blocked: employees can only be moved into periods where they are eligible (class period or off period).'
-                                            );
+                                            const sourceAssignment = assignmentByUid.get(sourceUid);
+                                            if (
+                                              sourceAssignment &&
+                                              sourceAssignment.date === assignment.date &&
+                                              sourceAssignment.period === assignment.period
+                                            ) {
+                                              setMessage(
+                                                'Reordering within the same shift does not count as a swap.'
+                                              );
+                                            } else {
+                                              setMessage(
+                                                'Swap blocked: employees can only be moved into periods where they are eligible (class period or off period).'
+                                              );
+                                            }
                                             setDragSourceUid(null);
                                             setDragTargetUid(null);
                                             return;
@@ -1804,11 +1892,17 @@ export function ScheduleTab() {
                                     );
                                     return;
                                   }
+                                  const openSlotMode = resolveOpenSlotMode(day.dateKey, targetPeriod);
+                                  if (!openSlotMode) {
+                                    setMessage('Drop blocked: this shift is full.');
+                                    return;
+                                  }
                                   manualSlotMutation.mutate({
                                     mode: 'assign',
                                     date: day.dateKey,
                                     period: targetPeriod,
-                                    employeeSNumber: draggedEmployeeSNumber
+                                    employeeSNumber: draggedEmployeeSNumber,
+                                    asAlternate: openSlotMode === 'alternate'
                                   });
                                   setDragSourceUid(null);
                                   setDragTargetUid(null);
