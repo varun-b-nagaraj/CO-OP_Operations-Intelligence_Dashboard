@@ -77,12 +77,17 @@ export function InventoryDashboard() {
   const [syncPreference, setSyncPreference] = useState<'ble' | 'qr'>('ble');
   const [syncStatus, setSyncStatus] = useState('');
   const [outgoingQrPacket, setOutgoingQrPacket] = useState('');
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncAttemptAt, setLastSyncAttemptAt] = useState<string | null>(null);
 
   const [finalizedTotals, setFinalizedTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
   const [mismatches, setMismatches] = useState<
     Array<{ system_id: string; qty: number; previous_qty: number; delta: number }>
   >([]);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [finalizeSelection, setFinalizeSelection] = useState<'none' | 'finalize' | 'lock'>('none');
+  const [isFinalizing, setIsFinalizing] = useState(false);
 
   const [online, setOnline] = useState(true);
 
@@ -307,23 +312,60 @@ export function InventoryDashboard() {
     }
   };
 
-  const syncNow = async () => {
+  const syncNow = async (trigger: 'manual' | 'auto' = 'manual') => {
+    if (isSyncing) return;
     if (!sessionId) {
-      setSyncStatus('No active session selected.');
+      if (trigger === 'manual') {
+        setSyncStatus('No active session selected.');
+      }
       return;
     }
 
-    const pendingEvents = await getPendingEvents(sessionId);
-    if (!pendingEvents.length) {
-      setSyncStatus('No pending local events.');
-      if (online) await loadSessionState(sessionId);
-      return;
-    }
+    setIsSyncing(true);
+    setLastSyncAttemptAt(new Date().toISOString());
+    try {
+      const pendingEvents = await getPendingEvents(sessionId);
+      if (!pendingEvents.length) {
+        setSyncStatus(trigger === 'manual' ? 'No pending local events.' : 'Auto sync: nothing pending.');
+        if (online) await loadSessionState(sessionId);
+        return;
+      }
 
-    const provider = resolveSyncProvider(syncPreference);
+      const provider = resolveSyncProvider(syncPreference);
 
-    if (provider.id === 'qr') {
-      const packet = createQrPacket({
+      if (provider.id === 'qr') {
+        const packet = createQrPacket({
+          context: {
+            session_id: sessionId,
+            actor_id: deviceId,
+            actor_name: actorName,
+            role
+          },
+          events: pendingEvents
+        });
+        setOutgoingQrPacket(packet);
+        setSyncStatus('QR packet generated. Have host scan/import it.');
+        return;
+      }
+
+      if (trigger === 'auto') {
+        const fallbackPacket = createQrPacket({
+          context: {
+            session_id: sessionId,
+            actor_id: deviceId,
+            actor_name: actorName,
+            role
+          },
+          events: pendingEvents
+        });
+        setOutgoingQrPacket(fallbackPacket);
+        setSyncStatus(
+          'Auto sync prepared QR packet. iOS web BLE requires a tap gesture, so use Sync Now for BLE or scan the QR packet.'
+        );
+        return;
+      }
+
+      const bleResult = await provider.syncNow({
         context: {
           session_id: sessionId,
           actor_id: deviceId,
@@ -332,56 +374,73 @@ export function InventoryDashboard() {
         },
         events: pendingEvents
       });
-      setOutgoingQrPacket(packet);
-      setSyncStatus('QR packet generated. Have host scan/import it.');
-      return;
-    }
 
-    const bleResult = await provider.syncNow({
-      context: {
-        session_id: sessionId,
-        actor_id: deviceId,
-        actor_name: actorName,
-        role
-      },
-      events: pendingEvents
-    });
+      if (!bleResult.ok) {
+        const fallbackPacket = createQrPacket({
+          context: {
+            session_id: sessionId,
+            actor_id: deviceId,
+            actor_name: actorName,
+            role
+          },
+          events: pendingEvents
+        });
+        setOutgoingQrPacket(fallbackPacket);
+        setSyncStatus(`BLE failed (${bleResult.message}). QR fallback packet generated.`);
+        return;
+      }
 
-    if (!bleResult.ok) {
-      const fallbackPacket = createQrPacket({
-        context: {
+      const commitPayload = await fetchJson<{
+        ok: true;
+        totals: Array<{ system_id: string; qty: number }>;
+      }>('/api/inventory/session/commit-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           session_id: sessionId,
           actor_id: deviceId,
           actor_name: actorName,
-          role
-        },
-        events: pendingEvents
+          events: pendingEvents
+        })
       });
-      setOutgoingQrPacket(fallbackPacket);
-      setSyncStatus(`BLE failed (${bleResult.message}). QR fallback packet generated.`);
-      return;
+
+      await markEventsSynced(pendingEvents.map((event) => event.event_id));
+      await saveSnapshot(sessionId, commitPayload.totals);
+      setOutgoingQrPacket('');
+      setSyncStatus('Sync complete and local pending events acknowledged.');
+      await loadSessionState(sessionId);
+    } catch (error) {
+      setSyncStatus(error instanceof Error ? error.message : 'Sync failed.');
+    } finally {
+      setIsSyncing(false);
     }
-
-    const commitPayload = await fetchJson<{
-      ok: true;
-      totals: Array<{ system_id: string; qty: number }>;
-    }>('/api/inventory/session/commit-events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessionId,
-        actor_id: deviceId,
-        actor_name: actorName,
-        events: pendingEvents
-      })
-    });
-
-    await markEventsSynced(pendingEvents.map((event) => event.event_id));
-    await saveSnapshot(sessionId, commitPayload.totals);
-    setOutgoingQrPacket('');
-    setSyncStatus('Sync complete and local pending events acknowledged.');
-    await loadSessionState(sessionId);
   };
+
+  useEffect(() => {
+    if (!autoSyncEnabled || !sessionId) return;
+
+    const runAutoSync = () => {
+      void syncNow('auto');
+    };
+
+    const timer = window.setInterval(runAutoSync, 12000);
+    const onFocus = () => runAutoSync();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        runAutoSync();
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSyncEnabled, sessionId, syncPreference, role]);
 
   const importQrPacket = async (packetText: string) => {
     if (!sessionId) {
@@ -443,6 +502,8 @@ export function InventoryDashboard() {
       return;
     }
 
+    setIsFinalizing(true);
+    setFinalizeSelection(lock ? 'lock' : 'finalize');
     try {
       const payload = await fetchJson<{
         ok: true;
@@ -460,6 +521,8 @@ export function InventoryDashboard() {
       await loadSessionState(sessionId);
     } catch (error) {
       setUploadStatus(error instanceof Error ? error.message : 'Finalize failed');
+    } finally {
+      setIsFinalizing(false);
     }
   };
 
@@ -836,16 +899,28 @@ export function InventoryDashboard() {
                     </select>
                   </label>
                   <button
-                    className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white"
-                    onClick={syncNow}
+                    className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white disabled:opacity-60"
+                    disabled={isSyncing}
+                    onClick={() => syncNow('manual')}
                     type="button"
                   >
-                    Sync Now
+                    {isSyncing ? 'Syncing...' : 'Sync Now'}
+                  </button>
+                  <button
+                    className={`border px-3 py-2 text-xs ${autoSyncEnabled ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-neutral-400 text-neutral-700'}`}
+                    onClick={() => setAutoSyncEnabled((value) => !value)}
+                    type="button"
+                  >
+                    Auto Sync {autoSyncEnabled ? 'ON' : 'OFF'}
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-neutral-700">{syncStatus}</p>
+                <p className="mt-1 text-xs text-neutral-600">
+                  Last sync attempt: {lastSyncAttemptAt ? new Date(lastSyncAttemptAt).toLocaleTimeString() : 'Never'}
+                </p>
                 <p className="mt-1 text-xs text-amber-700">
-                  During counting, devices can remain offline. Step outside briefly to sync.
+                  Continuous phone-to-phone Bluetooth keepalive is not supported in mobile web. Auto Sync runs foreground
+                  attempts and prepares QR packets automatically when gesture-based BLE is blocked.
                 </p>
               </div>
             </section>
@@ -973,18 +1048,28 @@ export function InventoryDashboard() {
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
-                    className="border border-neutral-700 px-3 py-2 text-xs"
+                    className={`border px-3 py-2 text-xs ${
+                      finalizeSelection === 'finalize'
+                        ? 'border-red-700 bg-red-700 text-white'
+                        : 'border-neutral-700 text-neutral-800'
+                    } disabled:opacity-60`}
+                    disabled={isFinalizing}
                     onClick={() => finalizeSession(false)}
                     type="button"
                   >
-                    Finalize (No Lock)
+                    {isFinalizing && finalizeSelection === 'finalize' ? 'Finalizing...' : 'Finalize (No Lock)'}
                   </button>
                   <button
-                    className="border border-brand-maroon bg-brand-maroon px-3 py-2 text-xs text-white"
+                    className={`border px-3 py-2 text-xs ${
+                      finalizeSelection === 'lock'
+                        ? 'border-red-800 bg-red-800 text-white'
+                        : 'border-brand-maroon bg-brand-maroon text-white'
+                    } disabled:opacity-60`}
+                    disabled={isFinalizing}
                     onClick={() => finalizeSession(true)}
                     type="button"
                   >
-                    Lock Session
+                    {isFinalizing && finalizeSelection === 'lock' ? 'Locking...' : 'Lock Session'}
                   </button>
                   <button className="border border-neutral-400 px-3 py-2 text-xs" onClick={() => exportFinal('csv')} type="button">
                     Export CSV
