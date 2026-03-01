@@ -115,14 +115,6 @@ export function InventoryDashboard() {
     manufact_sku: ''
   });
 
-  const [uploadForm, setUploadForm] = useState({
-    count_name: '',
-    shop_id: '1',
-    employee_id: '1',
-    reconcile: false,
-    rps: '0.3'
-  });
-
   useEffect(() => {
     setDeviceId(getOrCreateDeviceId());
   }, []);
@@ -717,11 +709,7 @@ export function InventoryDashboard() {
             session_id: sessionId,
             triggered_by: deviceId,
             actor_role: role,
-            count_name: uploadForm.count_name || `Inventory Session ${sessionId}`,
-            shop_id: uploadForm.shop_id,
-            employee_id: uploadForm.employee_id,
-            reconcile: uploadForm.reconcile,
-            rps: Number(uploadForm.rps),
+            reconcile: true,
             items: uploadRows
           })
         }
@@ -1249,7 +1237,9 @@ export function InventoryDashboard() {
 
               <div className="border border-red-300 bg-red-50 p-3">
                 <h3 className="text-sm font-semibold text-red-900">Upload to R-Series (Host Only)</h3>
-                <p className="mt-1 text-xs text-red-800">OAuth + 2FA supported.</p>
+                <p className="mt-1 text-xs text-red-800">
+                  OAuth + 2FA supported. Upload uses backend defaults for count naming and rate settings.
+                </p>
 
                 <button
                   className="mt-2 border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white"
@@ -1285,41 +1275,9 @@ export function InventoryDashboard() {
                 ) : null}
                 {oauthStatus ? <p className="mt-2 text-xs text-neutral-700">{oauthStatus}</p> : null}
 
-                <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                  <input
-                    className="border border-red-300 bg-white px-2 py-2 text-xs"
-                    onChange={(event) => setUploadForm((prev) => ({ ...prev, count_name: event.target.value }))}
-                    placeholder="Count name"
-                    value={uploadForm.count_name}
-                  />
-                  <input
-                    className="border border-red-300 bg-white px-2 py-2 text-xs"
-                    onChange={(event) => setUploadForm((prev) => ({ ...prev, shop_id: event.target.value }))}
-                    placeholder="shop_id"
-                    value={uploadForm.shop_id}
-                  />
-                  <input
-                    className="border border-red-300 bg-white px-2 py-2 text-xs"
-                    onChange={(event) => setUploadForm((prev) => ({ ...prev, employee_id: event.target.value }))}
-                    placeholder="employee_id"
-                    value={uploadForm.employee_id}
-                  />
-                  <input
-                    className="border border-red-300 bg-white px-2 py-2 text-xs"
-                    onChange={(event) => setUploadForm((prev) => ({ ...prev, rps: event.target.value }))}
-                    placeholder="rps"
-                    value={uploadForm.rps}
-                  />
-                </div>
-
-                <label className="mt-2 flex items-center gap-2 text-xs text-red-900">
-                  <input
-                    checked={uploadForm.reconcile}
-                    onChange={(event) => setUploadForm((prev) => ({ ...prev, reconcile: event.target.checked }))}
-                    type="checkbox"
-                  />
-                  Reconcile upload (omitted items set to 0 by backend reconcile)
-                </label>
+                <p className="mt-2 text-xs text-red-900">
+                  Reconcile is enabled for this action: items omitted from upload payload are set to 0 by backend.
+                </p>
 
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button

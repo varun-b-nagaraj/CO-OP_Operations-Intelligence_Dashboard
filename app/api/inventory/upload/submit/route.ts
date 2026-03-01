@@ -70,9 +70,13 @@ export async function POST(request: NextRequest) {
       response_status: upstream.status
     });
 
+    const warningMessage = payload.reconcile
+      ? 'Omitted items will be set to 0 by backend reconcile.'
+      : 'Reconcile is disabled. Only sent items are updated; omitted items are unchanged.';
+
     return NextResponse.json({
       ok: upstream.ok,
-      warning: 'Omitted items will be set to 0 by backend reconcile.',
+      warning: warningMessage,
       upstream: upstreamPayload
     });
   } catch (error) {
