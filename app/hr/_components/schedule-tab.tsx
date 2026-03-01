@@ -1786,10 +1786,13 @@ export function ScheduleTab() {
                     disabled={
                       volunteerForShiftMutation.isPending ||
                       manualSlotMutation.isPending ||
-                      (selectedShiftActionAssignment && selectedShiftActionAttendanceStatus !== 'expected') ||
+                      (selectedShiftActionAssignment
+                        ? selectedShiftActionAttendanceStatus !== 'expected'
+                        : false) ||
                       !assignmentTargetSNumber ||
-                      (selectedShiftActionAssignment &&
-                        assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber)
+                      (selectedShiftActionAssignment
+                        ? assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber
+                        : false)
                     }
                     onClick={handleSubmitShiftAction}
                     type="button"
