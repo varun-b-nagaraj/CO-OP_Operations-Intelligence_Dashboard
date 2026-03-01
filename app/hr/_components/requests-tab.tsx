@@ -17,7 +17,7 @@ import { getStudentDisplayName, getStudentSNumber, StudentRow, useBrowserSupabas
 
 const ShiftRequestFormSchema = z.object({
   shift_date: z.string().min(10),
-  shift_period: z.number().int().min(0).max(8),
+  shift_period: z.number().int().min(1).max(8),
   from_employee_s_number: z.string().trim().min(1),
   to_employee_s_number: z.string().trim().min(1),
   reason: z.string().trim().min(1).max(500)
@@ -40,6 +40,7 @@ type CachedScheduleAssignment = {
   studentSNumber?: string;
 };
 type CachedScheduleData = {
+  calendar?: Record<string, 'A' | 'B'>;
   schedule?: CachedScheduleAssignment[];
 };
 
@@ -214,6 +215,17 @@ export function RequestsTab() {
     ) as Array<Required<Pick<CachedScheduleAssignment, 'date' | 'period' | 'studentSNumber' | 'shiftSlotKey'>>>;
   }, [scheduleMonthQuery.data, selectedShiftDate, selectedShiftPeriod]);
 
+  const selectedDayType = useMemo(
+    () => scheduleMonthQuery.data?.calendar?.[selectedShiftDate] ?? null,
+    [scheduleMonthQuery.data, selectedShiftDate]
+  );
+
+  const allowedShiftPeriods = useMemo(() => {
+    if (selectedDayType === 'A') return [1, 2, 3, 4];
+    if (selectedDayType === 'B') return [5, 6, 7, 8];
+    return [1, 2, 3, 4, 5, 6, 7, 8];
+  }, [selectedDayType]);
+
   const attendanceRows = useMemo(
     () => attendanceSlotsQuery.data ?? [],
     [attendanceSlotsQuery.data]
@@ -280,6 +292,15 @@ export function RequestsTab() {
     studentNameBySNumber,
     studentsQuery.data
   ]);
+
+  useEffect(() => {
+    if (allowedShiftPeriods.length === 0) return;
+    if (allowedShiftPeriods.includes(selectedShiftPeriod)) return;
+    form.setValue('shift_period', allowedShiftPeriods[0], {
+      shouldDirty: true,
+      shouldValidate: true
+    });
+  }, [allowedShiftPeriods, form, selectedShiftPeriod]);
 
   useEffect(() => {
     const values = new Set(fromOptions.map((option) => option.value));
@@ -405,13 +426,23 @@ export function RequestsTab() {
         </label>
         <label className="text-sm">
           Shift Period
-          <input
+          <select
             className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-            type="number"
-            min={0}
-            max={8}
             {...form.register('shift_period', { valueAsNumber: true })}
-          />
+          >
+            {allowedShiftPeriods.map((period) => (
+              <option key={period} value={period}>
+                Period {period}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-neutral-600">
+            {selectedDayType === 'A'
+              ? 'A-day selected: period options are 1-4.'
+              : selectedDayType === 'B'
+                ? 'B-day selected: period options are 5-8.'
+                : 'A/B day not found for this date; showing periods 1-8.'}
+          </p>
         </label>
         <label className="text-sm">
           From s_number
