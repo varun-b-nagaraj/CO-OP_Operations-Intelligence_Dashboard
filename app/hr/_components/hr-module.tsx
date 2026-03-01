@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import type { Route } from 'next';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
 import { hasPermission } from '@/lib/permissions';
@@ -39,6 +39,8 @@ function isTab(value: string | null): value is HRTabItem['id'] {
   return Boolean(value && tabs.some((tab) => tab.id === value));
 }
 
+const HR_DATE_RANGE_SESSION_KEY = 'hr_global_date_range_v1';
+
 export function HRModule() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -60,6 +62,22 @@ export function HRModule() {
   const resolvedHRTab = visibleTabs.some((tab) => tab.id === activeHRTab) ? activeHRTab : visibleTabs[0]?.id;
 
   const activeCFATab: CFATabId = isCFATab(requestedTabRaw) ? requestedTabRaw : 'daily-log';
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(HR_DATE_RANGE_SESSION_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { from?: unknown; to?: unknown };
+      if (typeof parsed.from !== 'string' || typeof parsed.to !== 'string') return;
+      setGlobalDateRange({ from: parsed.from, to: parsed.to });
+    } catch {
+      // Ignore malformed session cache.
+    }
+  }, []);
+
+  useEffect(() => {
+    window.sessionStorage.setItem(HR_DATE_RANGE_SESSION_KEY, JSON.stringify(globalDateRange));
+  }, [globalDateRange]);
 
   const replaceWithParams = (nextParams: URLSearchParams) => {
     const href = `${pathname}?${nextParams.toString()}` as Route;
@@ -110,7 +128,7 @@ export function HRModule() {
                 Module view is selected at launch and stays locked on this page.
               </p>
             </div>
-            {resolvedModule === 'hr' && (
+            {resolvedModule === 'hr' && resolvedHRTab !== 'schedule' && (
               <div className="flex flex-wrap items-center gap-2">
                 <label className="text-xs text-neutral-700">
                   From
