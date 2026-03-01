@@ -183,12 +183,12 @@ function normalizeRange(startKey: string, endKey: string) {
   return startKey <= endKey ? { startKey, endKey } : { startKey: endKey, endKey: startKey };
 }
 
-function lookbackStartDateKey(lookback: HistoryLookback) {
+function lookbackStartDateKey(lookback: HistoryLookback, referenceEndKey: string) {
   if (lookback === 'all') return null;
-  const now = new Date();
+  const referenceEnd = toDateFromKey(referenceEndKey);
   const months = Number.parseInt(lookback.replace('m', ''), 10);
   if (!Number.isFinite(months)) return null;
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = new Date(referenceEnd.getFullYear(), referenceEnd.getMonth(), 1);
   start.setMonth(start.getMonth() - (months - 1));
   return dateKey(start);
 }
@@ -802,12 +802,13 @@ export function MarketingDashboard() {
   };
 
   const openPastFromCache = () => {
-    if (!pastSearchConfig) {
-      setNotice('No cached past search yet. Click View Past and drag a range first.');
-      return;
-    }
     setCalendarScope('past');
-    setNotice('Loaded cached past search.');
+    setPastSearchConfig(null);
+    setPendingPastRange(null);
+    setDragAnchorDate(null);
+    setDragPreviewDate(null);
+    setPastFilterModalOpen(false);
+    setNotice('Past selection reset. Drag a new date range and apply filters.');
   };
 
   const applyPastSearchFilters = () => {
@@ -919,7 +920,7 @@ export function MarketingDashboard() {
   const pastVisibleEventRows = useMemo(() => {
     if (!pastSearchConfig) return [] as MarketingEventRow[];
 
-    const lookbackStartKey = lookbackStartDateKey(pastSearchConfig.lookback);
+    const lookbackStartKey = lookbackStartDateKey(pastSearchConfig.lookback, pastSearchConfig.range.endKey);
     const effectiveStart =
       lookbackStartKey && pastSearchConfig.range.startKey < lookbackStartKey
         ? lookbackStartKey
@@ -944,7 +945,7 @@ export function MarketingDashboard() {
   }, [pastSearchConfig, events, eventSearchIndex]);
 
   const visibleCalendarRows = useMemo(() => {
-    if (calendarScope === 'past' && pastSearchConfig) return pastVisibleEventRows;
+    if (calendarScope === 'past') return pastSearchConfig ? pastVisibleEventRows : [];
     return visibleEventRows;
   }, [calendarScope, pastSearchConfig, pastVisibleEventRows, visibleEventRows]);
 
@@ -1055,18 +1056,18 @@ export function MarketingDashboard() {
                   </button>
                   <button
                     className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
-                    onClick={() => setMonthAnchor(new Date())}
-                    type="button"
-                  >
-                    Today
-                  </button>
-                  <p className="text-sm font-semibold">{monthHeading}</p>
-                  <button
-                    className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
                     onClick={() => setMonthAnchor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
                     type="button"
                   >
                     Next
+                  </button>
+                  <p className="text-sm font-semibold">{monthHeading}</p>
+                  <button
+                    className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
+                    onClick={() => setMonthAnchor(new Date())}
+                    type="button"
+                  >
+                    Today
                   </button>
                 </div>
 
@@ -1088,8 +1089,7 @@ export function MarketingDashboard() {
                     </button>
                   </div>
                   <button
-                    className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm disabled:opacity-50"
-                    disabled={!pastSearchConfig}
+                    className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
                     onClick={openPastFromCache}
                     type="button"
                   >
@@ -1256,7 +1256,7 @@ export function MarketingDashboard() {
                         </button>
 
                         <div className="space-y-1">
-                          {dayEvents.slice(0, 3).map((dayEvent) => {
+                          {(calendarScope === 'past' ? dayEvents : dayEvents.slice(0, 3)).map((dayEvent) => {
                             const hasImages = (eventIndicators[dayEvent.id]?.assets ?? 0) > 0;
                             const hasExternalContacts = (eventIndicators[dayEvent.id]?.externalContacts ?? 0) > 0;
                             return (
