@@ -24,6 +24,7 @@ import { createSessionJoinPacket, parseSessionJoinPacket } from '@/lib/inventory
 const TABS = ['Catalog', 'Sessions', 'Count View', 'Finalize & Upload'] as const;
 type TabId = (typeof TABS)[number];
 type FinalAction = 'none' | 'finalize' | 'lock';
+type ScanMode = 'single' | 'multi';
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -84,6 +85,12 @@ export function InventoryDashboard() {
   const [activeItem, setActiveItem] = useState<InventoryCatalogItem | null>(null);
   const [lookupCandidates, setLookupCandidates] = useState<InventoryCatalogItem[]>([]);
   const [lookupStatus, setLookupStatus] = useState('');
+  const [recentScanSummary, setRecentScanSummary] = useState<{
+    systemId: string;
+    itemName: string;
+    mode: ScanMode;
+    action: 'incremented' | 'identified';
+  } | null>(null);
   const [qtyDraftBySystemId, setQtyDraftBySystemId] = useState<Record<string, string>>({});
 
   const [pendingCount, setPendingCount] = useState(0);
@@ -466,7 +473,7 @@ export function InventoryDashboard() {
     await refreshPendingState(sessionId);
   };
 
-  const onScanValue = async (value: string) => {
+  const onScanValue = async (value: string, mode: ScanMode) => {
     setActiveScannedCode(value);
     const scanLookupSource = scanCatalog.length ? scanCatalog : catalog;
     const resolved = resolveCatalogItemByCode(scanLookupSource, value);
@@ -503,9 +510,26 @@ export function InventoryDashboard() {
 
       if (merged.length === 1) {
         setActiveItem(merged[0]);
-        await appendEvent(merged[0].system_id, 1);
-        setLookupStatus(`No direct barcode match. Auto-matched ${merged[0].item_name} and added +1.`);
-        setSyncStatus(`No direct barcode match. Auto-matched ${merged[0].item_name}.`);
+        if (mode === 'multi') {
+          await appendEvent(merged[0].system_id, 1);
+          setRecentScanSummary({
+            systemId: merged[0].system_id,
+            itemName: merged[0].item_name,
+            mode,
+            action: 'incremented'
+          });
+          setLookupStatus(`No direct barcode match. Auto-matched ${merged[0].item_name} and added +1.`);
+          setSyncStatus(`No direct barcode match. Auto-matched ${merged[0].item_name}. +1 added.`);
+        } else {
+          setRecentScanSummary({
+            systemId: merged[0].system_id,
+            itemName: merged[0].item_name,
+            mode,
+            action: 'identified'
+          });
+          setLookupStatus(`No direct barcode match. Auto-matched ${merged[0].item_name} (identify only).`);
+          setSyncStatus(`No direct barcode match. Auto-matched ${merged[0].item_name}.`);
+        }
         return;
       }
 
@@ -521,8 +545,24 @@ export function InventoryDashboard() {
     setLookupCandidates([]);
     setLookupStatus('');
     setActiveItem(resolved.item);
-    await appendEvent(resolved.item.system_id, 1);
-    setSyncStatus(`Scanned ${resolved.item.item_name}. +1 added.`);
+    if (mode === 'multi') {
+      await appendEvent(resolved.item.system_id, 1);
+      setRecentScanSummary({
+        systemId: resolved.item.system_id,
+        itemName: resolved.item.item_name,
+        mode,
+        action: 'incremented'
+      });
+      setSyncStatus(`Scanned ${resolved.item.item_name}. +1 added.`);
+    } else {
+      setRecentScanSummary({
+        systemId: resolved.item.system_id,
+        itemName: resolved.item.item_name,
+        mode,
+        action: 'identified'
+      });
+      setSyncStatus(`Scanned ${resolved.item.item_name}. Identified only.`);
+    }
   };
 
   const applyAbsoluteQty = async (systemId: string) => {
@@ -710,6 +750,7 @@ export function InventoryDashboard() {
       setSessionName('Inventory Session');
       setActiveScannedCode('');
       setActiveItem(null);
+      setRecentScanSummary(null);
       setPendingCount(0);
       setPendingTotals([]);
       setSnapshotTotals([]);
@@ -1408,12 +1449,24 @@ export function InventoryDashboard() {
             <section className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
                 <section className="space-y-3">
-                  <BarcodeScanner onDetected={onScanValue} />
+                  <BarcodeScanner
+                    onDetected={onScanValue}
+                    recentScan={
+                      recentScanSummary
+                        ? {
+                            itemName: recentScanSummary.itemName,
+                            currentCount: displayedTotals.get(recentScanSummary.systemId) ?? 0,
+                            mode: recentScanSummary.mode,
+                            action: recentScanSummary.action
+                          }
+                        : null
+                    }
+                  />
 
                   <div className="border border-neutral-300 p-3">
                     <h3 className="text-sm font-semibold text-neutral-900">Current Scanned Item</h3>
                     <p className="mt-1 text-xs text-neutral-700">
-                      Scan barcode. Matched item is selected and +1 is added automatically.
+                      Multi mode adds +1 each shutter. Single mode identifies product only.
                     </p>
 
                     <div className="mt-2 border border-neutral-200 p-2 text-xs">
