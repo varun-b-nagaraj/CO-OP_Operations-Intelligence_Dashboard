@@ -1,6 +1,6 @@
 export type MarketingEventStatus = 'draft' | 'scheduled' | 'completed' | 'cancelled';
 
-export type CoordinationMethod = 'email' | 'call' | 'in_person' | 'text';
+export type CoordinationMethod = 'email' | 'call' | 'in_person' | 'text' | 'other';
 
 export type AssetType = 'flyer' | 'photo' | 'mockup' | 'schedule' | 'other';
 
@@ -17,6 +17,7 @@ export interface MarketingEventRow {
   target_audience: string | null;
   budget_planned: number | null;
   budget_actual: number | null;
+  supplies_needed: string | null;
   links: string[];
   cover_asset_id: string | null;
   outcome_summary: string | null;
@@ -25,6 +26,8 @@ export interface MarketingEventRow {
   recommendations: string | null;
   estimated_interactions: number | null;
   units_sold: number | null;
+  revenue_impact: number | null;
+  engagement_notes: string | null;
   cost_roi_notes: string | null;
   updated_at: string;
 }
@@ -47,6 +50,7 @@ export interface EventContactRow {
   is_internal: boolean;
   coordinator_name: string | null;
   coordinator_role: string | null;
+  coordinator_contact: string | null;
   coordinator_notes: string | null;
   contact: ExternalContactRow | null;
 }
@@ -80,6 +84,7 @@ export interface CoordinationLogRow {
   method: CoordinationMethod;
   summary: string;
   next_steps: string | null;
+  next_steps_due_at: string | null;
   created_by: string | null;
   created_at: string;
 }

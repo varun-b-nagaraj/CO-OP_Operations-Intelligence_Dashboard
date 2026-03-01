@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS public.marketing_events (
   target_audience TEXT,
   budget_planned NUMERIC(12,2) CHECK (budget_planned IS NULL OR budget_planned >= 0),
   budget_actual NUMERIC(12,2) CHECK (budget_actual IS NULL OR budget_actual >= 0),
+  supplies_needed TEXT,
   links JSONB NOT NULL DEFAULT '[]'::jsonb,
   cover_asset_id UUID,
   outcome_summary TEXT,
@@ -31,6 +32,8 @@ CREATE TABLE IF NOT EXISTS public.marketing_events (
   recommendations TEXT,
   estimated_interactions INTEGER CHECK (estimated_interactions IS NULL OR estimated_interactions >= 0),
   units_sold INTEGER CHECK (units_sold IS NULL OR units_sold >= 0),
+  revenue_impact NUMERIC(12,2) CHECK (revenue_impact IS NULL OR revenue_impact >= 0),
+  engagement_notes TEXT,
   cost_roi_notes TEXT,
   created_by TEXT,
   updated_by TEXT,
@@ -67,6 +70,7 @@ CREATE TABLE IF NOT EXISTS public.event_contacts (
   is_internal BOOLEAN NOT NULL DEFAULT FALSE,
   coordinator_name TEXT,
   coordinator_role TEXT,
+  coordinator_contact TEXT,
   coordinator_notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (
@@ -114,9 +118,10 @@ CREATE TABLE IF NOT EXISTS public.coordination_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id UUID NOT NULL REFERENCES public.marketing_events(id) ON DELETE CASCADE,
   contacted_party TEXT NOT NULL CHECK (btrim(contacted_party) <> ''),
-  method TEXT NOT NULL DEFAULT 'email' CHECK (method IN ('email', 'call', 'in_person', 'text')),
+  method TEXT NOT NULL DEFAULT 'email' CHECK (method IN ('email', 'call', 'in_person', 'text', 'other')),
   summary TEXT NOT NULL CHECK (btrim(summary) <> ''),
   next_steps TEXT,
+  next_steps_due_at DATE,
   created_by TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

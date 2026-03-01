@@ -47,7 +47,8 @@ const METHODS: Array<{ value: CoordinationMethod; label: string }> = [
   { value: 'email', label: 'Email' },
   { value: 'call', label: 'Call' },
   { value: 'in_person', label: 'In-person' },
-  { value: 'text', label: 'Text' }
+  { value: 'text', label: 'Text' },
+  { value: 'other', label: 'Other' }
 ];
 
 const STATUS_CLASSES: Record<MarketingEventStatus, string> = {
@@ -109,6 +110,16 @@ function parseIntegerInput(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function inDateRange(value: string, from: string, to: string) {
+  const parsed = new Date(value).getTime();
+  if (!Number.isFinite(parsed)) return false;
+  const fromTime = from ? new Date(`${from}T00:00:00`).getTime() : null;
+  const toTime = to ? new Date(`${to}T23:59:59.999`).getTime() : null;
+  if (fromTime !== null && parsed < fromTime) return false;
+  if (toTime !== null && parsed > toTime) return false;
+  return true;
+}
+
 function buildMonthGrid(anchor: Date): Date[] {
   const year = anchor.getFullYear();
   const month = anchor.getMonth();
@@ -156,6 +167,7 @@ function toEventSavePayload(draft: EventDraft) {
     target_audience: draft.target_audience,
     budget_planned: draft.budget_planned,
     budget_actual: draft.budget_actual,
+    supplies_needed: draft.supplies_needed,
     links: draft.links,
     outcome_summary: draft.outcome_summary,
     what_worked: draft.what_worked,
@@ -163,6 +175,8 @@ function toEventSavePayload(draft: EventDraft) {
     recommendations: draft.recommendations,
     estimated_interactions: draft.estimated_interactions,
     units_sold: draft.units_sold,
+    revenue_impact: draft.revenue_impact,
+    engagement_notes: draft.engagement_notes,
     cost_roi_notes: draft.cost_roi_notes,
     cover_asset_id: draft.cover_asset_id
   };
@@ -171,6 +185,14 @@ function toEventSavePayload(draft: EventDraft) {
 export function MarketingDashboard() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const repository = useMemo(() => createMarketingRepository(supabase), [supabase]);
+  const permissions = useMemo(
+    () => ({
+      canView: true,
+      canCreate: true,
+      canEdit: true
+    }),
+    []
+  );
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('calendar');
   const [recentOnly, setRecentOnly] = useState(false);
@@ -187,6 +209,7 @@ export function MarketingDashboard() {
   const [eventIndicators, setEventIndicators] = useState<
     Record<string, { assets: number; internalContacts: number; externalContacts: number }>
   >({});
+  const [eventSearchIndex, setEventSearchIndex] = useState<Record<string, { external: string; internal: string }>>({});
 
   const [loading, setLoading] = useState(true);
   const [loadingDrawer, setLoadingDrawer] = useState(false);
@@ -205,6 +228,7 @@ export function MarketingDashboard() {
   const [newInternalCoordinator, setNewInternalCoordinator] = useState({
     coordinatorName: '',
     coordinatorRole: '',
+    coordinatorContact: '',
     coordinatorNotes: ''
   });
   const [newContactDraft, setNewContactDraft] = useState({
@@ -222,16 +246,29 @@ export function MarketingDashboard() {
     contactedParty: '',
     method: 'email' as CoordinationMethod,
     summary: '',
-    nextSteps: ''
+    nextSteps: '',
+    nextStepsDueAt: ''
   });
 
   const [contactSearch, setContactSearch] = useState('');
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [selectedContactEventIds, setSelectedContactEventIds] = useState<string[]>([]);
+  const [contactDraft, setContactDraft] = useState({
+    organization: '',
+    person_name: '',
+    role_title: '',
+    email: '',
+    phone: '',
+    notes: ''
+  });
 
   const [reportSearch, setReportSearch] = useState('');
+  const [eventDateFrom, setEventDateFrom] = useState('');
+  const [eventDateTo, setEventDateTo] = useState('');
+  const [eventSort, setEventSort] = useState<'upcoming' | 'recently_updated' | 'recently_completed'>('upcoming');
 
   const [pendingAssetPreviews, setPendingAssetPreviews] = useState<PendingAssetPreview[]>([]);
+  const [failedAssetUploads, setFailedAssetUploads] = useState<File[]>([]);
   const [assetDraftType, setAssetDraftType] = useState<AssetType>('photo');
   const [assetDraftCaption, setAssetDraftCaption] = useState('');
   const [previewAsset, setPreviewAsset] = useState<EventAssetRow | null>(null);
@@ -245,17 +282,6 @@ export function MarketingDashboard() {
   }, [events]);
 
   const calendarGrid = useMemo(() => buildMonthGrid(monthAnchor), [monthAnchor]);
-
-  const filteredEventsByDay = useMemo(() => {
-    const byDay = new Map<string, MarketingEventRow[]>();
-    events.forEach((event) => {
-      const key = dateKey(event.starts_at);
-      const bucket = byDay.get(key) ?? [];
-      bucket.push(event);
-      byDay.set(key, bucket);
-    });
-    return byDay;
-  }, [events]);
 
   const selectedContact = useMemo(() => {
     if (!selectedContactId) return null;
@@ -275,7 +301,7 @@ export function MarketingDashboard() {
       const [eventRows, contactRows, reportRows] = await Promise.all([
         repository.listEvents({
           recentOnly,
-          query: searchQuery,
+          query: '',
           status: statusFilter,
           category: categoryFilter
         }),
@@ -287,10 +313,15 @@ export function MarketingDashboard() {
       setContacts(contactRows);
       setReports(reportRows);
       if (eventRows.length) {
-        const indicators = await repository.listEventIndicators(eventRows.map((row) => row.id));
+        const [indicators, searchIndex] = await Promise.all([
+          repository.listEventIndicators(eventRows.map((row) => row.id)),
+          repository.listEventSearchIndex(eventRows.map((row) => row.id))
+        ]);
         setEventIndicators(indicators);
+        setEventSearchIndex(searchIndex);
       } else {
         setEventIndicators({});
+        setEventSearchIndex({});
       }
 
       if (selectedContactId && !contactRows.some((entry) => entry.id === selectedContactId)) {
@@ -304,7 +335,7 @@ export function MarketingDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [repository, recentOnly, searchQuery, statusFilter, categoryFilter, contactSearch, reportSearch, selectedContactId]);
+  }, [repository, recentOnly, statusFilter, categoryFilter, contactSearch, reportSearch, selectedContactId]);
 
   useEffect(() => {
     void loadDashboard();
@@ -325,6 +356,28 @@ export function MarketingDashboard() {
     };
     void run();
   }, [repository, selectedContactId]);
+
+  useEffect(() => {
+    if (!selectedContact) {
+      setContactDraft({
+        organization: '',
+        person_name: '',
+        role_title: '',
+        email: '',
+        phone: '',
+        notes: ''
+      });
+      return;
+    }
+    setContactDraft({
+      organization: selectedContact.organization,
+      person_name: selectedContact.person_name,
+      role_title: selectedContact.role_title ?? '',
+      email: selectedContact.email ?? '',
+      phone: selectedContact.phone ?? '',
+      notes: selectedContact.notes ?? ''
+    });
+  }, [selectedContact]);
 
   const loadEventBundle = useCallback(
     async (eventId: string) => {
@@ -371,6 +424,7 @@ export function MarketingDashboard() {
           target_audience: null,
           budget_planned: null,
           budget_actual: null,
+          supplies_needed: null,
           links: [],
           outcome_summary: null,
           what_worked: null,
@@ -378,6 +432,8 @@ export function MarketingDashboard() {
           recommendations: null,
           estimated_interactions: null,
           units_sold: null,
+          revenue_impact: null,
+          engagement_notes: null,
           cost_roi_notes: null,
           cover_asset_id: null
         });
@@ -484,9 +540,11 @@ export function MarketingDashboard() {
       setEventBundle((prev) => (prev ? { ...prev, assets: [...uploaded, ...prev.assets] } : prev));
       setNotice('Assets uploaded.');
       setAssetDraftCaption('');
+      setFailedAssetUploads([]);
     } catch (uploadError) {
       const message = uploadError instanceof Error ? uploadError.message : 'Asset upload failed.';
       setError(message);
+      setFailedAssetUploads(list);
     } finally {
       setPendingAssetPreviews((prev) => {
         prev.forEach((entry) => URL.revokeObjectURL(entry.previewUrl));
@@ -509,10 +567,11 @@ export function MarketingDashboard() {
         eventId: selectedEventId,
         coordinatorName: newInternalCoordinator.coordinatorName.trim(),
         coordinatorRole: newInternalCoordinator.coordinatorRole.trim() || null,
+        coordinatorContact: newInternalCoordinator.coordinatorContact.trim() || null,
         coordinatorNotes: newInternalCoordinator.coordinatorNotes.trim() || null
       });
       setEventBundle((prev) => (prev ? { ...prev, eventContacts: [row, ...prev.eventContacts] } : prev));
-      setNewInternalCoordinator({ coordinatorName: '', coordinatorRole: '', coordinatorNotes: '' });
+      setNewInternalCoordinator({ coordinatorName: '', coordinatorRole: '', coordinatorContact: '', coordinatorNotes: '' });
     } catch (coordinatorError) {
       const message = coordinatorError instanceof Error ? coordinatorError.message : 'Unable to add coordinator.';
       setError(message);
@@ -606,10 +665,11 @@ export function MarketingDashboard() {
         method: newCoordination.method,
         summary: newCoordination.summary.trim(),
         nextSteps: newCoordination.nextSteps.trim() || null,
+        nextStepsDueAt: newCoordination.nextStepsDueAt || null,
         createdBy: 'dashboard'
       });
       setEventBundle((prev) => (prev ? { ...prev, coordinationLogs: [row, ...prev.coordinationLogs] } : prev));
-      setNewCoordination({ contactedParty: '', method: 'email', summary: '', nextSteps: '' });
+      setNewCoordination({ contactedParty: '', method: 'email', summary: '', nextSteps: '', nextStepsDueAt: '' });
     } catch (coordinationError) {
       const message = coordinationError instanceof Error ? coordinationError.message : 'Unable to add coordination entry.';
       setError(message);
@@ -644,7 +704,90 @@ export function MarketingDashboard() {
     });
   }, [monthAnchor]);
 
-  const visibleEventRows = events;
+  const visibleEventRows = useMemo(() => {
+    const now = Date.now();
+    const search = searchQuery.trim().toLowerCase();
+    const filtered = events.filter((event) => {
+      if (!inDateRange(event.starts_at, eventDateFrom, eventDateTo)) return false;
+      if (!search) return true;
+      const index = eventSearchIndex[event.id];
+      return [event.title, event.location ?? '', event.category ?? '', index?.external ?? '', index?.internal ?? '']
+        .join(' ')
+        .toLowerCase()
+        .includes(search);
+    });
+
+    if (eventSort === 'recently_updated') {
+      return [...filtered].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    }
+    if (eventSort === 'recently_completed') {
+      return [...filtered].sort((a, b) => {
+        const aValue = a.status === 'completed' ? new Date(a.starts_at).getTime() : -Infinity;
+        const bValue = b.status === 'completed' ? new Date(b.starts_at).getTime() : -Infinity;
+        return bValue - aValue;
+      });
+    }
+    return [...filtered].sort((a, b) => {
+      const aTime = new Date(a.starts_at).getTime();
+      const bTime = new Date(b.starts_at).getTime();
+      const aUpcoming = aTime >= now;
+      const bUpcoming = bTime >= now;
+      if (aUpcoming && bUpcoming) return aTime - bTime;
+      if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+      return bTime - aTime;
+    });
+  }, [events, searchQuery, eventDateFrom, eventDateTo, eventSort, eventSearchIndex]);
+
+  const saveSelectedContact = async () => {
+    if (!selectedContactId) return;
+    try {
+      const saved = await repository.saveContact({
+        id: selectedContactId,
+        organization: contactDraft.organization.trim(),
+        person_name: contactDraft.person_name.trim(),
+        role_title: contactDraft.role_title.trim() || null,
+        email: contactDraft.email.trim() || null,
+        phone: contactDraft.phone.trim() || null,
+        notes: contactDraft.notes.trim() || null
+      });
+      setContacts((prev) => prev.map((entry) => (entry.id === saved.id ? saved : entry)));
+      setNotice('Contact saved.');
+    } catch (contactError) {
+      const message = contactError instanceof Error ? contactError.message : 'Unable to save contact.';
+      setError(message);
+    }
+  };
+
+  const createContactFromPanel = async () => {
+    if (!contactDraft.organization.trim() || !contactDraft.person_name.trim()) return;
+    try {
+      const created = await repository.saveContact({
+        organization: contactDraft.organization.trim(),
+        person_name: contactDraft.person_name.trim(),
+        role_title: contactDraft.role_title.trim() || null,
+        email: contactDraft.email.trim() || null,
+        phone: contactDraft.phone.trim() || null,
+        notes: contactDraft.notes.trim() || null
+      });
+      setContacts((prev) => [created, ...prev]);
+      setSelectedContactId(created.id);
+      setNotice('Contact created.');
+    } catch (contactError) {
+      const message = contactError instanceof Error ? contactError.message : 'Unable to create contact.';
+      setError(message);
+    }
+  };
+
+  const filteredEventsByDay = useMemo(() => {
+    const byDay = new Map<string, MarketingEventRow[]>();
+    visibleEventRows.forEach((event) => {
+      const key = dateKey(event.starts_at);
+      const bucket = byDay.get(key) ?? [];
+      bucket.push(event);
+      byDay.set(key, bucket);
+    });
+    return byDay;
+  }, [visibleEventRows]);
 
   if (loading) {
     return (
@@ -707,7 +850,7 @@ export function MarketingDashboard() {
 
               <button
                 className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white hover:bg-[#6a0000] disabled:opacity-60"
-                disabled={saving}
+                disabled={saving || !permissions.canCreate}
                 onClick={() => {
                   void createEvent();
                 }}
@@ -808,7 +951,11 @@ export function MarketingDashboard() {
 
               {events.length === 0 ? (
                 <div className="border border-dashed border-neutral-300 bg-neutral-50 p-6 text-center">
-                  <p className="text-sm text-neutral-700">No events yet. Create your first event.</p>
+                  <p className="text-sm text-neutral-700">
+                    {recentOnly
+                      ? 'No events in the recent window (last 30 days and next 30 days). Switch to All Events or create a new event.'
+                      : 'No events yet. Create your first event.'}
+                  </p>
                   <button
                     className="mt-3 min-h-[38px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white"
                     onClick={() => {
@@ -855,14 +1002,24 @@ export function MarketingDashboard() {
                             return (
                               <button
                                 key={event.id}
-                                className="flex w-full items-center justify-between gap-1 border border-neutral-200 bg-neutral-50 px-2 py-1 text-left text-[11px]"
+                                className="w-full border border-neutral-200 bg-neutral-50 px-2 py-1 text-left text-[11px]"
                                 onClick={() => {
                                   void loadEventBundle(event.id);
                                 }}
                                 type="button"
                               >
-                                <span className="truncate">{event.title}</span>
-                                <span className="flex items-center gap-1">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className={`inline-flex px-1 py-0.5 text-[10px] ${STATUS_CLASSES[event.status]}`}>
+                                    {formatLabel(event.status)}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    {hasImages ? <span className="text-neutral-600">IMG</span> : null}
+                                    {hasExternalContacts ? <span className="text-neutral-600">EXT</span> : null}
+                                  </span>
+                                </div>
+                                <p className="mt-1 truncate font-medium">{event.title}</p>
+                                <p className="truncate text-neutral-600">{event.category ?? 'General'}</p>
+                                <span className="hidden">
                                   {hasImages ? <span className="text-neutral-600">IMG</span> : null}
                                   {hasExternalContacts ? <span className="text-neutral-600">EXT</span> : null}
                                 </span>
@@ -947,9 +1104,26 @@ export function MarketingDashboard() {
                     </option>
                   ))}
                 </select>
-                <select className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm" defaultValue="starts_at_desc">
-                  <option value="starts_at_desc">Sort: Newest</option>
-                  <option value="starts_at_asc">Sort: Oldest</option>
+                <input
+                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setEventDateFrom(event.target.value)}
+                  type="date"
+                  value={eventDateFrom}
+                />
+                <input
+                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setEventDateTo(event.target.value)}
+                  type="date"
+                  value={eventDateTo}
+                />
+                <select
+                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setEventSort(event.target.value as 'upcoming' | 'recently_updated' | 'recently_completed')}
+                  value={eventSort}
+                >
+                  <option value="upcoming">Sort: Upcoming first</option>
+                  <option value="recently_updated">Sort: Recently updated</option>
+                  <option value="recently_completed">Sort: Recently completed</option>
                 </select>
               </div>
 
@@ -1010,12 +1184,30 @@ export function MarketingDashboard() {
             <section className="grid gap-3 lg:grid-cols-[1.1fr_1fr]">
               <div className="border border-neutral-300 bg-white">
                 <div className="border-b border-neutral-300 p-3">
-                  <input
-                    className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                    onChange={(event) => setContactSearch(event.target.value)}
-                    placeholder="Search contacts"
-                    value={contactSearch}
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactSearch(event.target.value)}
+                      placeholder="Search contacts"
+                      value={contactSearch}
+                    />
+                    <button
+                      className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
+                      onClick={() =>
+                        setContactDraft({
+                          organization: '',
+                          person_name: '',
+                          role_title: '',
+                          email: '',
+                          phone: '',
+                          notes: ''
+                        })
+                      }
+                      type="button"
+                    >
+                      New
+                    </button>
+                  </div>
                 </div>
 
                 <div className="max-h-[62vh] overflow-auto">
@@ -1055,25 +1247,63 @@ export function MarketingDashboard() {
                 ) : (
                   <div className="space-y-3 text-sm">
                     <h3 className="text-base font-semibold">Contact Details</h3>
-                    <div className="space-y-1">
-                      <p>
-                        <span className="font-medium">Organization:</span> {selectedContact.organization}
-                      </p>
-                      <p>
-                        <span className="font-medium">Person:</span> {selectedContact.person_name}
-                      </p>
-                      <p>
-                        <span className="font-medium">Role:</span> {selectedContact.role_title ?? '-'}
-                      </p>
-                      <p>
-                        <span className="font-medium">Email:</span> {selectedContact.email ?? '-'}
-                      </p>
-                      <p>
-                        <span className="font-medium">Phone:</span> {selectedContact.phone ?? '-'}
-                      </p>
-                      <p>
-                        <span className="font-medium">Notes:</span> {selectedContact.notes ?? '-'}
-                      </p>
+                    <div className="grid gap-2">
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setContactDraft((prev) => ({ ...prev, organization: event.target.value }))}
+                        placeholder="Organization"
+                        value={contactDraft.organization}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setContactDraft((prev) => ({ ...prev, person_name: event.target.value }))}
+                        placeholder="Person name"
+                        value={contactDraft.person_name}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setContactDraft((prev) => ({ ...prev, role_title: event.target.value }))}
+                        placeholder="Role/title"
+                        value={contactDraft.role_title}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setContactDraft((prev) => ({ ...prev, email: event.target.value }))}
+                        placeholder="Email"
+                        value={contactDraft.email}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setContactDraft((prev) => ({ ...prev, phone: event.target.value }))}
+                        placeholder="Phone"
+                        value={contactDraft.phone}
+                      />
+                      <textarea
+                        className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm"
+                        onChange={(event) => setContactDraft((prev) => ({ ...prev, notes: event.target.value }))}
+                        placeholder="Notes"
+                        value={contactDraft.notes}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
+                          onClick={() => {
+                            void saveSelectedContact();
+                          }}
+                          type="button"
+                        >
+                          Save Contact
+                        </button>
+                        <button
+                          className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
+                          onClick={() => {
+                            void createContactFromPanel();
+                          }}
+                          type="button"
+                        >
+                          Create Contact
+                        </button>
+                      </div>
                     </div>
 
                     <div className="border-t border-neutral-300 pt-3">
@@ -1128,7 +1358,7 @@ export function MarketingDashboard() {
                       <th className="border-b border-neutral-300 px-3 py-2">Date</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Title</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Category</th>
-                      <th className="border-b border-neutral-300 px-3 py-2">Interations</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Interactions</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Cost</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Notes</th>
                     </tr>
@@ -1300,6 +1530,15 @@ export function MarketingDashboard() {
                       </label>
 
                       <label className="md:col-span-2 text-sm">
+                        <span className="mb-1 block text-xs text-neutral-600">Supplies / Materials Needed</span>
+                        <textarea
+                          className="min-h-[72px] w-full border border-neutral-300 px-2 py-2"
+                          onChange={(event) => onDraftFieldChange('supplies_needed', event.target.value || null)}
+                          value={eventDraft.supplies_needed ?? ''}
+                        />
+                      </label>
+
+                      <label className="md:col-span-2 text-sm">
                         <span className="mb-1 block text-xs text-neutral-600">Links (one per line)</span>
                         <textarea
                           className="min-h-[72px] w-full border border-neutral-300 px-2 py-2"
@@ -1331,6 +1570,14 @@ export function MarketingDashboard() {
                           }
                           placeholder="Role"
                           value={newInternalCoordinator.coordinatorRole}
+                        />
+                        <input
+                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
+                          onChange={(event) =>
+                            setNewInternalCoordinator((prev) => ({ ...prev, coordinatorContact: event.target.value }))
+                          }
+                          placeholder="Contact method (email/phone)"
+                          value={newInternalCoordinator.coordinatorContact}
                         />
                         <textarea
                           className="min-h-[58px] w-full border border-neutral-300 px-2 py-2 text-sm"
@@ -1433,6 +1680,7 @@ export function MarketingDashboard() {
                             <th className="border-b border-neutral-300 px-2 py-2">Name/Person</th>
                             <th className="border-b border-neutral-300 px-2 py-2">Organization</th>
                             <th className="border-b border-neutral-300 px-2 py-2">Role</th>
+                            <th className="border-b border-neutral-300 px-2 py-2">Contact Method</th>
                             <th className="border-b border-neutral-300 px-2 py-2">Email</th>
                             <th className="border-b border-neutral-300 px-2 py-2">Phone</th>
                             <th className="border-b border-neutral-300 px-2 py-2">Notes</th>
@@ -1449,6 +1697,9 @@ export function MarketingDashboard() {
                               <td className="border-b border-neutral-200 px-2 py-2">{entry.contact?.organization ?? '-'}</td>
                               <td className="border-b border-neutral-200 px-2 py-2">
                                 {entry.is_internal ? entry.coordinator_role ?? '-' : entry.contact?.role_title ?? '-'}
+                              </td>
+                              <td className="border-b border-neutral-200 px-2 py-2">
+                                {entry.is_internal ? entry.coordinator_contact ?? '-' : '-'}
                               </td>
                               <td className="border-b border-neutral-200 px-2 py-2">{entry.contact?.email ?? '-'}</td>
                               <td className="border-b border-neutral-200 px-2 py-2">{entry.contact?.phone ?? '-'}</td>
@@ -1519,6 +1770,21 @@ export function MarketingDashboard() {
                     >
                       Drag and drop files here to upload
                     </div>
+
+                    {failedAssetUploads.length > 0 ? (
+                      <div className="flex items-center justify-between gap-2 border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                        <span>{failedAssetUploads.length} file(s) failed to upload.</span>
+                        <button
+                          className="border border-red-300 bg-white px-2 py-1 text-xs"
+                          onClick={() => {
+                            void onAssetFilesSelected(failedAssetUploads);
+                          }}
+                          type="button"
+                        >
+                          Retry Upload
+                        </button>
+                      </div>
+                    ) : null}
 
                     {eventBundle.assets.length === 0 && pendingAssetPreviews.length === 0 ? (
                       <div className="border border-dashed border-neutral-300 bg-neutral-50 p-4 text-center text-sm text-neutral-600">
@@ -1634,6 +1900,12 @@ export function MarketingDashboard() {
                         placeholder="Next steps"
                         value={newCoordination.nextSteps}
                       />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm md:col-span-2"
+                        onChange={(event) => setNewCoordination((prev) => ({ ...prev, nextStepsDueAt: event.target.value }))}
+                        type="date"
+                        value={newCoordination.nextStepsDueAt}
+                      />
                     </div>
                     <button
                       className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
@@ -1653,6 +1925,7 @@ export function MarketingDashboard() {
                           </p>
                           <p className="mt-1">{entry.summary}</p>
                           <p className="mt-1 text-neutral-700">Next: {entry.next_steps ?? '-'}</p>
+                          <p className="mt-1 text-neutral-700">Due: {formatDate(entry.next_steps_due_at)}</p>
                           <p className="mt-1 text-xs text-neutral-600">{formatDateTime(entry.created_at)}</p>
                         </div>
                       ))}
@@ -1722,6 +1995,24 @@ export function MarketingDashboard() {
                           className="min-h-[70px] w-full border border-neutral-300 px-2 py-2"
                           onChange={(event) => onDraftFieldChange('cost_roi_notes', event.target.value || null)}
                           value={eventDraft.cost_roi_notes ?? ''}
+                        />
+                      </label>
+
+                      <label className="text-sm">
+                        <span className="mb-1 block text-xs text-neutral-600">Revenue Impact (optional)</span>
+                        <input
+                          className="min-h-[36px] w-full border border-neutral-300 px-2"
+                          onChange={(event) => onDraftFieldChange('revenue_impact', parseCurrencyInput(event.target.value))}
+                          value={eventDraft.revenue_impact ?? ''}
+                        />
+                      </label>
+
+                      <label className="text-sm">
+                        <span className="mb-1 block text-xs text-neutral-600">Engagement Notes</span>
+                        <textarea
+                          className="min-h-[70px] w-full border border-neutral-300 px-2 py-2"
+                          onChange={(event) => onDraftFieldChange('engagement_notes', event.target.value || null)}
+                          value={eventDraft.engagement_notes ?? ''}
                         />
                       </label>
                     </div>

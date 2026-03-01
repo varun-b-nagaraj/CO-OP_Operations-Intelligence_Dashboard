@@ -50,6 +50,7 @@ function mapEvent(row: Record<string, unknown>): MarketingEventRow {
     target_audience: (row.target_audience as string | null) ?? null,
     budget_planned: asNumber(row.budget_planned),
     budget_actual: asNumber(row.budget_actual),
+    supplies_needed: (row.supplies_needed as string | null) ?? null,
     links: Array.isArray(row.links) ? (row.links as string[]) : [],
     cover_asset_id: (row.cover_asset_id as string | null) ?? null,
     outcome_summary: (row.outcome_summary as string | null) ?? null,
@@ -58,6 +59,8 @@ function mapEvent(row: Record<string, unknown>): MarketingEventRow {
     recommendations: (row.recommendations as string | null) ?? null,
     estimated_interactions: asNumber(row.estimated_interactions),
     units_sold: asNumber(row.units_sold),
+    revenue_impact: asNumber(row.revenue_impact),
+    engagement_notes: (row.engagement_notes as string | null) ?? null,
     cost_roi_notes: (row.cost_roi_notes as string | null) ?? null,
     updated_at: String(row.updated_at ?? row.starts_at ?? new Date().toISOString())
   };
@@ -85,6 +88,7 @@ function mapEventContact(row: Record<string, unknown>): EventContactRow {
     is_internal: Boolean(row.is_internal),
     coordinator_name: (row.coordinator_name as string | null) ?? null,
     coordinator_role: (row.coordinator_role as string | null) ?? null,
+    coordinator_contact: (row.coordinator_contact as string | null) ?? null,
     coordinator_notes: (row.coordinator_notes as string | null) ?? null,
     contact: joined ? mapContact(joined) : null
   };
@@ -124,6 +128,7 @@ function mapCoordination(row: Record<string, unknown>): CoordinationLogRow {
     method: ((row.method as CoordinationMethod | null) ?? 'email') as CoordinationMethod,
     summary: String(row.summary ?? ''),
     next_steps: (row.next_steps as string | null) ?? null,
+    next_steps_due_at: (row.next_steps_due_at as string | null) ?? null,
     created_by: (row.created_by as string | null) ?? null,
     created_at: String(row.created_at ?? new Date().toISOString())
   };
@@ -142,6 +147,7 @@ interface SaveEventInput {
   target_audience: string | null;
   budget_planned: number | null;
   budget_actual: number | null;
+  supplies_needed: string | null;
   links: string[];
   outcome_summary: string | null;
   what_worked: string | null;
@@ -149,6 +155,8 @@ interface SaveEventInput {
   recommendations: string | null;
   estimated_interactions: number | null;
   units_sold: number | null;
+  revenue_impact: number | null;
+  engagement_notes: string | null;
   cost_roi_notes: string | null;
   cover_asset_id: string | null;
 }
@@ -159,6 +167,7 @@ export interface MarketingRepository {
   listEventIndicators(
     eventIds: string[]
   ): Promise<Record<string, { assets: number; internalContacts: number; externalContacts: number }>>;
+  listEventSearchIndex(eventIds: string[]): Promise<Record<string, { external: string; internal: string }>>;
   listLinkedEventIdsForContact(contactId: string): Promise<string[]>;
   getEventBundle(eventId: string): Promise<MarketingEventBundle>;
   saveEvent(input: SaveEventInput): Promise<MarketingEventRow>;
@@ -167,6 +176,7 @@ export interface MarketingRepository {
     eventId: string;
     coordinatorName: string;
     coordinatorRole?: string | null;
+    coordinatorContact?: string | null;
     coordinatorNotes?: string | null;
   }): Promise<EventContactRow>;
   linkExternalContact(input: { eventId: string; contactId: string }): Promise<EventContactRow>;
@@ -178,6 +188,7 @@ export interface MarketingRepository {
     method: CoordinationMethod;
     summary: string;
     nextSteps?: string | null;
+    nextStepsDueAt?: string | null;
     createdBy?: string | null;
   }): Promise<CoordinationLogRow>;
   uploadAsset(input: { eventId: string; file: File; assetType: AssetType; caption?: string | null }): Promise<EventAssetRow>;
@@ -265,6 +276,72 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       return output;
     },
 
+    async listEventSearchIndex(eventIds) {
+      if (!eventIds.length) return {};
+      const { data, error } = await supabase
+        .from('event_contacts')
+        .select('event_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,contact:external_contacts(organization,person_name,role_title,email,phone)')
+        .in('event_id', eventIds);
+      if (error) throw error;
+
+      const output: Record<string, { external: string; internal: string }> = {};
+      eventIds.forEach((id) => {
+        output[id] = { external: '', internal: '' };
+      });
+
+      (
+        (data ?? []) as Array<{
+          event_id: string;
+          is_internal: boolean;
+          coordinator_name: string | null;
+          coordinator_role: string | null;
+          coordinator_contact: string | null;
+          contact:
+            | {
+                organization: string | null;
+                person_name: string | null;
+                role_title: string | null;
+                email: string | null;
+                phone: string | null;
+              }
+            | Array<{
+                organization: string | null;
+                person_name: string | null;
+                role_title: string | null;
+                email: string | null;
+                phone: string | null;
+              }>
+            | null;
+        }>
+      ).forEach((row) => {
+        if (!output[row.event_id]) output[row.event_id] = { external: '', internal: '' };
+        const joined = Array.isArray(row.contact) ? (row.contact[0] ?? null) : row.contact;
+        if (row.is_internal) {
+          output[row.event_id].internal = [
+            output[row.event_id].internal,
+            row.coordinator_name ?? '',
+            row.coordinator_role ?? '',
+            row.coordinator_contact ?? ''
+          ]
+            .join(' ')
+            .trim();
+        } else {
+          output[row.event_id].external = [
+            output[row.event_id].external,
+            joined?.organization ?? '',
+            joined?.person_name ?? '',
+            joined?.role_title ?? '',
+            joined?.email ?? '',
+            joined?.phone ?? ''
+          ]
+            .join(' ')
+            .trim();
+        }
+      });
+
+      return output;
+    },
+
     async listLinkedEventIdsForContact(contactId) {
       const { data, error } = await supabase.from('event_contacts').select('event_id').eq('contact_id', contactId);
       if (error) throw error;
@@ -277,7 +354,7 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
         supabase
           .from('event_contacts')
           .select(
-            'id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,notes,updated_at)'
+            'id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,notes,updated_at)'
           )
           .eq('event_id', eventId)
           .order('created_at', { ascending: false }),
@@ -315,6 +392,7 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
         target_audience: input.target_audience,
         budget_planned: input.budget_planned,
         budget_actual: input.budget_actual,
+        supplies_needed: input.supplies_needed,
         links: input.links,
         outcome_summary: input.outcome_summary,
         what_worked: input.what_worked,
@@ -322,6 +400,8 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
         recommendations: input.recommendations,
         estimated_interactions: input.estimated_interactions,
         units_sold: input.units_sold,
+        revenue_impact: input.revenue_impact,
+        engagement_notes: input.engagement_notes,
         cost_roi_notes: input.cost_roi_notes,
         cover_asset_id: input.cover_asset_id,
         updated_by: 'dashboard'
@@ -357,9 +437,10 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
           is_internal: true,
           coordinator_name: input.coordinatorName,
           coordinator_role: input.coordinatorRole ?? null,
+          coordinator_contact: input.coordinatorContact ?? null,
           coordinator_notes: input.coordinatorNotes ?? null
         })
-        .select('id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_notes')
+        .select('id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,coordinator_notes')
         .single();
       if (error) throw error;
       return mapEventContact((data ?? {}) as Record<string, unknown>);
@@ -374,7 +455,7 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
           is_internal: false
         })
         .select(
-          'id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,notes,updated_at)'
+          'id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,notes,updated_at)'
         )
         .single();
       if (error) throw error;
@@ -409,6 +490,7 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
           method: input.method,
           summary: input.summary,
           next_steps: input.nextSteps ?? null,
+          next_steps_due_at: input.nextStepsDueAt ?? null,
           created_by: input.createdBy ?? null
         })
         .select('*')
