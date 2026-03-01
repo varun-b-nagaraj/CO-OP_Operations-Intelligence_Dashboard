@@ -161,7 +161,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
     assignedPeriods: ''
   });
   const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
-  const [showMoreByEmployeeId, setShowMoreByEmployeeId] = useState<Record<string, boolean>>({});
   const [strikeScopeByEmployeeId, setStrikeScopeByEmployeeId] = useState<Record<string, 'active' | 'all'>>({});
   const [meetingDatePickerOpenByEmployeeId, setMeetingDatePickerOpenByEmployeeId] = useState<Record<string, boolean>>(
     {}
@@ -870,12 +869,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
     });
   };
 
-  const toggleShowMore = (employeeId: string) => {
-    setShowMoreByEmployeeId((previous) => ({
-      ...previous,
-      [employeeId]: !previous[employeeId]
-    }));
-  };
   const todayKey = getTodayDateKey();
 
   if (!canViewAttendance && !canOverrideAttendance && !canEditSettings && !canManageStrikes) {
@@ -949,7 +942,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                 scheduleable: true,
                 assignedPeriods: employee.assignedPeriods
               };
-              const showMore = showMoreByEmployeeId[employee.id] ?? false;
               const pointsDraft = pointsDrafts[employee.id] ?? { points: '1', type: 'manual', note: '' };
 
               return (
@@ -991,308 +983,282 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                   {isExpanded && (
                     <tr className="border-b border-neutral-200 bg-neutral-50">
                       <td className="p-3" colSpan={7}>
-                        <div className="space-y-4">
-                          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-                            <div className="space-y-2 border border-neutral-300 bg-white p-3">
-                              <h3 className="text-sm font-semibold text-neutral-900">General Overview</h3>
-                              <p className="text-sm text-neutral-700">Username: {employee.username ?? 'N/A'}</p>
-                              <p className="text-sm text-neutral-700">s_number: {employee.sNumber || 'N/A'}</p>
-                              <p className="text-sm text-neutral-700">
-                                Assigned periods: {employee.assignedPeriods || 'N/A'}
-                              </p>
-                              <p className="text-sm text-neutral-700">
-                                Active strikes: {employee.strikesCount}
-                              </p>
-                              <p className="text-sm text-neutral-700">Points: {employee.points}</p>
-                              <p className="text-sm text-neutral-700">
-                                Meeting rates (raw/adj): {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
-                              </p>
-                              <p className="text-sm text-neutral-700">
-                                Shift rates (raw/adj): {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
-                              </p>
-                              <p className="text-sm text-neutral-700">
-                                Shift summary: {employee.shiftPresent} present, {employee.shiftAbsent} absent, {employee.shiftExcused} excused
-                              </p>
+                        <div className="space-y-2">
+                          <div className="grid gap-2 md:grid-cols-4">
+                            <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
+                              Meeting Raw/Adj: {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
                             </div>
+                            <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
+                              Shift Raw/Adj: {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
+                            </div>
+                            <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
+                              Shift P/A/E: {employee.shiftPresent}/{employee.shiftAbsent}/{employee.shiftExcused}
+                            </div>
+                            <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
+                              Points: {employee.points} • Strikes: {employee.strikesCount}
+                            </div>
+                          </div>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            <details className="border border-neutral-300 bg-white p-2" open>
+                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">General Overview</summary>
+                              <div className="mt-2 space-y-1 text-sm text-neutral-700">
+                                <p>Username: {employee.username ?? 'N/A'}</p>
+                                <p>s_number: {employee.sNumber || 'N/A'}</p>
+                                <p>Assigned periods: {employee.assignedPeriods || 'N/A'}</p>
+                                <p>Off periods: {employee.offPeriods.join(', ')}</p>
+                              </div>
+                            </details>
 
-                            <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                              <h3 className="text-sm font-semibold text-neutral-900">Meeting Attendance Overview</h3>
-                              <p className="text-xs text-neutral-600">
-                                {employee.meetingAttended}/{employee.meetingSessions} attended, {employee.meetingExcused} excused
-                              </p>
-                              <div className="space-y-1">
-                                <p className="text-sm">Session Date</p>
-                                <div className="relative">
-                                  <button
-                                    className="flex min-h-[40px] w-full items-center justify-between rounded-md border border-neutral-300 bg-white px-3 text-left text-sm hover:border-neutral-400"
-                                    onClick={() =>
-                                      setMeetingDatePickerOpenByEmployeeId((previous) => ({
+                            <details className="border border-neutral-300 bg-white p-2">
+                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">
+                                Meeting Attendance
+                              </summary>
+                              <div className="mt-2 space-y-2">
+                                <p className="text-xs text-neutral-600">
+                                  {employee.meetingAttended}/{employee.meetingSessions} attended, {employee.meetingExcused} excused
+                                </p>
+                                <div className="space-y-1">
+                                  <p className="text-sm">Session Date</p>
+                                  <div className="relative">
+                                    <button
+                                      className="flex min-h-[40px] w-full items-center justify-between rounded-md border border-neutral-300 bg-white px-3 text-left text-sm hover:border-neutral-400"
+                                      onClick={() =>
+                                        setMeetingDatePickerOpenByEmployeeId((previous) => ({
+                                          ...previous,
+                                          [employee.id]: !previous[employee.id]
+                                        }))
+                                      }
+                                      type="button"
+                                    >
+                                      <span>{meetingDate || 'No session selected'}</span>
+                                      <span aria-hidden="true" className="text-xs text-neutral-500">
+                                        {meetingDatePickerOpenByEmployeeId[employee.id] ? '▴' : '▾'}
+                                      </span>
+                                    </button>
+                                    {meetingDatePickerOpenByEmployeeId[employee.id] && (
+                                      <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-neutral-300 bg-white shadow-lg">
+                                        {recentMeetingDates.length === 0 && (
+                                          <p className="p-2 text-xs text-neutral-600">No recent sessions</p>
+                                        )}
+                                        {recentMeetingDates.map((date) => {
+                                          const baseStatus =
+                                            derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
+                                          const overrideType =
+                                            derived.overrideTypeBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
+                                          const visual = getMeetingSessionVisual(baseStatus, overrideType);
+                                          return (
+                                            <button
+                                              className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-neutral-100 ${
+                                                date === meetingDate ? 'bg-neutral-100' : ''
+                                              }`}
+                                              key={`${employee.id}-meeting-option-${date}`}
+                                              onClick={() => {
+                                                setMeetingDateDrafts((previous) => ({
+                                                  ...previous,
+                                                  [employee.id]: date
+                                                }));
+                                                setMeetingDatePickerOpenByEmployeeId((previous) => ({
+                                                  ...previous,
+                                                  [employee.id]: false
+                                                }));
+                                              }}
+                                              type="button"
+                                            >
+                                              <span className="font-medium text-neutral-800">{date}</span>
+                                              <span className={`rounded border px-1 py-0.5 ${visual.badgeClass}`}>
+                                                {visual.label}
+                                              </span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <p className="text-xs text-neutral-600">
+                                  Current status: {selectedMeetingStatus ? selectedMeetingStatus : 'No record for selected session'}
+                                </p>
+                                <p className="text-xs text-neutral-600">
+                                  Current override: {selectedMeetingOverride ? selectedMeetingOverride : 'none'}
+                                </p>
+                                <label className="block text-sm">
+                                  Reason
+                                  <textarea
+                                    className="mt-1 min-h-[72px] w-full border border-neutral-300 p-2"
+                                    onChange={(event) =>
+                                      setMeetingReasonDrafts((previous) => ({
                                         ...previous,
-                                        [employee.id]: !previous[employee.id]
+                                        [employee.id]: event.target.value
                                       }))
                                     }
+                                    value={meetingReason}
+                                  />
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    className="min-h-[38px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canOverrideAttendance || !meetingDate || pardonMeetingMutation.isPending}
+                                    onClick={() => {
+                                      if (!meetingReason.trim()) {
+                                        setStatusMessage('Meeting pardon reason is required.');
+                                        return;
+                                      }
+                                      pardonMeetingMutation.mutate({
+                                        sNumber: employee.sNumber,
+                                        date: meetingDate,
+                                        reason: meetingReason.trim()
+                                      });
+                                    }}
                                     type="button"
                                   >
-                                    <span>{meetingDate || 'No session selected'}</span>
-                                    <span aria-hidden="true" className="text-xs text-neutral-500">
-                                      {meetingDatePickerOpenByEmployeeId[employee.id] ? '▴' : '▾'}
-                                    </span>
+                                    Pardon
                                   </button>
-                                  {meetingDatePickerOpenByEmployeeId[employee.id] && (
-                                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-neutral-300 bg-white shadow-lg">
-                                      {recentMeetingDates.length === 0 && (
-                                        <p className="p-2 text-xs text-neutral-600">No recent sessions</p>
-                                      )}
-                                      {recentMeetingDates.map((date) => {
-                                        const baseStatus =
-                                          derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
-                                        const overrideType =
-                                          derived.overrideTypeBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
-                                        const visual = getMeetingSessionVisual(baseStatus, overrideType);
-                                        return (
-                                          <button
-                                            className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-neutral-100 ${
-                                              date === meetingDate ? 'bg-neutral-100' : ''
-                                            }`}
-                                            key={`${employee.id}-meeting-option-${date}`}
-                                            onClick={() => {
-                                              setMeetingDateDrafts((previous) => ({
-                                                ...previous,
-                                                [employee.id]: date
-                                              }));
-                                              setMeetingDatePickerOpenByEmployeeId((previous) => ({
-                                                ...previous,
-                                                [employee.id]: false
-                                              }));
-                                            }}
-                                            type="button"
-                                          >
-                                            <span className="font-medium text-neutral-800">{date}</span>
-                                            <span className={`rounded border px-1 py-0.5 ${visual.badgeClass}`}>
-                                              {visual.label}
-                                            </span>
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                                  <button
+                                    className="min-h-[38px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canOverrideAttendance || !meetingDate || markMeetingPresentMutation.isPending}
+                                    onClick={() => {
+                                      if (!meetingReason.trim()) {
+                                        setStatusMessage('Meeting present reason is required.');
+                                        return;
+                                      }
+                                      markMeetingPresentMutation.mutate({
+                                        sNumber: employee.sNumber,
+                                        date: meetingDate,
+                                        reason: meetingReason.trim()
+                                      });
+                                    }}
+                                    type="button"
+                                  >
+                                    Mark Present
+                                  </button>
+                                  <button
+                                    className="min-h-[38px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canOverrideAttendance || !meetingDate || markMeetingAbsentMutation.isPending}
+                                    onClick={() => {
+                                      markMeetingAbsentMutation.mutate({
+                                        sNumber: employee.sNumber,
+                                        date: meetingDate,
+                                        reason: meetingReason.trim() || 'Marked absent from manager panel'
+                                      });
+                                    }}
+                                    type="button"
+                                  >
+                                    Mark Absent
+                                  </button>
+                                  <button
+                                    className="min-h-[38px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canOverrideAttendance || !meetingDate || clearMeetingOverrideMutation.isPending}
+                                    onClick={() => {
+                                      clearMeetingOverrideMutation.mutate({
+                                        sNumber: employee.sNumber,
+                                        date: meetingDate
+                                      });
+                                    }}
+                                    type="button"
+                                  >
+                                    Clear Override
+                                  </button>
                                 </div>
                               </div>
-                              <p className="text-xs text-neutral-600">
-                                Current status:{' '}
-                                {selectedMeetingStatus ? selectedMeetingStatus : 'No record for selected session'}
-                              </p>
-                              <p className="text-xs text-neutral-600">
-                                Current override: {selectedMeetingOverride ? selectedMeetingOverride : 'none'}
-                              </p>
-                              <label className="block text-sm">
-                                Reason
-                                <textarea
-                                  className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
-                                  onChange={(event) =>
-                                    setMeetingReasonDrafts((previous) => ({
-                                      ...previous,
-                                      [employee.id]: event.target.value
-                                    }))
-                                  }
-                                  value={meetingReason}
-                                />
-                              </label>
-                              <div className="grid grid-cols-2 gap-2">
-                                <button
-                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                  disabled={!canOverrideAttendance || !meetingDate || pardonMeetingMutation.isPending}
-                                  onClick={() => {
-                                    if (!meetingReason.trim()) {
-                                      setStatusMessage('Meeting pardon reason is required.');
-                                      return;
-                                    }
-                                    pardonMeetingMutation.mutate({
-                                      sNumber: employee.sNumber,
-                                      date: meetingDate,
-                                      reason: meetingReason.trim()
-                                    });
-                                  }}
-                                  type="button"
-                                >
-                                  Pardon Meeting
-                                </button>
-                                <button
-                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                  disabled={
-                                    !canOverrideAttendance || !meetingDate || markMeetingPresentMutation.isPending
-                                  }
-                                  onClick={() => {
-                                    if (!meetingReason.trim()) {
-                                      setStatusMessage('Meeting present reason is required.');
-                                      return;
-                                    }
-                                    markMeetingPresentMutation.mutate({
-                                      sNumber: employee.sNumber,
-                                      date: meetingDate,
-                                      reason: meetingReason.trim()
-                                    });
-                                  }}
-                                  type="button"
-                                >
-                                  Mark Meeting Present
-                                </button>
-                                <button
-                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                  disabled={
-                                    !canOverrideAttendance || !meetingDate || markMeetingAbsentMutation.isPending
-                                  }
-                                  onClick={() => {
-                                    markMeetingAbsentMutation.mutate({
-                                      sNumber: employee.sNumber,
-                                      date: meetingDate,
-                                      reason: meetingReason.trim() || 'Marked absent from manager panel'
-                                    });
-                                  }}
-                                  type="button"
-                                >
-                                  Mark Meeting Absent
-                                </button>
-                                <button
-                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                  disabled={
-                                    !canOverrideAttendance ||
-                                    !meetingDate ||
-                                    clearMeetingOverrideMutation.isPending
-                                  }
-                                  onClick={() => {
-                                    clearMeetingOverrideMutation.mutate({
-                                      sNumber: employee.sNumber,
-                                      date: meetingDate
-                                    });
-                                  }}
-                                  type="button"
-                                >
-                                  Remove Override
-                                </button>
-                              </div>
-                            </div>
+                            </details>
 
-                            <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                              <h3 className="text-sm font-semibold text-neutral-900">Shift Attendance Override</h3>
-                              <label className="block text-sm">
-                                Recent Shift
-                                <select
-                                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                                  onChange={(event) =>
-                                    setSelectedShiftDrafts((previous) => ({
-                                      ...previous,
-                                      [employee.id]: event.target.value
-                                    }))
-                                  }
-                                  value={selectedShiftKey}
-                                >
-                                  {recentShiftRows.length === 0 && <option value="">No recent shifts</option>}
-                                  {recentShiftRows.map((row) => (
-                                    <option key={`${employee.id}-${shiftRowKey(row)}`} value={shiftRowKey(row)}>
-                                      {String(row.shift_date)} P{String(row.shift_period)} ({String(row.shift_slot_key)}) —{' '}
-                                      {String(row.status)}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <p className="text-xs text-neutral-600">
-                                Selected status: {selectedShift ? String(selectedShift.status) : 'N/A'}
-                              </p>
-                              <label className="block text-sm">
-                                Reason
-                                <textarea
-                                  className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
-                                  onChange={(event) =>
-                                    setShiftReasonDrafts((previous) => ({
-                                      ...previous,
-                                      [employee.id]: event.target.value
-                                    }))
-                                  }
-                                  value={shiftReason}
-                                />
-                              </label>
-                              <div className="grid grid-cols-2 gap-2">
-                                <button
-                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                  disabled={
-                                    !canOverrideAttendance ||
-                                    !selectedShift ||
-                                    selectedShiftIsFuture ||
-                                    pardonShiftMutation.isPending
-                                  }
-                                  onClick={() => {
-                                    if (!selectedShift) {
-                                      setStatusMessage('Select a shift first.');
-                                      return;
+                            <details className="border border-neutral-300 bg-white p-2">
+                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Shift Attendance</summary>
+                              <div className="mt-2 space-y-2">
+                                <label className="block text-sm">
+                                  Recent Shift
+                                  <select
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setSelectedShiftDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: event.target.value
+                                      }))
                                     }
-                                    if (!shiftReason.trim()) {
-                                      setStatusMessage('Shift pardon reason is required.');
-                                      return;
-                                    }
-                                    pardonShiftMutation.mutate({
-                                      sNumber: employee.sNumber,
-                                      date: String(selectedShift.shift_date),
-                                      period: toNumber(selectedShift.shift_period),
-                                      shiftSlotKey: String(selectedShift.shift_slot_key),
-                                      reason: shiftReason.trim()
-                                    });
-                                  }}
-                                  type="button"
-                                >
-                                  Pardon Shift
-                                </button>
-                                <button
-                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                  disabled={
-                                    !canOverrideAttendance ||
-                                    !selectedShift ||
-                                    selectedShiftIsFuture ||
-                                    markShiftPresentMutation.isPending
-                                  }
-                                  onClick={() => {
-                                    if (!selectedShift) {
-                                      setStatusMessage('Select a shift first.');
-                                      return;
-                                    }
-                                    markShiftPresentMutation.mutate({
-                                      sNumber: employee.sNumber,
-                                      date: String(selectedShift.shift_date),
-                                      period: toNumber(selectedShift.shift_period),
-                                      shiftSlotKey: String(selectedShift.shift_slot_key)
-                                    });
-                                  }}
-                                  type="button"
-                                >
-                                  Mark Shift Present
-                                </button>
-                              </div>
-                              {selectedShiftIsFuture && (
+                                    value={selectedShiftKey}
+                                  >
+                                    {recentShiftRows.length === 0 && <option value="">No recent shifts</option>}
+                                    {recentShiftRows.map((row) => (
+                                      <option key={`${employee.id}-${shiftRowKey(row)}`} value={shiftRowKey(row)}>
+                                        {String(row.shift_date)} P{String(row.shift_period)} ({String(row.shift_slot_key)}) — {String(row.status)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
                                 <p className="text-xs text-neutral-600">
-                                  Shift overrides are available on the shift date or after.
+                                  Selected status: {selectedShift ? String(selectedShift.status) : 'N/A'}
                                 </p>
-                              )}
-                            </div>
-                          </div>
+                                <label className="block text-sm">
+                                  Reason
+                                  <textarea
+                                    className="mt-1 min-h-[72px] w-full border border-neutral-300 p-2"
+                                    onChange={(event) =>
+                                      setShiftReasonDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: event.target.value
+                                      }))
+                                    }
+                                    value={shiftReason}
+                                  />
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    className="min-h-[38px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canOverrideAttendance || !selectedShift || selectedShiftIsFuture || pardonShiftMutation.isPending}
+                                    onClick={() => {
+                                      if (!selectedShift) {
+                                        setStatusMessage('Select a shift first.');
+                                        return;
+                                      }
+                                      if (!shiftReason.trim()) {
+                                        setStatusMessage('Shift pardon reason is required.');
+                                        return;
+                                      }
+                                      pardonShiftMutation.mutate({
+                                        sNumber: employee.sNumber,
+                                        date: String(selectedShift.shift_date),
+                                        period: toNumber(selectedShift.shift_period),
+                                        shiftSlotKey: String(selectedShift.shift_slot_key),
+                                        reason: shiftReason.trim()
+                                      });
+                                    }}
+                                    type="button"
+                                  >
+                                    Pardon Shift
+                                  </button>
+                                  <button
+                                    className="min-h-[38px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canOverrideAttendance || !selectedShift || selectedShiftIsFuture || markShiftPresentMutation.isPending}
+                                    onClick={() => {
+                                      if (!selectedShift) {
+                                        setStatusMessage('Select a shift first.');
+                                        return;
+                                      }
+                                      markShiftPresentMutation.mutate({
+                                        sNumber: employee.sNumber,
+                                        date: String(selectedShift.shift_date),
+                                        period: toNumber(selectedShift.shift_period),
+                                        shiftSlotKey: String(selectedShift.shift_slot_key)
+                                      });
+                                    }}
+                                    type="button"
+                                  >
+                                    Mark Present
+                                  </button>
+                                </div>
+                                {selectedShiftIsFuture && (
+                                  <p className="text-xs text-neutral-600">Shift overrides are available on the shift date or after.</p>
+                                )}
+                              </div>
+                            </details>
 
-                          <div className="flex justify-start">
-                            <button
-                              className="min-h-[44px] border border-neutral-500 px-3 text-sm"
-                              onClick={() => toggleShowMore(employee.id)}
-                              type="button"
-                            >
-                              {showMore ? 'Show less' : 'Show more'}
-                            </button>
-                          </div>
-
-                          {showMore && (
-                            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                                <h3 className="text-sm font-semibold text-neutral-900">Employee Record</h3>
+                            <details className="border border-neutral-300 bg-white p-2">
+                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Employee Record</summary>
+                              <div className="mt-2 space-y-2">
                                 <label className="block text-sm">
                                   Name
                                   <input
-                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setEmployeeRecordDrafts((previous) => ({
                                         ...previous,
@@ -1305,7 +1271,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                 <label className="block text-sm">
                                   s_number
                                   <input
-                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setEmployeeRecordDrafts((previous) => ({
                                         ...previous,
@@ -1318,7 +1284,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                 <label className="block text-sm">
                                   Assigned periods
                                   <input
-                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setEmployeeRecordDrafts((previous) => ({
                                         ...previous,
@@ -1349,7 +1315,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                 </label>
                                 <div className="grid grid-cols-2 gap-2">
                                   <button
-                                    className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                    className="min-h-[38px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                                     disabled={!canEditSettings || saveEmployeeRecordMutation.isPending}
                                     onClick={() => saveEmployeeRecordMutation.mutate(employee.id)}
                                     type="button"
@@ -1357,7 +1323,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                     Save Record
                                   </button>
                                   <button
-                                    className="min-h-[44px] border border-neutral-500 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                    className="min-h-[38px] border border-neutral-500 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                                     disabled={!canEditSettings || removeEmployeeRecordMutation.isPending}
                                     onClick={() => removeEmployeeRecordMutation.mutate(employee.id)}
                                     type="button"
@@ -1366,13 +1332,15 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   </button>
                                 </div>
                               </div>
+                            </details>
 
-                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                                <h3 className="text-sm font-semibold text-neutral-900">Login Credentials</h3>
+                            <details className="border border-neutral-300 bg-white p-2">
+                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Login Credentials</summary>
+                              <div className="mt-2 space-y-2">
                                 <label className="block text-sm">
                                   Username
                                   <input
-                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setLoginUsernameDrafts((previous) => ({
                                         ...previous,
@@ -1385,7 +1353,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                 <label className="block text-sm">
                                   Password
                                   <input
-                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setLoginPasswordDrafts((previous) => ({
                                         ...previous,
@@ -1397,7 +1365,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   />
                                 </label>
                                 <button
-                                  className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  className="min-h-[38px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
                                   disabled={!canEditSettings || saveLoginMutation.isPending}
                                   onClick={() => {
                                     if (!loginUsername.trim()) {
@@ -1419,15 +1387,17 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   Save Login
                                 </button>
                               </div>
+                            </details>
 
-                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                                <h3 className="text-sm font-semibold text-neutral-900">Off-Period Settings</h3>
+                            <details className="border border-neutral-300 bg-white p-2">
+                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Off-Period Settings</summary>
+                              <div className="mt-2 space-y-2">
                                 <div className="grid grid-cols-4 gap-2">
                                   {Array.from({ length: 8 }, (_, index) => index + 1).map((period) => {
                                     const selected = draftOffPeriods.includes(period);
                                     return (
                                       <button
-                                        className={`min-h-[44px] border px-2 text-sm ${
+                                        className={`min-h-[36px] border px-2 text-xs ${
                                           selected
                                             ? 'border-brand-maroon bg-brand-maroon text-white'
                                             : 'border-neutral-300 bg-white text-neutral-900'
@@ -1442,7 +1412,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   })}
                                 </div>
                                 <button
-                                  className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  className="min-h-[38px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
                                   disabled={!canEditSettings || saveOffPeriodsMutation.isPending || draftOffPeriods.length === 0}
                                   onClick={() => {
                                     if (draftOffPeriods.length === 0) {
@@ -1459,13 +1429,15 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   Save Off-Periods
                                 </button>
                               </div>
+                            </details>
 
-                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                                <h3 className="text-sm font-semibold text-neutral-900">Strike Management</h3>
+                            <details className="border border-neutral-300 bg-white p-2">
+                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Strike Management</summary>
+                              <div className="mt-2 space-y-2">
                                 <label className="block text-sm">
                                   Strike view
                                   <select
-                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setStrikeScopeByEmployeeId((previous) => ({
                                         ...previous,
@@ -1481,7 +1453,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                 <label className="block text-sm">
                                   Reason
                                   <textarea
-                                    className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                                    className="mt-1 min-h-[72px] w-full border border-neutral-300 p-2"
                                     onChange={(event) =>
                                       setStrikeReasonDrafts((previous) => ({
                                         ...previous,
@@ -1492,7 +1464,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   />
                                 </label>
                                 <button
-                                  className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  className="min-h-[38px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
                                   disabled={!canManageStrikes || addStrikeMutation.isPending}
                                   onClick={() => {
                                     const reason = strikeReason.trim();
@@ -1523,7 +1495,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                           {new Date(String(strike.issued_at ?? '')).toLocaleDateString()}
                                         </p>
                                         <button
-                                          className="min-h-[44px] border border-neutral-400 px-2 text-xs"
+                                          className="min-h-[36px] border border-neutral-400 px-2 text-xs"
                                           disabled={!canManageStrikes || removeStrikeMutation.isPending}
                                           onClick={() => removeStrikeMutation.mutate(String(strike.id))}
                                           type="button"
@@ -1535,13 +1507,15 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   ))}
                                 </div>
                               </div>
+                            </details>
 
-                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
-                                <h3 className="text-sm font-semibold text-neutral-900">Points Management</h3>
+                            <details className="border border-neutral-300 bg-white p-2">
+                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Points Management</summary>
+                              <div className="mt-2 space-y-2">
                                 <label className="block text-sm">
                                   Type
                                   <select
-                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setPointsDrafts((previous) => ({
                                         ...previous,
@@ -1560,7 +1534,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                 <label className="block text-sm">
                                   Points
                                   <input
-                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setPointsDrafts((previous) => ({
                                         ...previous,
@@ -1574,7 +1548,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                 <label className="block text-sm">
                                   Note
                                   <textarea
-                                    className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                                    className="mt-1 min-h-[72px] w-full border border-neutral-300 p-2"
                                     onChange={(event) =>
                                       setPointsDrafts((previous) => ({
                                         ...previous,
@@ -1585,7 +1559,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   />
                                 </label>
                                 <button
-                                  className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  className="min-h-[38px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
                                   disabled={!canEditSettings || awardPointsMutation.isPending}
                                   onClick={() => {
                                     const points = Number(pointsDraft.points);
@@ -1605,8 +1579,8 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   Apply Points
                                 </button>
                               </div>
-                            </div>
-                          )}
+                            </details>
+                          </div>
                         </div>
                       </td>
                     </tr>
