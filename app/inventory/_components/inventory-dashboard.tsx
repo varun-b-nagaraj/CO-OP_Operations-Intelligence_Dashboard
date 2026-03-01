@@ -65,6 +65,7 @@ export function InventoryDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('Catalog');
 
   const [catalog, setCatalog] = useState<InventoryCatalogItem[]>([]);
+  const [scanCatalog, setScanCatalog] = useState<InventoryCatalogItem[]>([]);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogStatus, setCatalogStatus] = useState('');
 
@@ -179,21 +180,26 @@ export function InventoryDashboard() {
     return readCatalogSnapshot() as Promise<InventoryCatalogItem[]>;
   };
 
+  const refreshScanCatalog = async () => {
+    const items = await cacheCatalogLocally();
+    setScanCatalog(items);
+  };
+
   const loadCatalog = async () => {
-    const allItems = await cacheCatalogLocally();
-    const q = catalogQuery.trim().toLowerCase();
+    if (!online) {
+      setCatalogStatus('Catalog editor requires internet (live Supabase data).');
+      return;
+    }
 
-    const filtered = q
-      ? allItems.filter((item) => {
-          return [item.item_name, item.system_id, item.upc, item.ean, item.custom_sku, item.manufact_sku]
-            .join(' ')
-            .toLowerCase()
-            .includes(q);
-        })
-      : allItems;
-
-    setCatalog(filtered);
-    setCatalogStatus(`Catalog cached locally (${allItems.length} total items).`);
+    try {
+      const payload = await fetchJson<{ ok: true; items: InventoryCatalogItem[] }>(
+        `/api/inventory/catalog/list?q=${encodeURIComponent(catalogQuery.trim())}`
+      );
+      setCatalog(payload.items);
+      setCatalogStatus(`Live catalog loaded (${payload.items.length} rows).`);
+    } catch (error) {
+      setCatalogStatus(error instanceof Error ? error.message : 'Unable to load live catalog.');
+    }
   };
 
   const openCatalogRowEditor = (item: InventoryCatalogItem) => {
@@ -249,6 +255,7 @@ export function InventoryDashboard() {
       setCatalogStatus(`Saved edits for row ${rowId}.`);
       setExpandedCatalogRowId(null);
       await loadCatalog();
+      await refreshScanCatalog();
     } catch (error) {
       setCatalogStatus(error instanceof Error ? error.message : 'Catalog row save failed.');
     }
@@ -277,6 +284,7 @@ export function InventoryDashboard() {
 
   useEffect(() => {
     void loadCatalog();
+    void refreshScanCatalog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -407,9 +415,10 @@ export function InventoryDashboard() {
   }, [pendingTotals, serverTotals, snapshotTotals]);
 
   const countRows = useMemo(() => {
+    const lookupCatalog = scanCatalog.length ? scanCatalog : catalog;
     return Array.from(displayedTotals.entries())
       .map(([system_id, qty]) => {
-        const item = catalog.find((entry) => entry.system_id === system_id);
+        const item = lookupCatalog.find((entry) => entry.system_id === system_id);
         return {
           system_id,
           qty,
@@ -417,7 +426,7 @@ export function InventoryDashboard() {
         };
       })
       .sort((a, b) => b.qty - a.qty);
-  }, [catalog, displayedTotals]);
+  }, [catalog, displayedTotals, scanCatalog]);
 
   const uploadRows = useMemo(() => {
     if (!sessionId && lastCommittedTotals.length) {
@@ -448,11 +457,12 @@ export function InventoryDashboard() {
 
   const onScanValue = async (value: string) => {
     setActiveScannedCode(value);
-    const resolved = resolveCatalogItemByCode(catalog, value);
+    const scanLookupSource = scanCatalog.length ? scanCatalog : catalog;
+    const resolved = resolveCatalogItemByCode(scanLookupSource, value);
     if (!resolved.item) {
       setActiveItem(null);
       const normalized = value.trim().toLowerCase();
-      const localCandidates = catalog
+      const localCandidates = scanLookupSource
         .filter((item) =>
           [item.item_name, item.system_id, item.upc, item.ean, item.custom_sku, item.manufact_sku]
             .join(' ')
@@ -538,7 +548,7 @@ export function InventoryDashboard() {
 
       setRole('host');
       setSessionId(payload.session.id);
-      await cacheCatalogLocally();
+      await refreshScanCatalog();
       await loadSessionState(payload.session.id);
       await refreshPendingState(payload.session.id);
       setSessionStatus(`Session created: ${payload.session.id}.`);
@@ -567,7 +577,7 @@ export function InventoryDashboard() {
       });
 
       setSessionId(target);
-      await cacheCatalogLocally();
+      await refreshScanCatalog();
       await loadSessionState(target);
       await refreshPendingState(target);
       setSessionStatus(`Joined session ${target}.`);
@@ -1003,6 +1013,7 @@ export function InventoryDashboard() {
                         manufact_sku: ''
                       });
                       await loadCatalog();
+                      await refreshScanCatalog();
                       setCatalogStatus('Catalog item saved.');
                     } catch (error) {
                       setCatalogStatus(error instanceof Error ? error.message : 'Catalog save failed');
@@ -1018,9 +1029,9 @@ export function InventoryDashboard() {
 
               <div className="border border-neutral-300 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-neutral-900">All Cached Items</h3>
+                  <h3 className="text-sm font-semibold text-neutral-900">All Catalog Items (Live)</h3>
                   <span className="text-xs text-neutral-600">
-                    {catalog.length} rows {online ? '(editable online)' : '(view-only offline)'}
+                    {catalog.length} rows {online ? '(editable)' : '(offline - reconnect to edit)'}
                   </span>
                 </div>
 
