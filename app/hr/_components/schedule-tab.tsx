@@ -244,11 +244,19 @@ function isAlternateAssignment(assignment: Pick<ScheduleAssignment, 'role' | 'ty
   return /alternate/i.test(`${assignment.role} ${assignment.type}`);
 }
 
-function normalizeAttendanceStatus(value: unknown): ShiftAttendanceStatus {
-  if (value === 'present' || value === 'absent' || value === 'excused' || value === 'expected') {
-    return value;
+function normalizeAttendanceStatus(
+  value: unknown,
+  shiftDate?: string
+): ShiftAttendanceStatus {
+  const status: ShiftAttendanceStatus =
+    value === 'present' || value === 'absent' || value === 'excused' || value === 'expected'
+      ? value
+      : 'expected';
+
+  if (status === 'expected' && shiftDate && isDateBeforeToday(shiftDate, getTodayDateKey())) {
+    return 'present';
   }
-  return 'expected';
+  return status;
 }
 
 function toValidNumber(value: unknown): number | null {
@@ -1096,7 +1104,10 @@ export function ScheduleTab() {
       selectedShiftActionAssignment.shiftSlotKey,
       selectedShiftActionAssignment.effectiveWorkerSNumber
     ].join('|');
-    return normalizeAttendanceStatus(attendanceByAssignmentKey.get(key)?.status);
+    return normalizeAttendanceStatus(
+      attendanceByAssignmentKey.get(key)?.status,
+      selectedShiftActionAssignment.date
+    );
   }, [attendanceByAssignmentKey, selectedShiftActionAssignment]);
   const selectedShiftIsManualAssignment = Boolean(
     selectedShiftActionAssignment && isManualShiftSlotKey(selectedShiftActionAssignment.shiftSlotKey)
@@ -1995,7 +2006,8 @@ export function ScheduleTab() {
                                     assignment.effectiveWorkerSNumber
                                   ].join('|');
                                   const attendanceStatus = normalizeAttendanceStatus(
-                                    attendanceByAssignmentKey.get(attendanceKey)?.status
+                                    attendanceByAssignmentKey.get(attendanceKey)?.status,
+                                    assignment.date
                                   );
                                   const isDragTarget = dragTargetUid === assignment.uid;
                                   const isValidDropTarget = dragSourceUid

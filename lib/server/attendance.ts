@@ -50,6 +50,17 @@ function resolveShiftOverrideByDatePeriod(
   return map;
 }
 
+function resolveShiftStatusWithAutoPresent(
+  status: 'expected' | 'present' | 'absent' | 'excused',
+  date: string | null | undefined,
+  today: string
+): 'expected' | 'present' | 'absent' | 'excused' {
+  if (status === 'expected' && typeof date === 'string' && date < today) {
+    return 'present';
+  }
+  return status;
+}
+
 export function calculateMeetingAttendanceRate(inputs: {
   attendanceRecords: Array<{ date: string; status: 'present' | 'absent' }>;
   overrides: AttendanceOverride[];
@@ -124,7 +135,11 @@ export function calculateShiftAttendanceRate(inputs: {
   }
 
   const rawAttended = eligibleRecords.filter((item) => {
-    const status = item.rawStatus ?? item.status;
+    const status = resolveShiftStatusWithAutoPresent(
+      item.rawStatus ?? item.status,
+      item.date,
+      today
+    );
     return status === 'present';
   }).length;
   const attended = eligibleRecords.filter((item) => {
@@ -132,14 +147,14 @@ export function calculateShiftAttendanceRate(inputs: {
     const overrideType = shiftOverrideByDatePeriod.get(key);
     if (overrideType === 'present_override') return true;
     if (overrideType === 'excused') return false;
-    return item.status === 'present';
+    return resolveShiftStatusWithAutoPresent(item.status, item.date, today) === 'present';
   }).length;
   const excused = eligibleRecords.filter((item) => {
     const key = `${String(item.date ?? '')}|${Number(item.shiftPeriod ?? -1)}`;
     const overrideType = shiftOverrideByDatePeriod.get(key);
     if (overrideType === 'excused') return true;
     if (overrideType === 'present_override') return false;
-    return item.status === 'excused';
+    return resolveShiftStatusWithAutoPresent(item.status, item.date, today) === 'excused';
   }).length;
   const raw_rate = (rawAttended / expected_shifts) * 100;
   const adjustedDenominator = expected_shifts - excused;
@@ -180,7 +195,7 @@ export function summarizeShiftAttendanceCounts(inputs: {
     const overrideType = shiftOverrideByDatePeriod.get(key);
     if (overrideType === 'present_override') return 'present';
     if (overrideType === 'excused') return 'excused';
-    return item.status;
+    return resolveShiftStatusWithAutoPresent(item.status, item.date, today);
   };
 
   return {
