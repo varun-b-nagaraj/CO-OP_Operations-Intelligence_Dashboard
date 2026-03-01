@@ -271,9 +271,9 @@ export interface MeetingAttendanceResponse {
     timezone: string;
     generated_at: string;
     filters: {
-      date?: string;
-      from?: string;
-      to?: string;
+      date?: string | null;
+      from?: string | null;
+      to?: string | null;
       exclude?: string | string[];
     };
   };

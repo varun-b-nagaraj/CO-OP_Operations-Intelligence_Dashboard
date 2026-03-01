@@ -170,18 +170,9 @@ export const MeetingAttendanceParamsSchema = z
     from: DateStringSchema.optional(),
     to: DateStringSchema.optional(),
     exclude: z.string().max(500).optional()
-  })
-  .superRefine((value, ctx) => {
-    if (value.date && (value.from || value.to)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['date'],
-        message: 'Use either date or from/to, not both'
-      });
-    }
   });
 
-const OptionalDateOrEmptySchema = z.union([DateStringSchema, z.literal('')]).optional();
+const OptionalDateOrEmptySchema = z.union([DateStringSchema, z.literal(''), z.null()]).optional();
 
 const RawScheduleMetaSchema = z.object({
   year: z.number().int(),

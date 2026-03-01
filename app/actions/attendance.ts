@@ -14,6 +14,53 @@ import {
 } from '@/lib/types';
 import { AttendanceOverrideSchema, zodFieldErrors } from '@/lib/validation';
 
+async function upsertMeetingAttendanceSourceRecord(input: {
+  supabase: ReturnType<typeof createServerClient>;
+  sNumber: string;
+  checkinDate: string;
+  manualStatus: 'present' | 'absent' | 'excused' | null;
+  manualReason?: string | null;
+  updatedBy?: string | null;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { data: existing, error: existingError } = await input.supabase
+    .from('meeting_attendance_records')
+    .select('*')
+    .eq('s_number', input.sNumber)
+    .eq('checkin_date', input.checkinDate)
+    .maybeSingle();
+
+  if (existingError) {
+    return { ok: false, message: existingError.message };
+  }
+
+  const apiStatus =
+    (existing?.api_status as 'present' | 'absent' | null | undefined) ?? 'absent';
+  const effectiveStatus = input.manualStatus ?? apiStatus;
+
+  const { error: upsertError } = await input.supabase.from('meeting_attendance_records').upsert(
+    {
+      s_number: input.sNumber,
+      checkin_date: input.checkinDate,
+      api_status: apiStatus,
+      manual_status: input.manualStatus,
+      effective_status: effectiveStatus,
+      source: input.manualStatus ? 'manual' : 'api_sync',
+      manual_reason: input.manualReason ?? null,
+      last_api_synced_at: existing?.last_api_synced_at ?? null,
+      updated_by: input.updatedBy ?? 'open_access'
+    },
+    {
+      onConflict: 's_number,checkin_date'
+    }
+  );
+
+  if (upsertError) {
+    return { ok: false, message: upsertError.message };
+  }
+
+  return { ok: true };
+}
+
 async function upsertMeetingOverride(
   payload: {
     s_number: string;
@@ -114,6 +161,18 @@ async function upsertMeetingOverride(
       return errorResult(correlationId, 'DB_ERROR', error?.message ?? 'Unable to save override');
     }
 
+    const sourceUpdate = await upsertMeetingAttendanceSourceRecord({
+      supabase,
+      sNumber: parsed.data.s_number,
+      checkinDate: parsed.data.checkin_date,
+      manualStatus: parsed.data.override_type === 'present_override' ? 'present' : 'excused',
+      manualReason: parsed.data.reason,
+      updatedBy: 'open_access'
+    });
+    if (!sourceUpdate.ok) {
+      return errorResult(correlationId, 'DB_ERROR', sourceUpdate.message);
+    }
+
     await insertAuditEntry(
       supabase,
       {
@@ -202,6 +261,18 @@ export async function clearMeetingOverride(
     const { error: deleteError } = await supabase.from('attendance_overrides').delete().in('id', ids);
     if (deleteError) {
       return errorResult(correlationId, 'DB_ERROR', deleteError.message);
+    }
+
+    const sourceUpdate = await upsertMeetingAttendanceSourceRecord({
+      supabase,
+      sNumber,
+      checkinDate: date,
+      manualStatus: null,
+      manualReason: null,
+      updatedBy: 'open_access'
+    });
+    if (!sourceUpdate.ok) {
+      return errorResult(correlationId, 'DB_ERROR', sourceUpdate.message);
     }
 
     await insertAuditEntry(
@@ -335,6 +406,18 @@ export async function markMeetingAbsent(
       .eq('scope', 'meeting');
     if (clearOverridesError) {
       return errorResult(correlationId, 'DB_ERROR', clearOverridesError.message);
+    }
+
+    const sourceUpdate = await upsertMeetingAttendanceSourceRecord({
+      supabase,
+      sNumber: parsed.data.s_number,
+      checkinDate: parsed.data.checkin_date,
+      manualStatus: 'absent',
+      manualReason: parsed.data.reason,
+      updatedBy: 'open_access'
+    });
+    if (!sourceUpdate.ok) {
+      return errorResult(correlationId, 'DB_ERROR', sourceUpdate.message);
     }
 
     await insertAuditEntry(
