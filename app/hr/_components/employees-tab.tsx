@@ -362,7 +362,8 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
 
   const meetingAttendanceQuery = useQuery({
     queryKey: ['hr-meeting-data-for-employees', range],
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: 'always',
     queryFn: async () => {
       const result = await fetchMeetingAttendance({ from: range.from, to: range.to });
       if (!result.ok) throw new Error(result.error.message);

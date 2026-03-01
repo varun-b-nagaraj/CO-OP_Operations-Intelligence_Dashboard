@@ -25,7 +25,8 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
 
   const meetingQuery = useQuery({
     queryKey: ['hr-meeting-attendance', range],
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: 'always',
     queryFn: async () => {
       const result = await fetchMeetingAttendance({ from: range.from, to: range.to });
       if (!result.ok) throw new Error(result.error.message);
