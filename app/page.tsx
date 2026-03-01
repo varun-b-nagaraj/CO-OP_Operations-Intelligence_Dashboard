@@ -33,6 +33,12 @@ export default function HomePage() {
           >
             Open Inventory
           </Link>
+          <Link
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center border border-amber-700 bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+            href="/marketing"
+          >
+            Open Marketing
+          </Link>
         </div>
       </div>
     </main>

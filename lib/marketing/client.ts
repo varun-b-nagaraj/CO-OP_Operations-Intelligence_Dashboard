@@ -1,0 +1,480 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import type {
+  AssetType,
+  CoordinationLogRow,
+  CoordinationMethod,
+  EventAssetRow,
+  EventContactRow,
+  EventNoteRow,
+  ExternalContactRow,
+  MarketingEventBundle,
+  MarketingEventFilters,
+  MarketingEventRow,
+  MarketingEventStatus
+} from '@/lib/marketing/types';
+
+function startOfDay(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function endOfDay(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(23, 59, 59, 999);
+  return copy;
+}
+
+function asNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sanitizePathSegment(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+function mapEvent(row: Record<string, unknown>): MarketingEventRow {
+  return {
+    id: String(row.id),
+    title: String(row.title ?? ''),
+    status: (row.status as MarketingEventStatus) ?? 'draft',
+    category: (row.category as string | null) ?? null,
+    starts_at: String(row.starts_at),
+    ends_at: (row.ends_at as string | null) ?? null,
+    location: (row.location as string | null) ?? null,
+    description: (row.description as string | null) ?? null,
+    goals: (row.goals as string | null) ?? null,
+    target_audience: (row.target_audience as string | null) ?? null,
+    budget_planned: asNumber(row.budget_planned),
+    budget_actual: asNumber(row.budget_actual),
+    links: Array.isArray(row.links) ? (row.links as string[]) : [],
+    cover_asset_id: (row.cover_asset_id as string | null) ?? null,
+    outcome_summary: (row.outcome_summary as string | null) ?? null,
+    what_worked: (row.what_worked as string | null) ?? null,
+    what_didnt: (row.what_didnt as string | null) ?? null,
+    recommendations: (row.recommendations as string | null) ?? null,
+    estimated_interactions: asNumber(row.estimated_interactions),
+    units_sold: asNumber(row.units_sold),
+    cost_roi_notes: (row.cost_roi_notes as string | null) ?? null,
+    updated_at: String(row.updated_at ?? row.starts_at ?? new Date().toISOString())
+  };
+}
+
+function mapContact(row: Record<string, unknown>): ExternalContactRow {
+  return {
+    id: String(row.id),
+    organization: String(row.organization ?? ''),
+    person_name: String(row.person_name ?? ''),
+    role_title: (row.role_title as string | null) ?? null,
+    email: (row.email as string | null) ?? null,
+    phone: (row.phone as string | null) ?? null,
+    notes: (row.notes as string | null) ?? null,
+    updated_at: String(row.updated_at ?? new Date().toISOString())
+  };
+}
+
+function mapEventContact(row: Record<string, unknown>): EventContactRow {
+  const joined = row.contact as Record<string, unknown> | null;
+  return {
+    id: String(row.id),
+    event_id: String(row.event_id),
+    contact_id: (row.contact_id as string | null) ?? null,
+    is_internal: Boolean(row.is_internal),
+    coordinator_name: (row.coordinator_name as string | null) ?? null,
+    coordinator_role: (row.coordinator_role as string | null) ?? null,
+    coordinator_notes: (row.coordinator_notes as string | null) ?? null,
+    contact: joined ? mapContact(joined) : null
+  };
+}
+
+function mapAsset(row: Record<string, unknown>): EventAssetRow {
+  return {
+    id: String(row.id),
+    event_id: String(row.event_id),
+    bucket: String(row.bucket ?? 'marketing-files'),
+    storage_path: String(row.storage_path ?? ''),
+    file_name: String(row.file_name ?? ''),
+    mime_type: (row.mime_type as string | null) ?? null,
+    size_bytes: asNumber(row.size_bytes),
+    asset_type: ((row.asset_type as AssetType | null) ?? 'other') as AssetType,
+    caption: (row.caption as string | null) ?? null,
+    is_cover: Boolean(row.is_cover),
+    created_at: String(row.created_at ?? new Date().toISOString())
+  };
+}
+
+function mapNote(row: Record<string, unknown>): EventNoteRow {
+  return {
+    id: String(row.id),
+    event_id: String(row.event_id),
+    note: String(row.note ?? ''),
+    author: (row.author as string | null) ?? null,
+    created_at: String(row.created_at ?? new Date().toISOString())
+  };
+}
+
+function mapCoordination(row: Record<string, unknown>): CoordinationLogRow {
+  return {
+    id: String(row.id),
+    event_id: String(row.event_id),
+    contacted_party: String(row.contacted_party ?? ''),
+    method: ((row.method as CoordinationMethod | null) ?? 'email') as CoordinationMethod,
+    summary: String(row.summary ?? ''),
+    next_steps: (row.next_steps as string | null) ?? null,
+    created_by: (row.created_by as string | null) ?? null,
+    created_at: String(row.created_at ?? new Date().toISOString())
+  };
+}
+
+interface SaveEventInput {
+  id?: string;
+  title: string;
+  status: MarketingEventStatus;
+  category: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  location: string | null;
+  description: string | null;
+  goals: string | null;
+  target_audience: string | null;
+  budget_planned: number | null;
+  budget_actual: number | null;
+  links: string[];
+  outcome_summary: string | null;
+  what_worked: string | null;
+  what_didnt: string | null;
+  recommendations: string | null;
+  estimated_interactions: number | null;
+  units_sold: number | null;
+  cost_roi_notes: string | null;
+  cover_asset_id: string | null;
+}
+
+export interface MarketingRepository {
+  listEvents(filters: MarketingEventFilters): Promise<MarketingEventRow[]>;
+  listContacts(query: string): Promise<ExternalContactRow[]>;
+  listEventIndicators(
+    eventIds: string[]
+  ): Promise<Record<string, { assets: number; internalContacts: number; externalContacts: number }>>;
+  listLinkedEventIdsForContact(contactId: string): Promise<string[]>;
+  getEventBundle(eventId: string): Promise<MarketingEventBundle>;
+  saveEvent(input: SaveEventInput): Promise<MarketingEventRow>;
+  saveContact(input: Partial<ExternalContactRow> & { organization: string; person_name: string }): Promise<ExternalContactRow>;
+  addInternalCoordinator(input: {
+    eventId: string;
+    coordinatorName: string;
+    coordinatorRole?: string | null;
+    coordinatorNotes?: string | null;
+  }): Promise<EventContactRow>;
+  linkExternalContact(input: { eventId: string; contactId: string }): Promise<EventContactRow>;
+  unlinkEventContact(eventContactId: string): Promise<void>;
+  addEventNote(input: { eventId: string; note: string; author?: string | null }): Promise<EventNoteRow>;
+  addCoordinationLog(input: {
+    eventId: string;
+    contactedParty: string;
+    method: CoordinationMethod;
+    summary: string;
+    nextSteps?: string | null;
+    createdBy?: string | null;
+  }): Promise<CoordinationLogRow>;
+  uploadAsset(input: { eventId: string; file: File; assetType: AssetType; caption?: string | null }): Promise<EventAssetRow>;
+  setCoverAsset(input: { eventId: string; assetId: string }): Promise<void>;
+  listReportRows(query: string): Promise<MarketingEventRow[]>;
+}
+
+export function createMarketingRepository(supabase: SupabaseClient): MarketingRepository {
+  return {
+    async listEvents(filters) {
+      let query = supabase
+        .from('marketing_events')
+        .select('*')
+        .order('starts_at', { ascending: false });
+
+      if (filters.status !== 'all') {
+        query = query.eq('status', filters.status);
+      }
+
+      if (filters.category !== 'all') {
+        query = query.eq('category', filters.category);
+      }
+
+      if (filters.recentOnly) {
+        const now = new Date();
+        const from = startOfDay(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)).toISOString();
+        const to = endOfDay(new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)).toISOString();
+        query = query.gte('starts_at', from).lte('starts_at', to);
+      }
+
+      if (filters.query.trim()) {
+        const escaped = filters.query.trim().replaceAll(',', ' ');
+        query = query.or(`title.ilike.%${escaped}%,location.ilike.%${escaped}%,description.ilike.%${escaped}%,category.ilike.%${escaped}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(mapEvent);
+    },
+
+    async listContacts(query) {
+      let request = supabase
+        .from('external_contacts')
+        .select('*')
+        .order('organization', { ascending: true })
+        .order('person_name', { ascending: true });
+
+      if (query.trim()) {
+        const escaped = query.trim().replaceAll(',', ' ');
+        request = request.or(`organization.ilike.%${escaped}%,person_name.ilike.%${escaped}%,email.ilike.%${escaped}%,phone.ilike.%${escaped}%`);
+      }
+
+      const { data, error } = await request;
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(mapContact);
+    },
+
+    async listEventIndicators(eventIds) {
+      if (!eventIds.length) return {};
+
+      const [assetResult, contactResult] = await Promise.all([
+        supabase.from('event_assets').select('event_id').in('event_id', eventIds),
+        supabase.from('event_contacts').select('event_id,is_internal').in('event_id', eventIds)
+      ]);
+
+      if (assetResult.error) throw assetResult.error;
+      if (contactResult.error) throw contactResult.error;
+
+      const output: Record<string, { assets: number; internalContacts: number; externalContacts: number }> = {};
+      eventIds.forEach((id) => {
+        output[id] = { assets: 0, internalContacts: 0, externalContacts: 0 };
+      });
+
+      ((assetResult.data ?? []) as Array<{ event_id: string }>).forEach((row) => {
+        if (!output[row.event_id]) output[row.event_id] = { assets: 0, internalContacts: 0, externalContacts: 0 };
+        output[row.event_id].assets += 1;
+      });
+
+      ((contactResult.data ?? []) as Array<{ event_id: string; is_internal: boolean }>).forEach((row) => {
+        if (!output[row.event_id]) output[row.event_id] = { assets: 0, internalContacts: 0, externalContacts: 0 };
+        if (row.is_internal) output[row.event_id].internalContacts += 1;
+        else output[row.event_id].externalContacts += 1;
+      });
+
+      return output;
+    },
+
+    async listLinkedEventIdsForContact(contactId) {
+      const { data, error } = await supabase.from('event_contacts').select('event_id').eq('contact_id', contactId);
+      if (error) throw error;
+      return ((data ?? []) as Array<{ event_id: string }>).map((row) => row.event_id);
+    },
+
+    async getEventBundle(eventId) {
+      const [eventResult, eventContactsResult, assetsResult, notesResult, coordinationResult] = await Promise.all([
+        supabase.from('marketing_events').select('*').eq('id', eventId).single(),
+        supabase
+          .from('event_contacts')
+          .select(
+            'id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,notes,updated_at)'
+          )
+          .eq('event_id', eventId)
+          .order('created_at', { ascending: false }),
+        supabase.from('event_assets').select('*').eq('event_id', eventId).order('created_at', { ascending: false }),
+        supabase.from('event_notes').select('*').eq('event_id', eventId).order('created_at', { ascending: false }),
+        supabase.from('coordination_logs').select('*').eq('event_id', eventId).order('created_at', { ascending: false })
+      ]);
+
+      if (eventResult.error) throw eventResult.error;
+      if (eventContactsResult.error) throw eventContactsResult.error;
+      if (assetsResult.error) throw assetsResult.error;
+      if (notesResult.error) throw notesResult.error;
+      if (coordinationResult.error) throw coordinationResult.error;
+
+      return {
+        event: mapEvent((eventResult.data ?? {}) as Record<string, unknown>),
+        eventContacts: ((eventContactsResult.data ?? []) as Record<string, unknown>[]).map(mapEventContact),
+        assets: ((assetsResult.data ?? []) as Record<string, unknown>[]).map(mapAsset),
+        notes: ((notesResult.data ?? []) as Record<string, unknown>[]).map(mapNote),
+        coordinationLogs: ((coordinationResult.data ?? []) as Record<string, unknown>[]).map(mapCoordination)
+      };
+    },
+
+    async saveEvent(input) {
+      const payload = {
+        id: input.id,
+        title: input.title,
+        status: input.status,
+        category: input.category,
+        starts_at: input.starts_at,
+        ends_at: input.ends_at,
+        location: input.location,
+        description: input.description,
+        goals: input.goals,
+        target_audience: input.target_audience,
+        budget_planned: input.budget_planned,
+        budget_actual: input.budget_actual,
+        links: input.links,
+        outcome_summary: input.outcome_summary,
+        what_worked: input.what_worked,
+        what_didnt: input.what_didnt,
+        recommendations: input.recommendations,
+        estimated_interactions: input.estimated_interactions,
+        units_sold: input.units_sold,
+        cost_roi_notes: input.cost_roi_notes,
+        cover_asset_id: input.cover_asset_id,
+        updated_by: 'dashboard'
+      };
+
+      const { data, error } = await supabase.from('marketing_events').upsert(payload).select('*').single();
+      if (error) throw error;
+      return mapEvent((data ?? {}) as Record<string, unknown>);
+    },
+
+    async saveContact(input) {
+      const payload = {
+        id: input.id,
+        organization: input.organization,
+        person_name: input.person_name,
+        role_title: input.role_title ?? null,
+        email: input.email ?? null,
+        phone: input.phone ?? null,
+        notes: input.notes ?? null,
+        updated_by: 'dashboard'
+      };
+
+      const { data, error } = await supabase.from('external_contacts').upsert(payload).select('*').single();
+      if (error) throw error;
+      return mapContact((data ?? {}) as Record<string, unknown>);
+    },
+
+    async addInternalCoordinator(input) {
+      const { data, error } = await supabase
+        .from('event_contacts')
+        .insert({
+          event_id: input.eventId,
+          is_internal: true,
+          coordinator_name: input.coordinatorName,
+          coordinator_role: input.coordinatorRole ?? null,
+          coordinator_notes: input.coordinatorNotes ?? null
+        })
+        .select('id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_notes')
+        .single();
+      if (error) throw error;
+      return mapEventContact((data ?? {}) as Record<string, unknown>);
+    },
+
+    async linkExternalContact(input) {
+      const { data, error } = await supabase
+        .from('event_contacts')
+        .upsert({
+          event_id: input.eventId,
+          contact_id: input.contactId,
+          is_internal: false
+        })
+        .select(
+          'id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,notes,updated_at)'
+        )
+        .single();
+      if (error) throw error;
+      return mapEventContact((data ?? {}) as Record<string, unknown>);
+    },
+
+    async unlinkEventContact(eventContactId) {
+      const { error } = await supabase.from('event_contacts').delete().eq('id', eventContactId);
+      if (error) throw error;
+    },
+
+    async addEventNote(input) {
+      const { data, error } = await supabase
+        .from('event_notes')
+        .insert({
+          event_id: input.eventId,
+          note: input.note,
+          author: input.author ?? null
+        })
+        .select('*')
+        .single();
+      if (error) throw error;
+      return mapNote((data ?? {}) as Record<string, unknown>);
+    },
+
+    async addCoordinationLog(input) {
+      const { data, error } = await supabase
+        .from('coordination_logs')
+        .insert({
+          event_id: input.eventId,
+          contacted_party: input.contactedParty,
+          method: input.method,
+          summary: input.summary,
+          next_steps: input.nextSteps ?? null,
+          created_by: input.createdBy ?? null
+        })
+        .select('*')
+        .single();
+      if (error) throw error;
+      return mapCoordination((data ?? {}) as Record<string, unknown>);
+    },
+
+    async uploadAsset(input) {
+      const bucket = 'marketing-files';
+      const storagePath = `${input.eventId}/${Date.now()}-${sanitizePathSegment(input.file.name)}`;
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(storagePath, input.file, {
+        upsert: false,
+        contentType: input.file.type || undefined
+      });
+      if (uploadError) throw uploadError;
+
+      const { data, error } = await supabase
+        .from('event_assets')
+        .insert({
+          event_id: input.eventId,
+          bucket,
+          storage_path: storagePath,
+          file_name: input.file.name,
+          mime_type: input.file.type || null,
+          size_bytes: input.file.size,
+          asset_type: input.assetType,
+          caption: input.caption ?? null,
+          uploaded_by: 'dashboard'
+        })
+        .select('*')
+        .single();
+      if (error) throw error;
+
+      return mapAsset((data ?? {}) as Record<string, unknown>);
+    },
+
+    async setCoverAsset(input) {
+      const { error: unsetError } = await supabase.from('event_assets').update({ is_cover: false }).eq('event_id', input.eventId);
+      if (unsetError) throw unsetError;
+
+      const { error: setError } = await supabase.from('event_assets').update({ is_cover: true }).eq('id', input.assetId);
+      if (setError) throw setError;
+
+      const { error: eventError } = await supabase
+        .from('marketing_events')
+        .update({ cover_asset_id: input.assetId, updated_by: 'dashboard' })
+        .eq('id', input.eventId);
+      if (eventError) throw eventError;
+    },
+
+    async listReportRows(query) {
+      let request = supabase
+        .from('marketing_events')
+        .select('*')
+        .eq('status', 'completed')
+        .order('starts_at', { ascending: false });
+
+      if (query.trim()) {
+        const escaped = query.trim().replaceAll(',', ' ');
+        request = request.or(`title.ilike.%${escaped}%,category.ilike.%${escaped}%`);
+      }
+
+      const { data, error } = await request;
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(mapEvent);
+    }
+  };
+}
