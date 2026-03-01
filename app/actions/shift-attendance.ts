@@ -20,8 +20,8 @@ function getTodayDateKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function isShiftDateTodayOrPast(shiftDate: string): boolean {
-  return shiftDate <= getTodayDateKey();
+function hasShiftDatePassed(shiftDate: string): boolean {
+  return shiftDate < getTodayDateKey();
 }
 
 async function maybeAwardShiftPoints(
@@ -190,11 +190,11 @@ export async function markShiftPresent(
   if (!allowed) {
     return errorResult(correlationId, 'FORBIDDEN', 'You do not have permission to mark attendance.');
   }
-  if (!isShiftDateTodayOrPast(date)) {
+  if (!hasShiftDatePassed(date)) {
     return errorResult(
       correlationId,
       'VALIDATION_ERROR',
-      'You can only mark a shift present on the shift date or after.'
+      'You can only mark a shift present after the shift date has passed.'
     );
   }
 
@@ -219,6 +219,13 @@ export async function markShiftAbsent(
   if (!allowed) {
     return errorResult(correlationId, 'FORBIDDEN', 'You do not have permission to mark attendance.');
   }
+  if (!hasShiftDatePassed(date)) {
+    return errorResult(
+      correlationId,
+      'VALIDATION_ERROR',
+      'You can only mark a shift absent after the shift date has passed.'
+    );
+  }
 
   return upsertShiftAttendanceStatus({
     sNumber,
@@ -242,11 +249,11 @@ export async function excuseShiftAbsence(
   if (!allowed) {
     return errorResult(correlationId, 'FORBIDDEN', 'You do not have permission to excuse attendance.');
   }
-  if (!isShiftDateTodayOrPast(date)) {
+  if (!hasShiftDatePassed(date)) {
     return errorResult(
       correlationId,
       'VALIDATION_ERROR',
-      'You can only pardon a shift absence on the shift date or after.'
+      'You can only pardon a shift absence after the shift date has passed.'
     );
   }
 

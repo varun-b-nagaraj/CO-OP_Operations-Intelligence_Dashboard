@@ -12,6 +12,7 @@ import {
   generateCorrelationId,
   Result,
   ShiftChangeRequest,
+  ShiftRequestSource,
   ShiftRequestStatus,
   successResult
 } from '@/lib/types';
@@ -103,7 +104,8 @@ export async function submitShiftExchange(
   shiftSlotKey: string,
   fromSNumber: string,
   toSNumber: string,
-  reason: string
+  reason: string,
+  requestSource: ShiftRequestSource = 'employee_form'
 ): Promise<Result<ShiftChangeRequest>> {
   const correlationId = generateCorrelationId();
 
@@ -119,7 +121,8 @@ export async function submitShiftExchange(
       shift_slot_key: shiftSlotKey,
       from_employee_s_number: fromSNumber,
       to_employee_s_number: toSNumber,
-      reason
+      reason,
+      request_source: requestSource
     });
 
     if (!parsed.success) {
@@ -245,7 +248,8 @@ export async function submitShiftExchange(
         from_employee_s_number: parsed.data.from_employee_s_number,
         to_employee_s_number: parsed.data.to_employee_s_number,
         reason: parsed.data.reason,
-        status: 'pending'
+        status: 'pending',
+        request_source: parsed.data.request_source ?? 'employee_form'
       })
       .select('*')
       .single();

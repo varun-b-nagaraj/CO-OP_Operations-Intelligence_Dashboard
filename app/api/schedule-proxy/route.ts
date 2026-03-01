@@ -52,6 +52,31 @@ export async function GET(request: NextRequest) {
     const scheduleResult = await fetchScheduleWithCache(supabase, parsed.data, correlationId);
     const window = monthWindow(parsed.data.year, parsed.data.month);
 
+    if (parsed.data.forceRefresh) {
+      const { error: clearManagerEditsError } = await supabase
+        .from('shift_change_requests')
+        .delete()
+        .eq('status', 'approved')
+        .or(
+          [
+            'request_source.eq.manager_schedule',
+            'reason.ilike.%Saved schedule edits%',
+            'reason.ilike.%Assigned from schedule tab%',
+            'reason.ilike.%Self-volunteered for shift%',
+            'reason.ilike.%Self-removed from volunteered shift%'
+          ].join(',')
+        )
+        .gte('shift_date', window.from)
+        .lte('shift_date', window.to);
+
+      if (clearManagerEditsError && !clearManagerEditsError.message.includes('request_source')) {
+        logError('schedule_clear_manager_edits_failed', {
+          correlationId,
+          error: clearManagerEditsError.message
+        });
+      }
+    }
+
     const { data: approvedExchanges, error: exchangeError } = await supabase
       .from('shift_change_requests')
       .select('*')

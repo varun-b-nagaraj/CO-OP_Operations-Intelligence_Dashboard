@@ -7,18 +7,14 @@ import { getAuditLog } from '@/app/actions/audit';
 import { usePermission } from '@/lib/permissions';
 
 type AuditFiltersState = {
-  dateFrom: string;
-  dateTo: string;
   userId: string;
   actionType: string;
   tableName: string;
 };
 
-export function AuditTab() {
+export function AuditTab(props: { dateRange: { from: string; to: string } }) {
   const canView = usePermission('hr.audit.view');
   const [filters, setFilters] = useState<AuditFiltersState>({
-    dateFrom: '',
-    dateTo: '',
     userId: '',
     actionType: '',
     tableName: ''
@@ -29,15 +25,15 @@ export function AuditTab() {
 
   const normalizedFilters = useMemo(
     () => ({
-      dateFrom: filters.dateFrom || undefined,
-      dateTo: filters.dateTo || undefined,
+      dateFrom: props.dateRange.from || undefined,
+      dateTo: props.dateRange.to || undefined,
       userId: filters.userId || undefined,
       actionType: filters.actionType || undefined,
       tableName: filters.tableName || undefined,
       cursor: currentCursor ?? undefined,
       limit: 50
     }),
-    [currentCursor, filters]
+    [currentCursor, filters, props.dateRange.from, props.dateRange.to]
   );
 
   const auditQuery = useQuery({
@@ -55,35 +51,7 @@ export function AuditTab() {
 
   return (
     <section className="space-y-4">
-      <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-5">
-        <label className="text-sm">
-          Date From
-          <input
-            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-            onChange={(event) =>
-              setFilters((previous) => ({
-                ...previous,
-                dateFrom: event.target.value
-              }))
-            }
-            type="date"
-            value={filters.dateFrom}
-          />
-        </label>
-        <label className="text-sm">
-          Date To
-          <input
-            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-            onChange={(event) =>
-              setFilters((previous) => ({
-                ...previous,
-                dateTo: event.target.value
-              }))
-            }
-            type="date"
-            value={filters.dateTo}
-          />
-        </label>
+      <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-3">
         <label className="text-sm">
           User
           <input

@@ -57,7 +57,8 @@ export const ShiftExchangeRequestSchema = z
     shift_slot_key: ShiftSlotKeySchema,
     from_employee_s_number: SNumberSchema,
     to_employee_s_number: SNumberSchema,
-    reason: z.string().trim().min(1).max(500)
+    reason: z.string().trim().min(1).max(500),
+    request_source: z.enum(['employee_form', 'manager_schedule', 'system']).optional()
   })
   .superRefine((value, ctx) => {
     if (value.from_employee_s_number === value.to_employee_s_number) {

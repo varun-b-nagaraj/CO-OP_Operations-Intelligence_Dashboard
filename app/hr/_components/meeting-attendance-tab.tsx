@@ -1,20 +1,27 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { overrideMeetingAttendance, pardonMeetingAbsence } from '@/app/actions/attendance';
 import { fetchMeetingAttendance } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
 
-import { currentMonthRange, formatRate } from './utils';
+import { formatRate } from './utils';
 
-export function MeetingAttendanceTab() {
+export function MeetingAttendanceTab(props: { dateRange: { from: string; to: string } }) {
   const canView = usePermission('hr.attendance.view');
   const canOverride = usePermission('hr.attendance.override');
   const queryClient = useQueryClient();
-  const [range, setRange] = useState(currentMonthRange());
   const [status, setStatus] = useState<string | null>(null);
+  const [meetingActionDraft, setMeetingActionDraft] = useState<{
+    sNumber: string;
+    name: string;
+    mode: 'pardon' | 'present';
+    date: string;
+    reason: string;
+  } | null>(null);
+  const range = useMemo(() => props.dateRange, [props.dateRange]);
 
   const meetingQuery = useQuery({
     queryKey: ['hr-meeting-attendance', range],
@@ -62,27 +69,6 @@ export function MeetingAttendanceTab() {
       <p className="text-xs text-neutral-600">
         Meeting attendance is separate from period 0 morning shift attendance.
       </p>
-      <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-4">
-        <label className="text-sm">
-          From
-          <input
-            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-            onChange={(event) => setRange((previous) => ({ ...previous, from: event.target.value }))}
-            type="date"
-            value={range.from}
-          />
-        </label>
-        <label className="text-sm">
-          To
-          <input
-            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-            onChange={(event) => setRange((previous) => ({ ...previous, to: event.target.value }))}
-            type="date"
-            value={range.to}
-          />
-        </label>
-      </div>
-
       {status && <p className="text-sm text-brand-maroon">{status}</p>}
       {meetingQuery.isLoading && <p className="text-sm text-neutral-600">Loading meeting attendance...</p>}
       {meetingQuery.error && <p className="text-sm text-red-700">{(meetingQuery.error as Error).message}</p>}
@@ -132,11 +118,14 @@ export function MeetingAttendanceTab() {
                           <button
                             className="min-h-[44px] border border-neutral-500 px-2 text-xs"
                             onClick={() => {
-                              const date = meetingQuery.data?.dates[meetingQuery.data.dates.length - 1];
-                              if (!date) return;
-                              const reason = window.prompt('Reason for excused absence') ?? '';
-                              if (!reason.trim()) return;
-                              pardonMutation.mutate({ sNumber: student.s_number, date, reason });
+                              const date = meetingQuery.data?.dates[meetingQuery.data.dates.length - 1] ?? '';
+                              setMeetingActionDraft({
+                                sNumber: student.s_number,
+                                name: student.name,
+                                mode: 'pardon',
+                                date,
+                                reason: ''
+                              });
                             }}
                             type="button"
                           >
@@ -145,11 +134,14 @@ export function MeetingAttendanceTab() {
                           <button
                             className="min-h-[44px] border border-neutral-500 px-2 text-xs"
                             onClick={() => {
-                              const date = meetingQuery.data?.dates[meetingQuery.data.dates.length - 1];
-                              if (!date) return;
-                              const reason = window.prompt('Reason for present override') ?? '';
-                              if (!reason.trim()) return;
-                              overrideMutation.mutate({ sNumber: student.s_number, date, reason });
+                              const date = meetingQuery.data?.dates[meetingQuery.data.dates.length - 1] ?? '';
+                              setMeetingActionDraft({
+                                sNumber: student.s_number,
+                                name: student.name,
+                                mode: 'present',
+                                date,
+                                reason: ''
+                              });
                             }}
                             type="button"
                           >
@@ -164,6 +156,81 @@ export function MeetingAttendanceTab() {
             </table>
           </div>
         </>
+      )}
+
+      {meetingActionDraft && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+          <div className="w-full max-w-lg border border-neutral-400 bg-white p-4">
+            <h3 className="text-base font-semibold text-neutral-900">
+              {meetingActionDraft.mode === 'pardon' ? 'Pardon Meeting Absence' : 'Mark Meeting Present'}
+            </h3>
+            <p className="mt-1 text-sm text-neutral-700">{meetingActionDraft.name}</p>
+            <label className="mt-3 block text-sm">
+              Meeting date
+              <select
+                className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                onChange={(event) =>
+                  setMeetingActionDraft((previous) =>
+                    previous ? { ...previous, date: event.target.value } : previous
+                  )
+                }
+                value={meetingActionDraft.date}
+              >
+                {(meetingQuery.data?.dates ?? []).map((date) => (
+                  <option key={date} value={date}>
+                    {date}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="mt-3 block text-sm">
+              Reason
+              <textarea
+                className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                onChange={(event) =>
+                  setMeetingActionDraft((previous) =>
+                    previous ? { ...previous, reason: event.target.value } : previous
+                  )
+                }
+                value={meetingActionDraft.reason}
+              />
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                onClick={() => setMeetingActionDraft(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
+                disabled={
+                  !meetingActionDraft.date ||
+                  !meetingActionDraft.reason.trim() ||
+                  pardonMutation.isPending ||
+                  overrideMutation.isPending
+                }
+                onClick={() => {
+                  const payload = {
+                    sNumber: meetingActionDraft.sNumber,
+                    date: meetingActionDraft.date,
+                    reason: meetingActionDraft.reason.trim()
+                  };
+                  if (meetingActionDraft.mode === 'pardon') {
+                    pardonMutation.mutate(payload);
+                  } else {
+                    overrideMutation.mutate(payload);
+                  }
+                  setMeetingActionDraft(null);
+                }}
+                type="button"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

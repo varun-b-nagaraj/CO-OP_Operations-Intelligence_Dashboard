@@ -96,6 +96,7 @@ export interface AttendanceOverride {
 }
 
 export type ShiftRequestStatus = 'pending' | 'approved' | 'denied';
+export type ShiftRequestSource = 'employee_form' | 'manager_schedule' | 'system';
 
 export interface ShiftChangeRequest {
   id: string;
@@ -106,6 +107,7 @@ export interface ShiftChangeRequest {
   to_employee_s_number: string;
   reason: string;
   status: ShiftRequestStatus;
+  request_source: ShiftRequestSource;
   requested_at: string;
   reviewed_by: string | null;
   reviewed_at: string | null;

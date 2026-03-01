@@ -64,7 +64,7 @@ function readBooleanField(row: StudentRow, keys: string[], fallback: boolean): b
   return fallback;
 }
 
-export function RequestsTab() {
+export function RequestsTab(props: { dateRange: { from: string; to: string } }) {
   const canView = usePermission('hr.requests.view');
   const canApprove = usePermission('hr.schedule.edit');
   const supabase = useBrowserSupabase();
@@ -157,6 +157,9 @@ export function RequestsTab() {
       let query = supabase
         .from('shift_change_requests')
         .select('*')
+        .eq('request_source', 'employee_form')
+        .gte('shift_date', props.dateRange.from)
+        .lte('shift_date', props.dateRange.to)
         .order('requested_at', { ascending: false })
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
 
@@ -357,7 +360,8 @@ export function RequestsTab() {
         shiftSlotKey,
         values.from_employee_s_number,
         values.to_employee_s_number,
-        values.reason
+        values.reason,
+        'employee_form'
       );
       if (!result.ok) throw new Error(result.error.message);
       return result.data;
@@ -452,7 +456,7 @@ export function RequestsTab() {
             {...form.register('from_employee_s_number')}
           >
             {fromOptions.length === 0 ? (
-              <option value="">No workers scheduled in this slot</option>
+              <option value="">No workers expected in this slot</option>
             ) : (
               fromOptions.map((option) => (
                 <option key={option.value} value={option.value}>

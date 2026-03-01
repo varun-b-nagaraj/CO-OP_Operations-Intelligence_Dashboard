@@ -8,6 +8,7 @@ import {
   overrideMeetingAttendance,
   pardonMeetingAbsence
 } from '@/app/actions/attendance';
+import { awardPoints } from '@/app/actions/points';
 import {
   getEmployeeLoginProfiles,
   updateEmployeeLoginCredentials
@@ -17,17 +18,15 @@ import { updateEmployeeOffPeriods } from '@/app/actions/employee-settings';
 import { excuseShiftAbsence, markShiftPresent } from '@/app/actions/shift-attendance';
 import { fetchMeetingAttendance } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
-import { calculateMeetingAttendanceRate, calculateShiftAttendanceRate } from '@/lib/server/attendance';
+import { calculateMeetingAttendanceRate } from '@/lib/server/attendance';
 import { AttendanceOverride } from '@/lib/types';
 
 import {
-  currentMonthRange,
-  formatRate,
   getStudentDisplayName,
   getStudentId,
   getStudentSNumber,
   getTodayDateKey,
-  isDateTodayOrPast,
+  isDateBeforeToday,
   StudentRow,
   useBrowserSupabase
 } from './utils';
@@ -50,13 +49,13 @@ interface EmployeeMetric {
   shiftPresent: number;
   shiftAbsent: number;
   shiftExcused: number;
-  shiftRawRate: number | null;
-  shiftAdjustedRate: number | null;
+  shiftRawMissed: number;
+  shiftAdjustedMissed: number;
   meetingSessions: number;
   meetingAttended: number;
   meetingExcused: number;
-  meetingRawRate: number | null;
-  meetingAdjustedRate: number | null;
+  meetingRawMissed: number;
+  meetingAdjustedMissed: number;
   points: number;
 }
 
@@ -101,14 +100,14 @@ function shiftRowKey(row: GenericRow): string {
   return `${String(row.shift_date ?? '')}|${String(row.shift_period ?? '')}|${String(row.shift_slot_key ?? '')}`;
 }
 
-export function EmployeesTab() {
+export function EmployeesTab(props: { dateRange: { from: string; to: string } }) {
   const canViewAttendance = usePermission('hr.attendance.view');
   const canOverrideAttendance = usePermission('hr.attendance.override');
   const canEditSettings = usePermission('hr.settings.edit');
   const canManageStrikes = usePermission('hr.strikes.manage');
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
-  const [range, setRange] = useState(currentMonthRange());
+  const range = props.dateRange;
   const [expandedEmployeeId, setExpandedEmployeeId] = useState<string | null>(null);
   const [offPeriodDrafts, setOffPeriodDrafts] = useState<Record<string, number[]>>({});
   const [strikeReasonDrafts, setStrikeReasonDrafts] = useState<Record<string, string>>({});
@@ -127,6 +126,8 @@ export function EmployeesTab() {
   });
   const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
   const [showMoreByEmployeeId, setShowMoreByEmployeeId] = useState<Record<string, boolean>>({});
+  const [strikeScopeByEmployeeId, setStrikeScopeByEmployeeId] = useState<Record<string, 'active' | 'all'>>({});
+  const [pointsDrafts, setPointsDrafts] = useState<Record<string, { points: string; type: string; note: string }>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const studentsQuery = useQuery({
@@ -153,9 +154,9 @@ export function EmployeesTab() {
   }, [studentsQuery.data]);
 
   const strikesQuery = useQuery({
-    queryKey: ['hr-strikes-active'],
+    queryKey: ['hr-strikes-all'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('strikes').select('*').eq('active', true);
+      const { data, error } = await supabase.from('strikes').select('*');
       if (error) throw new Error(error.message);
       return (data ?? []) as GenericRow[];
     }
@@ -248,7 +249,7 @@ export function EmployeesTab() {
       return result.data;
     },
     onSuccess: (_, payload) => {
-      queryClient.invalidateQueries({ queryKey: ['hr-strikes-active'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-strikes-all'] });
       setStrikeReasonDrafts((previous) => ({ ...previous, [payload.employeeId]: '' }));
       setStatusMessage(`Added strike for employee ${payload.employeeId}.`);
     },
@@ -264,7 +265,7 @@ export function EmployeesTab() {
       return result.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['hr-strikes-active'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-strikes-all'] });
       setStatusMessage('Strike removed.');
     },
     onError: (error) => {
@@ -299,7 +300,7 @@ export function EmployeesTab() {
     queryClient.invalidateQueries({ queryKey: ['hr-meeting-data-for-employees'] });
     queryClient.invalidateQueries({ queryKey: ['hr-meeting-overrides'] });
     queryClient.invalidateQueries({ queryKey: ['hr-points-ledger'] });
-    queryClient.invalidateQueries({ queryKey: ['hr-strikes-active'] });
+    queryClient.invalidateQueries({ queryKey: ['hr-strikes-all'] });
     queryClient.invalidateQueries({ queryKey: ['hr-login-profiles'] });
   };
 
@@ -562,14 +563,46 @@ export function EmployeesTab() {
     }
   });
 
+  const awardPointsMutation = useMutation({
+    mutationFn: async (payload: { employeeId: string; points: number; type: string; note: string }) => {
+      const pointType =
+        payload.type === 'meeting' ||
+        payload.type === 'morning_shift' ||
+        payload.type === 'off_period_shift' ||
+        payload.type === 'project'
+          ? payload.type
+          : 'manual';
+      const result = await awardPoints(payload.employeeId, pointType, payload.points, payload.note);
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    },
+    onSuccess: (_, payload) => {
+      queryClient.invalidateQueries({ queryKey: ['hr-points-ledger'] });
+      setPointsDrafts((previous) => ({
+        ...previous,
+        [payload.employeeId]: { points: '1', type: 'manual', note: '' }
+      }));
+      setStatusMessage('Points updated.');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to update points.');
+    }
+  });
+
   const derived = useMemo(() => {
     const strikesByEmployee = new Map<string, GenericRow[]>();
+    const activeStrikesByEmployee = new Map<string, GenericRow[]>();
     for (const row of strikesQuery.data ?? []) {
       const employeeId = String(row.employee_id ?? '');
       if (!employeeId) continue;
       const bucket = strikesByEmployee.get(employeeId) ?? [];
       bucket.push(row);
       strikesByEmployee.set(employeeId, bucket);
+      if (row.active === true) {
+        const activeBucket = activeStrikesByEmployee.get(employeeId) ?? [];
+        activeBucket.push(row);
+        activeStrikesByEmployee.set(employeeId, activeBucket);
+      }
     }
 
     const settingsByEmployeeId = new Map<string, number[]>();
@@ -659,12 +692,7 @@ export function EmployeesTab() {
       const sNumber = getStudentSNumber(student);
       const shifts = shiftBySNumber.get(sNumber) ?? [];
       const offPeriods = settingsByEmployeeId.get(id) ?? settingsBySNumber.get(sNumber) ?? [4, 8];
-      const shiftRates = calculateShiftAttendanceRate({
-        shiftAttendanceRecords: shifts.map((item) => ({
-          status: item.status as 'expected' | 'present' | 'absent' | 'excused',
-          date: String(item.shift_date ?? '')
-        }))
-      });
+      const localTodayKey = getTodayDateKey();
 
       const attendanceRecords =
         meetingAttendanceQuery.data?.records.filter((record) => record.s_number === sNumber) ?? [];
@@ -683,6 +711,20 @@ export function EmployeesTab() {
         (item) => offPeriods.includes(toNumber(item.shift_period)) && item.status === 'present'
       ).length;
 
+      const meetingRawMissed = attendanceRecords.filter((record) => record.status === 'absent').length;
+      const meetingAdjustedMissed = Math.max(
+        0,
+        meetingRates.total_sessions - meetingRates.attended - meetingRates.excused
+      );
+      const eligibleShiftRows = shifts.filter(
+        (item) => String(item.shift_date ?? '') <= localTodayKey
+      );
+      const shiftRawMissed = eligibleShiftRows.filter(
+        (item) => item.status === 'absent' || item.status === 'excused'
+      ).length;
+      const shiftAdjustedMissed = eligibleShiftRows.filter((item) => item.status === 'absent').length;
+
+      const basePoints = meetingRates.attended + morningShifts + offPeriodShifts;
       return {
         id,
         name: getStudentDisplayName(student),
@@ -693,21 +735,21 @@ export function EmployeesTab() {
         assignedPeriods:
           ((student.assigned_periods as string | undefined) ?? String(student.Schedule ?? '')).trim(),
         offPeriods,
-        strikesCount: (strikesByEmployee.get(id) ?? []).length,
+        strikesCount: (activeStrikesByEmployee.get(id) ?? []).length,
         totalShifts: shifts.length,
         morningShifts,
         offPeriodShifts,
         shiftPresent,
         shiftAbsent,
         shiftExcused,
-        shiftRawRate: shiftRates.raw_rate,
-        shiftAdjustedRate: shiftRates.adjusted_rate,
+        shiftRawMissed,
+        shiftAdjustedMissed,
         meetingSessions: meetingRates.total_sessions,
         meetingAttended: meetingRates.attended,
         meetingExcused: meetingRates.excused,
-        meetingRawRate: meetingRates.raw_rate,
-        meetingAdjustedRate: meetingRates.adjusted_rate,
-        points: pointsByEmployee.get(id) ?? 0
+        meetingRawMissed,
+        meetingAdjustedMissed,
+        points: basePoints + (pointsByEmployee.get(id) ?? 0)
       };
     });
 
@@ -716,6 +758,7 @@ export function EmployeesTab() {
     return {
       metrics,
       strikesByEmployee,
+      activeStrikesByEmployee,
       shiftBySNumber,
       meetingStatusBySNumberDate,
       recentMeetingDatesBySNumber,
@@ -811,27 +854,6 @@ export function EmployeesTab() {
         </button>
       </div>
 
-      <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-4">
-        <label className="text-sm">
-          From
-          <input
-            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-            onChange={(event) => setRange((previous) => ({ ...previous, from: event.target.value }))}
-            type="date"
-            value={range.from}
-          />
-        </label>
-        <label className="text-sm">
-          To
-          <input
-            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-            onChange={(event) => setRange((previous) => ({ ...previous, to: event.target.value }))}
-            type="date"
-            value={range.to}
-          />
-        </label>
-      </div>
-
       {statusMessage && <p className="text-sm text-brand-maroon">{statusMessage}</p>}
 
       <div className="overflow-x-auto border border-neutral-300">
@@ -857,14 +879,17 @@ export function EmployeesTab() {
               const shiftReason = shiftReasonDrafts[employee.id] ?? '';
               const loginUsername = loginUsernameDrafts[employee.id] ?? employee.username ?? '';
               const loginPassword = loginPasswordDrafts[employee.id] ?? '';
-              const employeeStrikes = derived.strikesByEmployee.get(employee.id) ?? [];
+              const employeeStrikesAll = derived.strikesByEmployee.get(employee.id) ?? [];
+              const activeEmployeeStrikes = derived.activeStrikesByEmployee.get(employee.id) ?? [];
+              const strikeScope = strikeScopeByEmployeeId[employee.id] ?? 'active';
+              const employeeStrikes = strikeScope === 'all' ? employeeStrikesAll : activeEmployeeStrikes;
               const recentMeetingDates = derived.recentMeetingDatesBySNumber.get(employee.sNumber) ?? [];
               const recentShiftRows = (derived.shiftBySNumber.get(employee.sNumber) ?? []).slice(0, 30);
               const selectedShiftKey = selectedShiftDrafts[employee.id] ?? '';
               const selectedShift =
                 recentShiftRows.find((row) => shiftRowKey(row) === selectedShiftKey) ?? null;
               const selectedShiftIsFuture = selectedShift
-                ? !isDateTodayOrPast(String(selectedShift.shift_date ?? ''), todayKey)
+                ? !isDateBeforeToday(String(selectedShift.shift_date ?? ''), todayKey)
                 : false;
               const selectedMeetingStatus =
                 derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(meetingDate) ?? null;
@@ -878,6 +903,7 @@ export function EmployeesTab() {
                 assignedPeriods: employee.assignedPeriods
               };
               const showMore = showMoreByEmployeeId[employee.id] ?? false;
+              const pointsDraft = pointsDrafts[employee.id] ?? { points: '1', type: 'manual', note: '' };
 
               return (
                 <Fragment key={employee.id}>
@@ -906,10 +932,10 @@ export function EmployeesTab() {
                     <td className="p-2">{employee.sNumber || 'N/A'}</td>
                     <td className="p-2">{employee.strikesCount}</td>
                     <td className="p-2">
-                      {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
+                      {employee.meetingRawMissed} / {employee.meetingAdjustedMissed}
                     </td>
                     <td className="p-2">
-                      {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
+                      {employee.shiftRawMissed} / {employee.shiftAdjustedMissed}
                     </td>
                     <td className="p-2">{employee.offPeriods.join(', ')}</td>
                     <td className="p-2">{employee.points}</td>
@@ -932,10 +958,10 @@ export function EmployeesTab() {
                               </p>
                               <p className="text-sm text-neutral-700">Points: {employee.points}</p>
                               <p className="text-sm text-neutral-700">
-                                Meeting rates: {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
+                                Meeting missed (raw/adj): {employee.meetingRawMissed} / {employee.meetingAdjustedMissed}
                               </p>
                               <p className="text-sm text-neutral-700">
-                                Shift rates: {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
+                                Shift missed (raw/adj): {employee.shiftRawMissed} / {employee.shiftAdjustedMissed}
                               </p>
                               <p className="text-sm text-neutral-700">
                                 Shift summary: {employee.shiftPresent} present, {employee.shiftAbsent} absent, {employee.shiftExcused} excused
@@ -1336,6 +1362,22 @@ export function EmployeesTab() {
                               <div className="space-y-3 border border-neutral-300 bg-white p-3">
                                 <h3 className="text-sm font-semibold text-neutral-900">Strike Management</h3>
                                 <label className="block text-sm">
+                                  Strike view
+                                  <select
+                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setStrikeScopeByEmployeeId((previous) => ({
+                                        ...previous,
+                                        [employee.id]: event.target.value === 'all' ? 'all' : 'active'
+                                      }))
+                                    }
+                                    value={strikeScope}
+                                  >
+                                    <option value="active">Active strikes</option>
+                                    <option value="all">All-time strikes</option>
+                                  </select>
+                                </label>
+                                <label className="block text-sm">
                                   Reason
                                   <textarea
                                     className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
@@ -1368,7 +1410,9 @@ export function EmployeesTab() {
                                 </button>
                                 <div className="space-y-2">
                                   {employeeStrikes.length === 0 && (
-                                    <p className="text-sm text-neutral-600">No active strikes.</p>
+                                    <p className="text-sm text-neutral-600">
+                                      {strikeScope === 'all' ? 'No strike history.' : 'No active strikes.'}
+                                    </p>
                                   )}
                                   {employeeStrikes.map((strike) => (
                                     <div className="border border-neutral-300 p-2" key={String(strike.id)}>
@@ -1389,6 +1433,76 @@ export function EmployeesTab() {
                                     </div>
                                   ))}
                                 </div>
+                              </div>
+
+                              <div className="space-y-3 border border-neutral-300 bg-white p-3">
+                                <h3 className="text-sm font-semibold text-neutral-900">Points Management</h3>
+                                <label className="block text-sm">
+                                  Type
+                                  <select
+                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setPointsDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: { ...pointsDraft, type: event.target.value }
+                                      }))
+                                    }
+                                    value={pointsDraft.type}
+                                  >
+                                    <option value="manual">Manual</option>
+                                    <option value="meeting">Meeting</option>
+                                    <option value="morning_shift">Morning Shift</option>
+                                    <option value="off_period_shift">Off-Period Shift</option>
+                                    <option value="project">Project</option>
+                                  </select>
+                                </label>
+                                <label className="block text-sm">
+                                  Points
+                                  <input
+                                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setPointsDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: { ...pointsDraft, points: event.target.value }
+                                      }))
+                                    }
+                                    type="number"
+                                    value={pointsDraft.points}
+                                  />
+                                </label>
+                                <label className="block text-sm">
+                                  Note
+                                  <textarea
+                                    className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                                    onChange={(event) =>
+                                      setPointsDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: { ...pointsDraft, note: event.target.value }
+                                      }))
+                                    }
+                                    value={pointsDraft.note}
+                                  />
+                                </label>
+                                <button
+                                  className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={!canEditSettings || awardPointsMutation.isPending}
+                                  onClick={() => {
+                                    const points = Number(pointsDraft.points);
+                                    if (!Number.isFinite(points) || points === 0) {
+                                      setStatusMessage('Points must be a non-zero number.');
+                                      return;
+                                    }
+                                    awardPointsMutation.mutate({
+                                      employeeId: employee.id,
+                                      points: Math.trunc(points),
+                                      type: pointsDraft.type,
+                                      note: pointsDraft.note.trim() || 'Manual points adjustment'
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Apply Points
+                                </button>
                               </div>
                             </div>
                           )}

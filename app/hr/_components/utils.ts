@@ -31,6 +31,10 @@ export function isDateTodayOrPast(dateKey: string, todayKey: string = getTodayDa
   return dateKey <= todayKey;
 }
 
+export function isDateBeforeToday(dateKey: string, todayKey: string = getTodayDateKey()): boolean {
+  return dateKey < todayKey;
+}
+
 export type StudentRow = Record<string, unknown>;
 
 function getFirstStringField(row: StudentRow, keys: string[]): string | null {

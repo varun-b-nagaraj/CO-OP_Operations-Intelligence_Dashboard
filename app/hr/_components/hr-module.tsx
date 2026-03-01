@@ -3,12 +3,14 @@
 import dynamic from 'next/dynamic';
 import type { Route } from 'next';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useState } from 'react';
 
 import { hasPermission } from '@/lib/permissions';
 import { PermissionFlag } from '@/lib/types';
 
 import { CFATabId, CFAModule, isCFATab } from './cfa-module';
 import { HRTabItem, TabNavigation } from './tab-navigation';
+import { currentMonthRange } from './utils';
 
 const ScheduleTab = dynamic(() => import('./schedule-tab').then((module) => module.ScheduleTab));
 const EmployeesTab = dynamic(() => import('./employees-tab').then((module) => module.EmployeesTab));
@@ -42,6 +44,7 @@ export function HRModule() {
   const pathname = usePathname();
 
   const visibleTabs = tabs.filter((tab) => hasPermission(tab.permission));
+  const [globalDateRange, setGlobalDateRange] = useState(currentMonthRange());
 
   const requestedModule = searchParams.get('module');
   const resolvedModule: PrimaryModule = requestedModule === 'cfa' ? 'cfa' : 'hr';
@@ -80,12 +83,42 @@ export function HRModule() {
     <main className="min-h-screen w-full">
       <section className="border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-4">
-          <h1 className="text-xl font-semibold text-neutral-900">
-            {resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
-          </h1>
-          <p className="mt-1 text-sm text-neutral-700">
-            Module view is selected at launch and stays locked on this page.
-          </p>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-semibold text-neutral-900">
+                {resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
+              </h1>
+              <p className="mt-1 text-sm text-neutral-700">
+                Module view is selected at launch and stays locked on this page.
+              </p>
+            </div>
+            {resolvedModule === 'hr' && (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs text-neutral-700">
+                  From
+                  <input
+                    className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                    onChange={(event) =>
+                      setGlobalDateRange((previous) => ({ ...previous, from: event.target.value }))
+                    }
+                    type="date"
+                    value={globalDateRange.from}
+                  />
+                </label>
+                <label className="text-xs text-neutral-700">
+                  To
+                  <input
+                    className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                    onChange={(event) =>
+                      setGlobalDateRange((previous) => ({ ...previous, to: event.target.value }))
+                    }
+                    type="date"
+                    value={globalDateRange.to}
+                  />
+                </label>
+              </div>
+            )}
+          </div>
         </header>
 
         {resolvedModule === 'hr' ? (
@@ -99,11 +132,11 @@ export function HRModule() {
               role="tabpanel"
             >
               {resolvedHRTab === 'schedule' && <ScheduleTab />}
-              {resolvedHRTab === 'employees' && <EmployeesTab />}
-              {resolvedHRTab === 'meeting-attendance' && <MeetingAttendanceTab />}
-              {resolvedHRTab === 'shift-attendance' && <ShiftAttendanceTab />}
-              {resolvedHRTab === 'requests' && <RequestsTab />}
-              {resolvedHRTab === 'audit' && <AuditTab />}
+              {resolvedHRTab === 'employees' && <EmployeesTab dateRange={globalDateRange} />}
+              {resolvedHRTab === 'meeting-attendance' && <MeetingAttendanceTab dateRange={globalDateRange} />}
+              {resolvedHRTab === 'shift-attendance' && <ShiftAttendanceTab dateRange={globalDateRange} />}
+              {resolvedHRTab === 'requests' && <RequestsTab dateRange={globalDateRange} />}
+              {resolvedHRTab === 'audit' && <AuditTab dateRange={globalDateRange} />}
             </section>
           </section>
         ) : (

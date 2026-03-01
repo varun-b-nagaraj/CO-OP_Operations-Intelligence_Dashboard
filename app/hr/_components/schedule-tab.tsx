@@ -10,7 +10,7 @@ import { fetchSchedule } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
 import { ScheduleAssignment, ScheduleParams, ShiftAttendanceStatus } from '@/lib/types';
 
-import { getTodayDateKey, isDateTodayOrPast, useBrowserSupabase } from './utils';
+import { getTodayDateKey, isDateBeforeToday, useBrowserSupabase } from './utils';
 
 type GenericRow = Record<string, unknown>;
 type YearMonthSelection = { year: number; month: number };
@@ -27,6 +27,21 @@ type EmptySlotTarget = {
   date: string;
   period: number;
 };
+type PendingManualEdit =
+  | {
+      mode: 'assign';
+      date: string;
+      period: number;
+      employeeSNumber: string;
+      asAlternate: boolean;
+    }
+  | {
+      mode: 'remove';
+      date: string;
+      period: number;
+      shiftSlotKey: string;
+      employeeSNumber: string;
+    };
 
 type StoredScheduleTableRow = {
   year: number;
@@ -330,6 +345,7 @@ export function ScheduleTab() {
   const [attendanceReason, setAttendanceReason] = useState('');
   const [savedAssignmentWorkersByUid, setSavedAssignmentWorkersByUid] = useState<Record<string, string>>({});
   const [savedRosterScheduleableById, setSavedRosterScheduleableById] = useState<Record<string, boolean>>({});
+  const [pendingManualEdits, setPendingManualEdits] = useState<PendingManualEdit[]>([]);
   const [isPersistingEdits, setIsPersistingEdits] = useState(false);
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
@@ -478,7 +494,8 @@ export function ScheduleTab() {
         payload.assignment.shiftSlotKey,
         payload.assignment.effectiveWorkerSNumber,
         payload.targetSNumber,
-        payload.reason
+        payload.reason,
+        'manager_schedule'
       );
       if (!submitResult.ok) throw new Error(`${submitResult.error.message} (${submitResult.correlationId})`);
 
@@ -665,6 +682,7 @@ export function ScheduleTab() {
     setDragTargetUid(null);
     setShiftActionModalUid(null);
     setEmptySlotTarget(null);
+    setPendingManualEdits([]);
   }, [schedule]);
 
   useEffect(() => {
@@ -1045,7 +1063,8 @@ export function ScheduleTab() {
         ),
     [editableRoster, savedRosterScheduleableById]
   );
-  const hasUnsavedChanges = changedAssignmentRows.length > 0 || changedRosterRows.length > 0;
+  const hasUnsavedChanges =
+    changedAssignmentRows.length > 0 || changedRosterRows.length > 0 || pendingManualEdits.length > 0;
 
   const attendanceByAssignmentKey = useMemo(() => {
     const map = new Map<string, GenericRow>();
@@ -1218,7 +1237,7 @@ export function ScheduleTab() {
   }, [hasUnsavedChanges]);
 
   const todayKey = getTodayDateKey();
-  const selectedShiftIsFuture = selectedActionDate ? !isDateTodayOrPast(selectedActionDate, todayKey) : false;
+  const selectedShiftDayPassed = selectedActionDate ? isDateBeforeToday(selectedActionDate, todayKey) : false;
 
   const targetYearMonthLabel = `${generationSelection.year}-${String(generationSelection.month).padStart(2, '0')}`;
   const openMonthLabel = `${monthSelection.year}-${String(monthSelection.month).padStart(2, '0')}`;
@@ -1245,6 +1264,7 @@ export function ScheduleTab() {
     if (!hasUnsavedChanges || isPersistingEdits) return;
     let savedAssignmentCount = 0;
     let savedRosterCount = 0;
+    let savedManualCount = 0;
     const nextSavedRosterScheduleableById = { ...savedRosterScheduleableById };
     const nextSavedAssignmentWorkersByUid = { ...savedAssignmentWorkersByUid };
     setIsPersistingEdits(true);
@@ -1268,7 +1288,8 @@ export function ScheduleTab() {
           change.assignment.shiftSlotKey,
           change.fromWorker,
           change.toWorker,
-          'Saved schedule edits'
+          'Saved schedule edits',
+          'manager_schedule'
         );
         if (!submitResult.ok) {
           throw new Error(`${submitResult.error.message} (${submitResult.correlationId})`);
@@ -1281,8 +1302,49 @@ export function ScheduleTab() {
         savedAssignmentCount += 1;
       }
 
+      for (const edit of pendingManualEdits) {
+        if (edit.mode === 'assign') {
+          const shiftSlotKey = buildManualShiftSlotKey(
+            edit.date,
+            edit.period,
+            edit.employeeSNumber,
+            edit.asAlternate
+          );
+          const { error } = await supabase.from('shift_attendance').upsert(
+            {
+              shift_date: edit.date,
+              shift_period: edit.period,
+              shift_slot_key: shiftSlotKey,
+              employee_s_number: edit.employeeSNumber,
+              status: 'expected',
+              source: 'manual',
+              reason: null,
+              marked_by: 'open_access',
+              marked_at: new Date().toISOString()
+            },
+            {
+              onConflict: 'shift_date,shift_period,shift_slot_key,employee_s_number'
+            }
+          );
+          if (error) throw new Error(error.message);
+          savedManualCount += 1;
+          continue;
+        }
+
+        const { error } = await supabase
+          .from('shift_attendance')
+          .delete()
+          .eq('shift_date', edit.date)
+          .eq('shift_period', edit.period)
+          .eq('shift_slot_key', edit.shiftSlotKey)
+          .eq('employee_s_number', edit.employeeSNumber);
+        if (error) throw new Error(error.message);
+        savedManualCount += 1;
+      }
+
       setSavedRosterScheduleableById(nextSavedRosterScheduleableById);
       setSavedAssignmentWorkersByUid(nextSavedAssignmentWorkersByUid);
+      setPendingManualEdits([]);
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['hr-schedule'] }),
@@ -1297,12 +1359,13 @@ export function ScheduleTab() {
       const savedParts: string[] = [];
       if (savedAssignmentCount > 0) savedParts.push(`${savedAssignmentCount} assignment update(s)`);
       if (savedRosterCount > 0) savedParts.push(`${savedRosterCount} roster update(s)`);
+      if (savedManualCount > 0) savedParts.push(`${savedManualCount} manual shift update(s)`);
       setMessage(`Saved changes: ${savedParts.join(', ')}.`);
       setIsSwapModeEnabled(false);
       setDragSourceUid(null);
       setDragTargetUid(null);
     } catch (error) {
-      if (savedAssignmentCount > 0 || savedRosterCount > 0) {
+      if (savedAssignmentCount > 0 || savedRosterCount > 0 || savedManualCount > 0) {
         setSavedRosterScheduleableById(nextSavedRosterScheduleableById);
         setSavedAssignmentWorkersByUid(nextSavedAssignmentWorkersByUid);
         await Promise.all([
@@ -1316,9 +1379,9 @@ export function ScheduleTab() {
       }
       const fallbackMessage = 'Unable to save changes.';
       const errorMessage = error instanceof Error ? error.message : fallbackMessage;
-      if (savedAssignmentCount > 0 || savedRosterCount > 0) {
+      if (savedAssignmentCount > 0 || savedRosterCount > 0 || savedManualCount > 0) {
         setMessage(
-          `Partially saved (${savedAssignmentCount} assignment, ${savedRosterCount} roster). ${errorMessage}`
+          `Partially saved (${savedAssignmentCount} assignment, ${savedRosterCount} roster, ${savedManualCount} manual). ${errorMessage}`
         );
       } else {
         setMessage(errorMessage);
@@ -1358,6 +1421,87 @@ export function ScheduleTab() {
     setShiftActionModalUid(null);
     setEmptySlotTarget(null);
     setManagerAssigneeSearch('');
+  };
+
+  const stageManualAssign = (payload: {
+    date: string;
+    period: number;
+    employeeSNumber: string;
+    asAlternate: boolean;
+  }) => {
+    const shiftSlotKey = buildManualShiftSlotKey(
+      payload.date,
+      payload.period,
+      payload.employeeSNumber,
+      payload.asAlternate
+    );
+    setManualAssignments((previous) => {
+      const dedupeKey = `${payload.date}|${payload.period}|${shiftSlotKey}|${payload.employeeSNumber}`;
+      if (
+        previous.some(
+          (entry) =>
+            `${entry.date}|${entry.period}|${entry.shiftSlotKey}|${entry.effectiveWorkerSNumber}` === dedupeKey
+        )
+      ) {
+        return previous;
+      }
+      const displayName = rosterNameBySNumber.get(payload.employeeSNumber) ?? payload.employeeSNumber;
+      return [
+        ...previous,
+        {
+          uid: `manual|${payload.date}|${payload.period}|${shiftSlotKey}|${payload.employeeSNumber}`,
+          date: payload.date,
+          day: schedule?.calendar[payload.date] ?? '',
+          period: payload.period,
+          shiftSlotKey,
+          studentName: displayName,
+          studentSNumber: payload.employeeSNumber,
+          type: payload.asAlternate ? 'Alternate' : 'Manual',
+          group: 'Manual',
+          role: payload.asAlternate ? 'alternate employee' : 'employee',
+          effectiveWorkerSNumber: payload.employeeSNumber
+        }
+      ];
+    });
+    setPendingManualEdits((previous) => [
+      ...previous,
+      {
+        mode: 'assign',
+        date: payload.date,
+        period: payload.period,
+        employeeSNumber: payload.employeeSNumber,
+        asAlternate: payload.asAlternate
+      }
+    ]);
+  };
+
+  const stageManualRemove = (payload: {
+    date: string;
+    period: number;
+    shiftSlotKey: string;
+    employeeSNumber: string;
+  }) => {
+    setManualAssignments((previous) =>
+      previous.filter(
+        (entry) =>
+          !(
+            entry.date === payload.date &&
+            entry.period === payload.period &&
+            entry.shiftSlotKey === payload.shiftSlotKey &&
+            entry.effectiveWorkerSNumber === payload.employeeSNumber
+          )
+      )
+    );
+    setPendingManualEdits((previous) => [
+      ...previous,
+      {
+        mode: 'remove',
+        date: payload.date,
+        period: payload.period,
+        shiftSlotKey: payload.shiftSlotKey,
+        employeeSNumber: payload.employeeSNumber
+      }
+    ]);
   };
 
   const handleSubmitShiftAction = () => {
@@ -1450,35 +1594,39 @@ export function ScheduleTab() {
     }
 
     if (selectedShiftActionAssignment) {
-      if (selectedShiftActionAttendanceStatus !== 'expected') {
-        setMessage('Only expected shifts can be reassigned.');
-        return;
-      }
-
       if (assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber) {
         setMessage('No change: this employee is already assigned.');
         return;
       }
 
       if (selectedShiftIsManualAssignment) {
-        manualSlotMutation.mutate({
-          mode: 'reassign',
+        const asAlternate = isAlternateAssignment(selectedShiftActionAssignment);
+        stageManualRemove({
           date: selectedShiftActionAssignment.date,
           period: selectedShiftActionAssignment.period,
           shiftSlotKey: selectedShiftActionAssignment.shiftSlotKey,
-          previousEmployeeSNumber: selectedShiftActionAssignment.effectiveWorkerSNumber,
-          employeeSNumber: assignmentTargetSNumber
+          employeeSNumber: selectedShiftActionAssignment.effectiveWorkerSNumber
         });
+        stageManualAssign({
+          date: selectedShiftActionAssignment.date,
+          period: selectedShiftActionAssignment.period,
+          employeeSNumber: assignmentTargetSNumber,
+          asAlternate
+        });
+        closeShiftActionModal();
+        setMessage('Manual assignment updated. Save changes to persist.');
         return;
       }
 
-      volunteerForShiftMutation.mutate({
-        assignment: selectedShiftActionAssignment,
-        targetSNumber: assignmentTargetSNumber,
-        reason: 'Assigned from schedule tab',
-        autoApprove: true,
-        mode: 'assign'
-      });
+      setEditableAssignments((previous) =>
+        previous.map((assignment) =>
+          assignment.uid === selectedShiftActionAssignment.uid
+            ? { ...assignment, effectiveWorkerSNumber: assignmentTargetSNumber }
+            : assignment
+        )
+      );
+      closeShiftActionModal();
+      setMessage('Assignment updated. Save changes to persist.');
       return;
     }
 
@@ -1494,13 +1642,14 @@ export function ScheduleTab() {
       setMessage('This shift is full (max 3 regular + 1 alternate).');
       return;
     }
-    manualSlotMutation.mutate({
-      mode: 'assign',
+    stageManualAssign({
       date: emptySlotTarget.date,
       period: emptySlotTarget.period,
       employeeSNumber: assignmentTargetSNumber,
       asAlternate: emptySlotMode === 'alternate'
     });
+    closeShiftActionModal();
+    setMessage('Manual assignment added. Save changes to persist.');
   };
 
   return (
@@ -1551,7 +1700,8 @@ export function ScheduleTab() {
                 )}
                 {hasUnsavedChanges && (
                   <p className="text-xs text-brand-maroon">
-                    Unsaved changes: {changedAssignmentRows.length} assignment, {changedRosterRows.length} roster.
+                    Unsaved changes: {changedAssignmentRows.length} assignment, {changedRosterRows.length} roster,{' '}
+                    {pendingManualEdits.length} manual.
                   </p>
                 )}
                 {canChangeAccessMode && (
@@ -1846,11 +1996,6 @@ export function ScheduleTab() {
                                           {attendanceStatus === 'excused' ? 'pardoned' : attendanceStatus}
                                         </span>
                                       </div>
-                                      {isSwapModeEnabled && (
-                                        <p className="mt-1 text-[10px] text-neutral-500">
-                                          Drag to another employee to swap, or to an open spot to assign.
-                                        </p>
-                                      )}
                                     </div>
                                   );
                                 })}
@@ -1897,13 +2042,13 @@ export function ScheduleTab() {
                                     setMessage('Drop blocked: this shift is full.');
                                     return;
                                   }
-                                  manualSlotMutation.mutate({
-                                    mode: 'assign',
+                                  stageManualAssign({
                                     date: day.dateKey,
                                     period: targetPeriod,
                                     employeeSNumber: draggedEmployeeSNumber,
                                     asAlternate: openSlotMode === 'alternate'
                                   });
+                                  setMessage('Manual assignment added. Save changes to persist.');
                                   setDragSourceUid(null);
                                   setDragTargetUid(null);
                                 }}
@@ -2255,6 +2400,29 @@ export function ScheduleTab() {
                   </select>
                 </label>
                 <div className="flex justify-end gap-2">
+                  {selectedShiftActionAssignment && (
+                    <button
+                      className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                      onClick={() => {
+                        if (!selectedShiftActionAssignment) return;
+                        if (!isManualShiftSlotKey(selectedShiftActionAssignment.shiftSlotKey)) {
+                          setMessage('Only manual/open-slot assignments can be removed.');
+                          return;
+                        }
+                        stageManualRemove({
+                          date: selectedShiftActionAssignment.date,
+                          period: selectedShiftActionAssignment.period,
+                          shiftSlotKey: selectedShiftActionAssignment.shiftSlotKey,
+                          employeeSNumber: selectedShiftActionAssignment.effectiveWorkerSNumber
+                        });
+                        closeShiftActionModal();
+                        setMessage('Manual assignment removed. Save changes to persist.');
+                      }}
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  )}
                   <button
                     className="min-h-[44px] border border-neutral-500 px-3 text-sm"
                     onClick={closeShiftActionModal}
@@ -2268,9 +2436,6 @@ export function ScheduleTab() {
                       selectedActionIsWeekend ||
                       volunteerForShiftMutation.isPending ||
                       manualSlotMutation.isPending ||
-                      (selectedShiftActionAssignment
-                        ? selectedShiftActionAttendanceStatus !== 'expected'
-                        : false) ||
                       !assignmentTargetSNumber ||
                       (selectedShiftActionAssignment
                         ? assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber
@@ -2374,7 +2539,7 @@ export function ScheduleTab() {
                     <div className="mt-3 grid grid-cols-3 gap-2">
                       <button
                         className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={updateAttendanceMutation.isPending || selectedShiftIsFuture}
+                        disabled={updateAttendanceMutation.isPending || !selectedShiftDayPassed}
                         onClick={() =>
                           updateAttendanceMutation.mutate({
                             assignment: selectedShiftActionAssignment,
@@ -2387,7 +2552,7 @@ export function ScheduleTab() {
                       </button>
                       <button
                         className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={updateAttendanceMutation.isPending}
+                        disabled={updateAttendanceMutation.isPending || !selectedShiftDayPassed}
                         onClick={() =>
                           updateAttendanceMutation.mutate({
                             assignment: selectedShiftActionAssignment,
@@ -2398,24 +2563,10 @@ export function ScheduleTab() {
                       >
                         Mark Absent
                       </button>
-                      <button
-                        className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={updateAttendanceMutation.isPending || !attendanceReason.trim() || selectedShiftIsFuture}
-                        onClick={() =>
-                          updateAttendanceMutation.mutate({
-                            assignment: selectedShiftActionAssignment,
-                            status: 'excused',
-                            reason: attendanceReason.trim()
-                          })
-                        }
-                        type="button"
-                      >
-                        Mark Excused
-                      </button>
                     </div>
-                    {selectedShiftIsFuture && (
+                    {!selectedShiftDayPassed && (
                       <p className="mt-2 text-xs text-neutral-600">
-                        Present and excused overrides are only allowed on the shift date or after.
+                        Present/absent updates are only allowed after the shift date has passed.
                       </p>
                     )}
                   </>
