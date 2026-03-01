@@ -1,6 +1,7 @@
 'use client';
 
 import jsQR from 'jsqr';
+import Image from 'next/image';
 import QRCode from 'qrcode';
 import { useEffect, useRef, useState } from 'react';
 
@@ -99,7 +100,14 @@ export function QRSyncPanel({ outgoingPacket, onImportPacket }: QRSyncPanelProps
         <div className="border border-neutral-200 p-2">
           <p className="text-xs font-medium text-neutral-800">Outgoing Packet</p>
           {qrImage ? (
-            <img alt="QR Sync Packet" className="mt-2 border border-neutral-300" src={qrImage} />
+            <Image
+              alt="QR Sync Packet"
+              className="mt-2 border border-neutral-300"
+              height={280}
+              src={qrImage}
+              unoptimized
+              width={280}
+            />
           ) : (
             <p className="mt-2 text-xs text-neutral-500">No packet generated yet.</p>
           )}

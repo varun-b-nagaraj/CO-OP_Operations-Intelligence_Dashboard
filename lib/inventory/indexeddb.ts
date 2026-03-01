@@ -1,10 +1,8 @@
 'use client';
 
-import { DBSchema, openDB } from 'idb';
+import { openDB } from 'idb';
 
 import { InventoryCountEvent } from '@/lib/inventory/types';
-
-type InventoryDB = DBSchema;
 
 const DB_NAME = 'coop_inventory_v1';
 

@@ -4,6 +4,33 @@ const SERVICE_UUID = '2f9fb7e0-7f34-4c1a-a88c-0da3d05bb9b7';
 const PUSH_CHAR_UUID = '2f9fb7e1-7f34-4c1a-a88c-0da3d05bb9b7';
 const SNAPSHOT_CHAR_UUID = '2f9fb7e2-7f34-4c1a-a88c-0da3d05bb9b7';
 
+interface BluetoothCharacteristicLike {
+  writeValueWithResponse(value: BufferSource): Promise<void>;
+  readValue(): Promise<DataView>;
+}
+
+interface BluetoothServiceLike {
+  getCharacteristic(uuid: string): Promise<BluetoothCharacteristicLike>;
+}
+
+interface BluetoothServerLike {
+  getPrimaryService(uuid: string): Promise<BluetoothServiceLike>;
+  disconnect(): void;
+}
+
+interface BluetoothDeviceLike {
+  gatt?: {
+    connect(): Promise<BluetoothServerLike>;
+  };
+}
+
+interface BluetoothLike {
+  requestDevice(options: {
+    filters?: Array<{ services: string[] }>;
+    optionalServices?: string[];
+  }): Promise<BluetoothDeviceLike>;
+}
+
 function chunkString(value: string, size = 180): string[] {
   const chunks: string[] = [];
   for (let i = 0; i < value.length; i += size) {
@@ -16,8 +43,9 @@ export class BLEProvider implements SyncProvider {
   readonly id = 'ble' as const;
 
   isSupported(): boolean {
-    const nav = navigator as Navigator & { bluetooth?: { requestDevice: (options: unknown) => Promise<any> } };
-    return typeof navigator !== 'undefined' && Boolean(nav.bluetooth);
+    if (typeof navigator === 'undefined') return false;
+    const nav = navigator as Navigator & { bluetooth?: BluetoothLike };
+    return Boolean(nav.bluetooth);
   }
 
   async syncNow(input: {
@@ -53,7 +81,7 @@ export class BLEProvider implements SyncProvider {
     }
 
     try {
-      const nav = navigator as Navigator & { bluetooth?: { requestDevice: (options: unknown) => Promise<any> } };
+      const nav = navigator as Navigator & { bluetooth?: BluetoothLike };
       if (!nav.bluetooth) {
         throw new Error('Web Bluetooth is unavailable on this browser.');
       }

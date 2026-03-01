@@ -583,7 +583,7 @@ export function InventoryDashboard() {
               <div className="border border-neutral-300 p-3">
                 <h3 className="text-sm font-semibold text-neutral-900">CSV Drag-Drop Import (Catalog Only)</h3>
                 <p className="mt-1 text-xs text-neutral-700">
-                  Imports/updates metadata from `public."Inventory"` columns. `Qty.` is ignored and never changes counts.
+                  Imports/updates metadata from `public.&quot;Inventory&quot;` columns. `Qty.` is ignored and never changes counts.
                 </p>
                 <input
                   accept=".csv,text/csv"
