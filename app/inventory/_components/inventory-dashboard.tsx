@@ -672,11 +672,17 @@ export function InventoryDashboard() {
       }
 
       setOauthAuthorizeUrl(payload.authorize_url);
-      setOauthStatus(
-        payload.instructions ??
-          'Redirecting to Lightspeed OAuth now. Complete login + 2FA, then return and run upload.'
-      );
-      window.location.assign(payload.authorize_url);
+      const popup = window.open(payload.authorize_url, '_blank', 'noopener,noreferrer');
+      if (popup) {
+        setOauthStatus(
+          payload.instructions ??
+            'OAuth opened in a new tab. Complete Lightspeed login + 2FA there, then return and run upload.'
+        );
+      } else {
+        setOauthStatus(
+          'Popup blocked. Use Open authorize_url below, complete login + 2FA, then return and run upload.'
+        );
+      }
     } catch (error) {
       setOauthStatus(error instanceof Error ? error.message : 'Unable to start OAuth');
     }
@@ -1260,6 +1266,16 @@ export function InventoryDashboard() {
                       type="button"
                     >
                       Open authorize_url
+                    </button>
+                    <button
+                      className="border border-neutral-400 px-3 py-2 text-xs"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(oauthAuthorizeUrl);
+                        setOauthStatus('authorize_url copied. Paste into browser and complete login + 2FA.');
+                      }}
+                      type="button"
+                    >
+                      Copy authorize_url
                     </button>
                     <span className="text-xs text-neutral-700">
                       Use `authorize_url` only. Never open `redirect_uri` directly or you will get
