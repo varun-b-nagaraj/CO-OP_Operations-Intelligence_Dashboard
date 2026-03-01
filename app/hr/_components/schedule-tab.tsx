@@ -110,6 +110,8 @@ const MONTH_OPTIONS: Array<{ value: number; label: string }> = [
 
 const COLLAPSED_ROSTER_SUMMARY_ROWS = 12;
 const COLLAPSED_OVERVIEW_MAX_HEIGHT_CLASS = 'max-h-[560px]';
+const MAX_REGULAR_ASSIGNMENTS_PER_SHIFT = 3;
+const MAX_ALTERNATE_ASSIGNMENTS_PER_SHIFT = 1;
 const LEAVE_WITH_UNSAVED_CHANGES_MESSAGE =
   'You have unsaved schedule changes. Save before leaving, or your changes will be lost.';
 
@@ -915,15 +917,43 @@ export function ScheduleTab() {
     [assignmentMap]
   );
 
+  const getShiftSlotCapacity = useCallback(
+    (date: string, period: number) => {
+      const assignments = getShiftAssignments(date, period);
+      const alternateCount = assignments.filter((assignment) => isAlternateAssignment(assignment)).length;
+      const regularCount = assignments.length - alternateCount;
+      return {
+        assignments,
+        regularCount,
+        alternateCount,
+        openRegularSlots: Math.max(0, MAX_REGULAR_ASSIGNMENTS_PER_SHIFT - regularCount),
+        openAlternateSlots: Math.max(0, MAX_ALTERNATE_ASSIGNMENTS_PER_SHIFT - alternateCount)
+      };
+    },
+    [getShiftAssignments]
+  );
+
+  const resolveOpenSlotMode = useCallback(
+    (date: string, period: number): 'regular' | 'alternate' | null => {
+      const { openRegularSlots, openAlternateSlots } = getShiftSlotCapacity(date, period);
+      if (openRegularSlots > 0) return 'regular';
+      if (openAlternateSlots > 0) return 'alternate';
+      return null;
+    },
+    [getShiftSlotCapacity]
+  );
+
   const canAssignEmployeeToOpenSlot = useCallback(
     (employeeSNumber: string, date: string, period: number): boolean => {
       if (!employeeSNumber) return false;
       if (isWeekendDateKey(date)) return false;
       if (!canEmployeeWorkPeriod(employeeSNumber, period)) return false;
-      const assignments = getShiftAssignments(date, period);
+      const { assignments } = getShiftSlotCapacity(date, period);
+      const openSlotMode = resolveOpenSlotMode(date, period);
+      if (!openSlotMode) return false;
       return !assignments.some((assignment) => assignment.effectiveWorkerSNumber === employeeSNumber);
     },
-    [canEmployeeWorkPeriod, getShiftAssignments]
+    [canEmployeeWorkPeriod, getShiftSlotCapacity, resolveOpenSlotMode]
   );
 
   const getDraggedEmployeeSNumber = useCallback(
@@ -1563,7 +1593,12 @@ export function ScheduleTab() {
           return;
         }
         if (!canAssignEmployeeToOpenSlot(actingEmployeeSNumber, emptySlotTarget.date, emptySlotTarget.period)) {
-          setMessage('You are already assigned here or are not eligible for this period.');
+          setMessage('This shift is full (max 3 regular + 1 alternate) or you are already assigned.');
+          return;
+        }
+        const emptySlotMode = resolveOpenSlotMode(emptySlotTarget.date, emptySlotTarget.period);
+        if (!emptySlotMode) {
+          setMessage('This shift is full (max 3 regular + 1 alternate).');
           return;
         }
         manualSlotMutation.mutate({
@@ -1571,7 +1606,7 @@ export function ScheduleTab() {
           date: emptySlotTarget.date,
           period: emptySlotTarget.period,
           employeeSNumber: actingEmployeeSNumber,
-          asAlternate: false
+          asAlternate: emptySlotMode === 'alternate'
         });
         return;
       }
@@ -1651,14 +1686,21 @@ export function ScheduleTab() {
 
     if (!emptySlotTarget) return;
     if (!canAssignEmployeeToOpenSlot(assignmentTargetSNumber, emptySlotTarget.date, emptySlotTarget.period)) {
-      setMessage('Selected employee is not eligible for this period or is already assigned.');
+      setMessage(
+        'Selected employee is not eligible for this period, already assigned, or this shift has reached capacity (3 regular + 1 alternate).'
+      );
+      return;
+    }
+    const emptySlotMode = resolveOpenSlotMode(emptySlotTarget.date, emptySlotTarget.period);
+    if (!emptySlotMode) {
+      setMessage('This shift is full (max 3 regular + 1 alternate).');
       return;
     }
     stageManualAssign({
       date: emptySlotTarget.date,
       period: emptySlotTarget.period,
       employeeSNumber: assignmentTargetSNumber,
-      asAlternate: false
+      asAlternate: emptySlotMode === 'alternate'
     });
     closeShiftActionModal();
     setMessage('Manual assignment added. Save changes to persist.');
@@ -1867,7 +1909,14 @@ export function ScheduleTab() {
                             return left.shiftSlotKey.localeCompare(right.shiftSlotKey);
                           });
                         const targetPeriod = resolvePeriodForDay(periodBand.periods, dayType);
-                        const canShowOpenSlotButton = day.inCurrentMonth && !isWeekend;
+                        const {
+                          openRegularSlots: targetOpenRegularSlots,
+                          openAlternateSlots: targetOpenAlternateSlots
+                        } = getShiftSlotCapacity(day.dateKey, targetPeriod);
+                        const canShowOpenSlotButton =
+                          day.inCurrentMonth &&
+                          !isWeekend &&
+                          (targetOpenRegularSlots > 0 || targetOpenAlternateSlots > 0);
 
                         return (
                           <td className={`border-b border-neutral-300 p-2 align-top ${baseCellTone}`} key={`${day.dateKey}-${periodBand.id}`}>
@@ -2055,15 +2104,20 @@ export function ScheduleTab() {
                                   }
                                   if (!canAssignEmployeeToOpenSlot(draggedEmployeeSNumber, day.dateKey, targetPeriod)) {
                                     setMessage(
-                                      'Drop blocked: employee is not eligible for this period or already assigned.'
+                                      'Drop blocked: employee is not eligible, already assigned, or this shift is full.'
                                     );
+                                    return;
+                                  }
+                                  const openSlotMode = resolveOpenSlotMode(day.dateKey, targetPeriod);
+                                  if (!openSlotMode) {
+                                    setMessage('Drop blocked: this shift is full.');
                                     return;
                                   }
                                   stageManualAssign({
                                     date: day.dateKey,
                                     period: targetPeriod,
                                     employeeSNumber: draggedEmployeeSNumber,
-                                    asAlternate: false
+                                    asAlternate: openSlotMode === 'alternate'
                                   });
                                   setMessage('Manual assignment added. Save changes to persist.');
                                   setDragSourceUid(null);
@@ -2071,7 +2125,8 @@ export function ScheduleTab() {
                                 }}
                                 type="button"
                               >
-                                Add employee
+                                Add employee ({targetOpenRegularSlots} regular left
+                                {targetOpenAlternateSlots > 0 ? `, ${targetOpenAlternateSlots} alternate left` : ''})
                               </button>
                             )}
                           </td>
