@@ -1491,29 +1491,6 @@ export function ScheduleTab() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="border border-neutral-300">
-              <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Statistics</h3>
-              <div className="max-h-60 overflow-auto p-2 text-sm">
-                {schedule.statistics.map((stat) => (
-                  <p key={stat.metric}>
-                    {stat.metric}: {stat.value}
-                  </p>
-                ))}
-              </div>
-            </div>
-            <div className="border border-neutral-300">
-              <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Balance Analysis</h3>
-              <div className="max-h-60 overflow-auto p-2 text-sm">
-                {schedule.balanceAnalysis.map((item) => (
-                  <p key={`${item.category}-${item.metric}`}>
-                    {item.category} — {item.metric}: {item.value}
-                  </p>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
             <div className="overflow-x-auto border border-neutral-300">
               <div className="border-b border-neutral-300 bg-neutral-50 p-2">
                 <h3 className="text-sm font-semibold">Roster (Students Table)</h3>
@@ -1613,6 +1590,28 @@ export function ScheduleTab() {
                 <div className="border border-neutral-300 p-3">
                   <p className="text-xs text-neutral-500">Calendar days</p>
                   <p className="text-sm font-medium">{Object.keys(schedule.calendar).length}</p>
+                </div>
+              </div>
+
+              <div className="border border-neutral-300">
+                <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Statistics</h3>
+                <div className="max-h-60 overflow-auto p-2 text-sm">
+                  {schedule.statistics.map((stat) => (
+                    <p key={stat.metric}>
+                      {stat.metric}: {stat.value}
+                    </p>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border border-neutral-300">
+                <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Balance Analysis</h3>
+                <div className="max-h-60 overflow-auto p-2 text-sm">
+                  {schedule.balanceAnalysis.map((item) => (
+                    <p key={`${item.category}-${item.metric}`}>
+                      {item.category} — {item.metric}: {item.value}
+                    </p>
+                  ))}
                 </div>
               </div>
             </div>
