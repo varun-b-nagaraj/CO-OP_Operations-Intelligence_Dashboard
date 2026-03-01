@@ -8,13 +8,14 @@ import { resolveCatalogItemByCode } from '@/lib/inventory/identifiers';
 import {
   clearSessionLocalData,
   getPendingEvents,
+  getSessionEvents,
   markEventsSynced,
   readSnapshot,
   saveLocalEvent,
   saveSnapshot
 } from '@/lib/inventory/indexeddb';
 import { InventoryCatalogItem, InventoryCountEvent, InventorySessionState } from '@/lib/inventory/types';
-import { createQrPacket, encodeQrPacket, parseQrPacket, resolveSyncProvider } from '@/lib/inventory/sync';
+import { createQrPacket, encodeQrPacket, parseQrPacket } from '@/lib/inventory/sync';
 
 const TABS = ['Catalog', 'Sessions', 'Count View', 'Finalize & Upload'] as const;
 type TabId = (typeof TABS)[number];
@@ -74,7 +75,6 @@ export function InventoryDashboard() {
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingTotals, setPendingTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
   const [snapshotTotals, setSnapshotTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
-  const [syncPreference, setSyncPreference] = useState<'ble' | 'qr'>('ble');
   const [syncStatus, setSyncStatus] = useState('');
   const [outgoingQrPacket, setOutgoingQrPacket] = useState('');
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
@@ -88,6 +88,8 @@ export function InventoryDashboard() {
   const [uploadStatus, setUploadStatus] = useState('');
   const [finalizeSelection, setFinalizeSelection] = useState<'none' | 'finalize' | 'lock'>('none');
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isEndingSession, setIsEndingSession] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
 
   const [online, setOnline] = useState(true);
 
@@ -158,6 +160,7 @@ export function InventoryDashboard() {
 
   useEffect(() => {
     if (!sessionId) return;
+    setSessionEnded(false);
     loadSessionState(sessionId);
 
     const timer = window.setInterval(() => {
@@ -185,13 +188,11 @@ export function InventoryDashboard() {
   }, [sessionId, sessionState]);
 
   const displayedTotals = useMemo(() => {
-    const server = new Map<string, number>();
-    for (const row of sessionState?.totals ?? []) {
-      server.set(row.system_id, row.qty);
+    const merged = new Map<string, number>();
+    for (const row of snapshotTotals) {
+      merged.set(row.system_id, row.qty);
     }
-    const merged = new Map<string, number>(server);
-    const baseRows = sessionState ? [] : snapshotTotals;
-    for (const row of baseRows) {
+    for (const row of sessionState?.totals ?? []) {
       merged.set(row.system_id, row.qty);
     }
     for (const row of pendingTotals) {
@@ -331,41 +332,12 @@ export function InventoryDashboard() {
         return;
       }
 
-      const provider = resolveSyncProvider(syncPreference);
-
-      if (provider.id === 'qr') {
-        const packet = createQrPacket({
-          context: {
-            session_id: sessionId,
-            actor_id: deviceId,
-            actor_name: actorName,
-            role
-          },
-          events: pendingEvents
-        });
-        setOutgoingQrPacket(packet);
-        setSyncStatus('QR packet generated. Have host scan/import it.');
+      if (role === 'host') {
+        setSyncStatus('Host is ready. Scan participant QR packets below to collect all counts.');
         return;
       }
 
-      if (trigger === 'auto') {
-        const fallbackPacket = createQrPacket({
-          context: {
-            session_id: sessionId,
-            actor_id: deviceId,
-            actor_name: actorName,
-            role
-          },
-          events: pendingEvents
-        });
-        setOutgoingQrPacket(fallbackPacket);
-        setSyncStatus(
-          'Auto sync prepared QR packet. iOS web BLE requires a tap gesture, so use Sync Now for BLE or scan the QR packet.'
-        );
-        return;
-      }
-
-      const bleResult = await provider.syncNow({
+      const packet = createQrPacket({
         context: {
           session_id: sessionId,
           actor_id: deviceId,
@@ -374,41 +346,12 @@ export function InventoryDashboard() {
         },
         events: pendingEvents
       });
-
-      if (!bleResult.ok) {
-        const fallbackPacket = createQrPacket({
-          context: {
-            session_id: sessionId,
-            actor_id: deviceId,
-            actor_name: actorName,
-            role
-          },
-          events: pendingEvents
-        });
-        setOutgoingQrPacket(fallbackPacket);
-        setSyncStatus(`BLE failed (${bleResult.message}). QR fallback packet generated.`);
-        return;
-      }
-
-      const commitPayload = await fetchJson<{
-        ok: true;
-        totals: Array<{ system_id: string; qty: number }>;
-      }>('/api/inventory/session/commit-events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          actor_id: deviceId,
-          actor_name: actorName,
-          events: pendingEvents
-        })
-      });
-
-      await markEventsSynced(pendingEvents.map((event) => event.event_id));
-      await saveSnapshot(sessionId, commitPayload.totals);
-      setOutgoingQrPacket('');
-      setSyncStatus('Sync complete and local pending events acknowledged.');
-      await loadSessionState(sessionId);
+      setOutgoingQrPacket(packet);
+      setSyncStatus(
+        trigger === 'manual'
+          ? 'QR sync packet generated. Show this to the host phone to import.'
+          : 'Auto sync refreshed your QR sync packet.'
+      );
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : 'Sync failed.');
     } finally {
@@ -440,7 +383,81 @@ export function InventoryDashboard() {
       document.removeEventListener('visibilitychange', onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSyncEnabled, sessionId, syncPreference, role]);
+  }, [autoSyncEnabled, sessionId, role]);
+
+  const commitLocalEventsToServer = async () => {
+    if (!sessionId) {
+      throw new Error('No active session selected.');
+    }
+
+    const localEvents = await getSessionEvents(sessionId);
+    if (!localEvents.length) {
+      return {
+        totals: snapshotTotals
+      };
+    }
+
+    const payload = await fetchJson<{
+      ok: true;
+      totals: Array<{ system_id: string; qty: number }>;
+    }>('/api/inventory/session/commit-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        actor_id: deviceId,
+        actor_name: actorName,
+        events: localEvents.map((event) => ({
+          session_id: event.session_id,
+          event_id: event.event_id,
+          actor_id: event.actor_id,
+          system_id: event.system_id,
+          delta_qty: event.delta_qty,
+          timestamp: event.timestamp
+        }))
+      })
+    });
+
+    await markEventsSynced(localEvents.map((event) => event.event_id));
+    await saveSnapshot(sessionId, payload.totals);
+    await loadSessionState(sessionId);
+    const pendingEvents = await getPendingEvents(sessionId);
+    setPendingCount(pendingEvents.length);
+    return payload;
+  };
+
+  const endSession = async () => {
+    if (role !== 'host') {
+      setUploadStatus('Only host can end the session.');
+      return;
+    }
+    if (!sessionId) {
+      setUploadStatus('No session selected.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'End this session now? This commits all host-phone local events to backend and marks session as ended.'
+    );
+    if (!confirmed) return;
+
+    setIsEndingSession(true);
+    try {
+      const commitPayload = await commitLocalEventsToServer();
+      await fetchJson('/api/inventory/session/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, finalized_by: deviceId, lock: false })
+      });
+      setSessionEnded(true);
+      setFinalizedTotals(commitPayload.totals);
+      setUploadStatus('Session ended and committed. You can now finalize/lock and upload.');
+    } catch (error) {
+      setUploadStatus(error instanceof Error ? error.message : 'Unable to end session.');
+    } finally {
+      setIsEndingSession(false);
+    }
+  };
 
   const importQrPacket = async (packetText: string) => {
     if (!sessionId) {
@@ -453,31 +470,43 @@ export function InventoryDashboard() {
     }
 
     if (role === 'host' && packet.events.length) {
-      const response = await fetchJson<{ ok: true; totals: Array<{ system_id: string; qty: number }> }>(
-        '/api/inventory/session/commit-events',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_id: sessionId,
-            actor_id: packet.actor_id,
-            actor_name: `Peer ${packet.actor_id.slice(-4)}`,
-            events: packet.events
-          })
-        }
+      for (const event of packet.events) {
+        await saveLocalEvent({
+          session_id: sessionId,
+          event_id: event.event_id,
+          actor_id: event.actor_id,
+          system_id: event.system_id,
+          delta_qty: event.delta_qty,
+          timestamp: event.timestamp
+        });
+      }
+
+      const hostLocalEvents = await getSessionEvents(sessionId);
+      const hostTotalsMap = aggregateTotals(
+        hostLocalEvents.map((row) => ({
+          session_id: row.session_id,
+          event_id: row.event_id,
+          actor_id: row.actor_id,
+          system_id: row.system_id,
+          delta_qty: row.delta_qty,
+          timestamp: row.timestamp
+        }))
       );
+      const totals = Array.from(hostTotalsMap.entries()).map(([system_id, qty]) => ({ system_id, qty }));
+      await saveSnapshot(sessionId, totals);
 
       const ackPacket = encodeQrPacket({
         session_id: sessionId,
         actor_id: deviceId,
         generated_at: new Date().toISOString(),
         events: [],
-        totals: response.totals,
+        totals,
         ack_event_ids: packet.events.map((event) => event.event_id)
       });
       setOutgoingQrPacket(ackPacket);
-      await loadSessionState(sessionId);
-      setSyncStatus(`Imported ${packet.events.length} events from peer packet.`);
+      const pendingEvents = await getPendingEvents(sessionId);
+      setPendingCount(pendingEvents.length);
+      setSyncStatus(`Imported ${packet.events.length} events from peer packet to host local session.`);
       return;
     }
 
@@ -505,6 +534,7 @@ export function InventoryDashboard() {
     setIsFinalizing(true);
     setFinalizeSelection(lock ? 'lock' : 'finalize');
     try {
+      await commitLocalEventsToServer();
       const payload = await fetchJson<{
         ok: true;
         totals: Array<{ system_id: string; qty: number }>;
@@ -610,7 +640,7 @@ export function InventoryDashboard() {
         <header className="border-b border-neutral-300 p-4">
           <h1 className="text-xl font-semibold text-neutral-900">Inventory Dashboard</h1>
           <p className="mt-1 text-sm text-neutral-700">
-            Offline-first counting with BLE burst sync and QR packet fallback.
+            Offline-first counting with local phone storage and host QR sync.
           </p>
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
             <span className={`border px-2 py-1 ${online ? 'border-emerald-700 text-emerald-700' : 'border-red-700 text-red-700'}`}>
@@ -898,17 +928,6 @@ export function InventoryDashboard() {
               <div className="border border-neutral-300 p-3">
                 <h3 className="text-sm font-semibold text-neutral-900">Sync Status</h3>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <label className="text-xs text-neutral-700">
-                    Provider
-                    <select
-                      className="ml-2 border border-neutral-300 px-2 py-1"
-                      onChange={(event) => setSyncPreference(event.target.value as 'ble' | 'qr')}
-                      value={syncPreference}
-                    >
-                      <option value="ble">BLE (Primary)</option>
-                      <option value="qr">QR Packet (Fallback)</option>
-                    </select>
-                  </label>
                   <button
                     className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white disabled:opacity-60"
                     disabled={isSyncing}
@@ -930,8 +949,8 @@ export function InventoryDashboard() {
                   Last sync attempt: {lastSyncAttemptAt ? new Date(lastSyncAttemptAt).toLocaleTimeString() : 'Never'}
                 </p>
                 <p className="mt-1 text-xs text-amber-700">
-                  Continuous phone-to-phone Bluetooth keepalive is not supported in mobile web. Auto Sync runs foreground
-                  attempts and prepares QR packets automatically when gesture-based BLE is blocked.
+                  Each phone keeps a local copy while counting. Sync sends local events to host phone via QR packet import only;
+                  no backend commits happen until host ends/finalizes session.
                 </p>
               </div>
             </section>
@@ -1057,12 +1076,24 @@ export function InventoryDashboard() {
                 <p className="mt-1 text-xs text-neutral-700">
                   Finalize and lock are optional controls. Upload always uses your counted totals from Count View (or finalized totals if present).
                 </p>
+                <div className="mt-2">
+                  <button
+                    className={`border px-3 py-2 text-xs ${
+                      sessionEnded ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-neutral-700 bg-neutral-800 text-white'
+                    } disabled:opacity-60`}
+                    disabled={isEndingSession || role !== 'host'}
+                    onClick={endSession}
+                    type="button"
+                  >
+                    {isEndingSession ? 'Ending Session...' : sessionEnded ? 'Session Ended' : 'End Session (Commit Host Copy)'}
+                  </button>
+                </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     className={`border px-3 py-2 text-xs ${
                       finalizeSelection === 'finalize'
                         ? 'border-red-700 bg-red-700 text-white'
-                        : 'border-neutral-700 text-neutral-800'
+                        : 'border-neutral-700 bg-white text-neutral-800'
                     } disabled:opacity-60`}
                     disabled={isFinalizing}
                     onClick={() => finalizeSession(false)}
@@ -1074,7 +1105,7 @@ export function InventoryDashboard() {
                     className={`border px-3 py-2 text-xs ${
                       finalizeSelection === 'lock'
                         ? 'border-red-800 bg-red-800 text-white'
-                        : 'border-brand-maroon bg-brand-maroon text-white'
+                        : 'border-neutral-700 bg-white text-neutral-800'
                     } disabled:opacity-60`}
                     disabled={isFinalizing}
                     onClick={() => finalizeSession(true)}
@@ -1118,9 +1149,7 @@ export function InventoryDashboard() {
                   </table>
                 </div>
                 {mismatches.length > 0 ? (
-                  <p className="mt-2 text-xs text-neutral-600">
-                    Comparison note: {mismatches.length} items differ from previous locked session.
-                  </p>
+                  <p className="mt-2 text-xs text-neutral-600">Comparison note hidden by default for simpler upload flow.</p>
                 ) : null}
               </div>
 
