@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { DepartmentShell } from '@/app/_components/department-shell';
 import { createMarketingRepository } from '@/lib/marketing/client';
 import type {
   AssetType,
@@ -807,7 +808,14 @@ export function MarketingDashboard() {
   }
 
   return (
-    <main className="min-h-screen w-full text-neutral-900">
+    <DepartmentShell
+      activeNavId={activeTab}
+      navAriaLabel="Marketing navigation"
+      navItems={TABS}
+      onNavSelect={(id) => setActiveTab(id as DashboardTab)}
+      subtitle="Events, contacts, and campaign coordination"
+      title="Marketing Dashboard"
+    >
       <section className="w-full border border-neutral-300 bg-white">
         {(error || notice) && (
           <section className="border-b border-neutral-300 px-4 py-3 md:px-6">
@@ -826,14 +834,14 @@ export function MarketingDashboard() {
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex border border-neutral-300 bg-white text-sm">
                 <button
-                  className={`min-h-[38px] px-3 ${!recentOnly ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-700'}`}
+                  className={`min-h-[38px] px-3 ${!recentOnly ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
                   onClick={() => setRecentOnly(false)}
                   type="button"
                 >
                   All Events
                 </button>
                 <button
-                  className={`min-h-[38px] border-l border-neutral-300 px-3 ${recentOnly ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-700'}`}
+                  className={`min-h-[38px] border-l border-neutral-300 px-3 ${recentOnly ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
                   onClick={() => setRecentOnly(true)}
                   type="button"
                 >
@@ -862,26 +870,6 @@ export function MarketingDashboard() {
           </div>
         </header>
 
-        <nav className="overflow-x-auto border-b border-neutral-300 bg-neutral-50" role="tablist" aria-label="Marketing tabs">
-          <div className="flex min-w-max">
-            {TABS.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  aria-selected={isActive}
-                  role="tab"
-                  className={`border-r border-neutral-300 px-4 py-2 text-sm ${isActive ? 'bg-white font-semibold' : 'bg-neutral-50 text-neutral-700'}`}
-                  onClick={() => setActiveTab(tab.id)}
-                  type="button"
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-
         <section className="space-y-3 p-4 md:space-y-4 md:p-6">
           {activeTab === 'calendar' && (
             <section className="space-y-3">
@@ -907,14 +895,14 @@ export function MarketingDashboard() {
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="inline-flex border border-neutral-300 bg-white text-sm">
                     <button
-                      className={`min-h-[34px] px-3 ${calendarView === 'month' ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-700'}`}
+                      className={`min-h-[34px] px-3 ${calendarView === 'month' ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
                       onClick={() => setCalendarView('month')}
                       type="button"
                     >
                       Month
                     </button>
                     <button
-                      className={`min-h-[34px] border-l border-neutral-300 px-3 ${calendarView === 'list' ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-700'}`}
+                      className={`min-h-[34px] border-l border-neutral-300 px-3 ${calendarView === 'list' ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
                       onClick={() => setCalendarView('list')}
                       type="button"
                     >
@@ -2044,6 +2032,6 @@ export function MarketingDashboard() {
           </div>
         </div>
       )}
-    </main>
+    </DepartmentShell>
   );
 }

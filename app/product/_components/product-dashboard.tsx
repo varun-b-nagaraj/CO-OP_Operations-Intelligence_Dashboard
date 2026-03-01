@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 
+import { DepartmentShell } from '@/app/_components/department-shell';
 import { createBrowserClient } from '@/lib/supabase';
 
 type DashboardView = 'orders' | 'prompts' | 'products' | 'vendors' | 'designs' | 'wishlist' | 'settings';
@@ -1032,36 +1033,18 @@ export function ProductDashboard() {
   }
 
   return (
-    <main className="min-h-screen w-full text-neutral-900">
-      <div className="grid min-h-screen w-full grid-cols-1 border border-neutral-300 bg-white md:grid-cols-[240px_1fr]">
-        <aside className="w-full border-b border-neutral-300 bg-white md:min-h-screen md:border-b-0 md:border-r">
-          <div className="border-b border-neutral-300 px-4 py-4">
-            <h1 className="text-lg font-semibold">Product Dashboard</h1>
-            <p className="mt-1 text-xs text-neutral-600">School Store Operations Portal</p>
-          </div>
-          <nav aria-label="Product navigation" className="p-0" role="tablist">
-            {NAV_ITEMS.map((item) => {
-              const isActive = activeView === item.id;
-              return (
-                <button
-                  aria-selected={isActive}
-                  className={`flex min-h-[44px] w-full items-center justify-between border-b border-neutral-300 px-4 py-3 text-left text-sm font-medium ${
-                    isActive ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-800 hover:bg-neutral-50'
-                  }`}
-                  key={item.id}
-                  onClick={() => setActiveView(item.id)}
-                  role="tab"
-                  type="button"
-                >
-                  <span>{item.label}</span>
-                  {item.id === 'prompts' && promptCount > 0 ? <span className="text-xs tabular-nums">{promptCount}</span> : null}
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
-
-        <section className="w-full flex-1">
+    <DepartmentShell
+      activeNavId={activeView}
+      navAriaLabel="Product navigation"
+      navItems={NAV_ITEMS.map((item) => ({
+        ...item,
+        badge: item.id === 'prompts' && promptCount > 0 ? promptCount : undefined
+      }))}
+      onNavSelect={(id) => setActiveView(id as DashboardView)}
+      subtitle="School Store Operations Portal"
+      title="Product Dashboard"
+    >
+      <section className="w-full flex-1">
           {(error || notice) && (
             <section className="border-b border-neutral-300 px-4 py-3 md:px-6">
               {error ? <p className="text-sm text-red-700">{error}</p> : null}
@@ -2422,8 +2405,7 @@ export function ProductDashboard() {
               </section>
             </section>
           )}
-        </section>
-      </div>
+      </section>
 
       {promptConvertDraft ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -2561,6 +2543,6 @@ export function ProductDashboard() {
           </div>
         </div>
       ) : null}
-    </main>
+    </DepartmentShell>
   );
 }

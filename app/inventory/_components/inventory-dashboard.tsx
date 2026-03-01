@@ -5,6 +5,7 @@ import Image from 'next/image';
 import QRCode from 'qrcode';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
+import { DepartmentShell } from '@/app/_components/department-shell';
 import { BarcodeScanner } from '@/app/inventory/_components/barcode-scanner';
 import { resolveCatalogItemByCode } from '@/lib/inventory/identifiers';
 import {
@@ -972,10 +973,17 @@ export function InventoryDashboard() {
   };
 
   return (
-    <main className="min-h-screen w-full p-2 sm:p-4 md:p-6">
+    <DepartmentShell
+      activeNavId={activeTab}
+      navAriaLabel="Inventory navigation"
+      navItems={TABS.map((tab) => ({ id: tab, label: tab }))}
+      onNavSelect={(id) => setActiveTab(id as TabId)}
+      subtitle="Catalog counting, session sync, and upload workflows"
+      title="Inventory Dashboard"
+    >
       <section className="border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-3 sm:p-4">
-          <h1 className="text-lg font-semibold text-neutral-900 sm:text-xl">Inventory Dashboard</h1>
+          <h2 className="text-lg font-semibold text-neutral-900 sm:text-xl">Inventory Operations</h2>
           <p className="mt-1 text-xs text-neutral-700 sm:text-sm">
             Sync pushes local phone counts to backend for this active session. Host sees only this session totals.
           </p>
@@ -988,21 +996,6 @@ export function InventoryDashboard() {
           </div>
         </header>
 
-        <nav className="overflow-x-auto border-b border-neutral-300 bg-neutral-50">
-          <div className="flex min-w-max">
-            {TABS.map((tab) => (
-              <button
-                className={`border-r border-neutral-300 px-4 py-2 text-sm ${activeTab === tab ? 'bg-white font-semibold' : 'bg-neutral-50'}`}
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                type="button"
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-        </nav>
-
         <section className="space-y-3 p-3 sm:space-y-4 sm:p-4">
           {activeTab === 'Catalog' ? (
             <section className="space-y-3">
@@ -1014,7 +1007,7 @@ export function InventoryDashboard() {
                   value={catalogQuery}
                 />
                 <button
-                  className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-white"
+                  className="border border-brand-maroon bg-brand-maroon px-3 py-2 text-sm text-white hover:bg-[#6a0000]"
                   onClick={() => {
                     void loadCatalog();
                   }}
@@ -1824,6 +1817,6 @@ export function InventoryDashboard() {
           ) : null}
         </section>
       </section>
-    </main>
+    </DepartmentShell>
   );
 }

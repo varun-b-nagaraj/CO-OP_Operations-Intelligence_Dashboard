@@ -5,11 +5,12 @@ import type { Route } from 'next';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 
+import { DepartmentShell } from '@/app/_components/department-shell';
 import { hasPermission } from '@/lib/permissions';
 import { PermissionFlag } from '@/lib/types';
 
-import { CFATabId, CFAModule, isCFATab } from './cfa-module';
-import { HRTabItem, TabNavigation } from './tab-navigation';
+import { CFATabId, CFAModule, CFA_TABS, isCFATab } from './cfa-module';
+import { HRTabItem } from './tab-navigation';
 import { currentMonthRange } from './utils';
 
 const ScheduleTab = dynamic(() => import('./schedule-tab').then((module) => module.ScheduleTab));
@@ -79,15 +80,32 @@ export function HRModule() {
     replaceWithParams(nextParams);
   };
 
+  const activeNavId = resolvedModule === 'hr' ? (resolvedHRTab ?? 'schedule') : activeCFATab;
+  const navItems =
+    resolvedModule === 'hr'
+      ? visibleTabs.map((tab) => ({ id: tab.id, label: tab.label }))
+      : CFA_TABS.map((tab) => ({ id: tab.id, label: tab.label }));
+
   return (
-    <main className="min-h-screen w-full">
+    <DepartmentShell
+      activeNavId={activeNavId}
+      navAriaLabel={resolvedModule === 'hr' ? 'HR navigation' : 'Chick-fil-A navigation'}
+      navItems={navItems}
+      onNavSelect={(id) => {
+        if (resolvedModule === 'hr') {
+          onHRTabChange(id as HRTabItem['id']);
+          return;
+        }
+        onCFATabChange(id as CFATabId);
+      }}
+      subtitle={resolvedModule === 'hr' ? 'People operations and attendance controls' : 'Sales log and forecast operations'}
+      title={resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
+    >
       <section className="border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h1 className="text-xl font-semibold text-neutral-900">
-                {resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
-              </h1>
+              <h2 className="text-xl font-semibold text-neutral-900">{resolvedModule === 'hr' ? 'HR Workspace' : 'CFA Workspace'}</h2>
               <p className="mt-1 text-sm text-neutral-700">
                 Module view is selected at launch and stays locked on this page.
               </p>
@@ -123,10 +141,7 @@ export function HRModule() {
 
         {resolvedModule === 'hr' ? (
           <section id="module-panel-hr">
-            <TabNavigation activeTab={resolvedHRTab ?? 'schedule'} onTabChange={onHRTabChange} tabs={visibleTabs} />
-
             <section
-              aria-labelledby={`tab-${resolvedHRTab}`}
               className="p-0"
               id={`panel-${resolvedHRTab}`}
               role="tabpanel"
@@ -141,10 +156,10 @@ export function HRModule() {
           </section>
         ) : (
           <section id="module-panel-cfa">
-            <CFAModule activeTab={activeCFATab} onTabChange={onCFATabChange} />
+            <CFAModule activeTab={activeCFATab} />
           </section>
         )}
       </section>
-    </main>
+    </DepartmentShell>
   );
 }

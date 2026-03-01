@@ -40,10 +40,9 @@ interface MenuDraft {
 
 interface CFAModuleProps {
   activeTab: CFATabId;
-  onTabChange: (tab: CFATabId) => void;
 }
 
-const cfaTabs: CFATabItem[] = [
+export const CFA_TABS: CFATabItem[] = [
   { id: 'daily-log', label: 'Daily Log' },
   { id: 'history', label: 'History' },
   { id: 'ab-analysis', label: 'A/B Analysis' },
@@ -158,10 +157,10 @@ function weekdayFromDateKey(dateKey: string): number {
 }
 
 export function isCFATab(value: string | null): value is CFATabId {
-  return Boolean(value && cfaTabs.some((tab) => tab.id === value));
+  return Boolean(value && CFA_TABS.some((tab) => tab.id === value));
 }
 
-export function CFAModule({ activeTab, onTabChange }: CFAModuleProps) {
+export function CFAModule({ activeTab }: CFAModuleProps) {
   const canReadLogs = usePermission('cfa.logs.read');
   const canWriteLogs = usePermission('cfa.logs.write');
   const canManageMenu = usePermission('cfa.menu.manage');
@@ -753,39 +752,11 @@ export function CFAModule({ activeTab, onTabChange }: CFAModuleProps) {
   };
 
   return (
-    <section>
-      <nav aria-label="Chick-fil-A module tabs" className="border-b border-neutral-300 bg-white" role="tablist">
-        <div className="grid grid-cols-2 gap-2 p-2 md:flex md:flex-wrap">
-          {cfaTabs.map((tab) => {
-            const isActive = tab.id === activeTab;
-            return (
-              <button
-                aria-controls={`cfa-panel-${tab.id}`}
-                aria-selected={isActive}
-                className={`min-h-[44px] min-w-[44px] border px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                  isActive
-                    ? 'border-brand-maroon bg-brand-maroon text-white'
-                    : 'border-neutral-300 bg-white text-neutral-800 hover:border-brand-maroon'
-                }`}
-                id={`cfa-tab-${tab.id}`}
-                key={tab.id}
-                onClick={() => onTabChange(tab.id)}
-                role="tab"
-                type="button"
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-
-      <section
-        aria-labelledby={`cfa-tab-${activeTab}`}
-        className="space-y-4 p-3 md:p-5"
-        id={`cfa-panel-${activeTab}`}
-        role="tabpanel"
-      >
+    <section
+      className="space-y-4 p-3 md:p-5"
+      id={`cfa-panel-${activeTab}`}
+      role="tabpanel"
+    >
         {!canReadLogs && (
           <p className="border border-neutral-300 bg-white p-3 text-sm text-neutral-700">
             You do not have permission to view Chick-fil-A dashboard data.
@@ -1460,7 +1431,6 @@ export function CFAModule({ activeTab, onTabChange }: CFAModuleProps) {
             )}
           </div>
         )}
-      </section>
     </section>
   );
 }

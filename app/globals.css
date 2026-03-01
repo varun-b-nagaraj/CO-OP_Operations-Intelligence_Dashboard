@@ -37,7 +37,44 @@ button,
 input,
 select,
 textarea {
-  transition-duration: 150ms;
+  transition-duration: 160ms;
+  transition-timing-function: ease-out;
+  transition-property:
+    color,
+    background-color,
+    border-color,
+    opacity,
+    box-shadow,
+    transform;
+}
+
+button,
+[role='button'],
+[role='tab'] {
+  transform: translateZ(0);
+}
+
+button:active,
+[role='button']:active,
+[role='tab']:active,
+.ui-click:active {
+  transform: scale(0.98);
+}
+
+.ui-fade-in {
+  animation: ui-fade-in 180ms ease-out;
+}
+
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 :focus-visible {
