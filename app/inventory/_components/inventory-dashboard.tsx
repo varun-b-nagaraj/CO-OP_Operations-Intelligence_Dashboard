@@ -77,6 +77,9 @@ export function InventoryDashboard() {
 
   const [activeScannedCode, setActiveScannedCode] = useState('');
   const [activeItem, setActiveItem] = useState<InventoryCatalogItem | null>(null);
+  const [lookupCandidates, setLookupCandidates] = useState<InventoryCatalogItem[]>([]);
+  const [lookupStatus, setLookupStatus] = useState('');
+  const [qtyDraftBySystemId, setQtyDraftBySystemId] = useState<Record<string, string>>({});
 
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingTotals, setPendingTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
@@ -373,13 +376,76 @@ export function InventoryDashboard() {
     const resolved = resolveCatalogItemByCode(catalog, value);
     if (!resolved.item) {
       setActiveItem(null);
-      setSyncStatus(`No catalog match for ${value}`);
+      const normalized = value.trim().toLowerCase();
+      const localCandidates = catalog
+        .filter((item) =>
+          [item.item_name, item.system_id, item.upc, item.ean, item.custom_sku, item.manufact_sku]
+            .join(' ')
+            .toLowerCase()
+            .includes(normalized)
+        )
+        .slice(0, 8);
+
+      let backendCandidates: InventoryCatalogItem[] = [];
+      if (online) {
+        try {
+          const payload = await fetchJson<{ ok: true; items: InventoryCatalogItem[] }>(
+            `/api/inventory/catalog/list?q=${encodeURIComponent(value)}`
+          );
+          backendCandidates = payload.items.slice(0, 8);
+        } catch {
+          backendCandidates = [];
+        }
+      }
+
+      const mergedMap = new Map<number, InventoryCatalogItem>();
+      for (const item of [...localCandidates, ...backendCandidates]) {
+        mergedMap.set(item.row_id, item);
+      }
+      const merged = Array.from(mergedMap.values());
+      setLookupCandidates(merged);
+
+      if (merged.length === 1) {
+        setActiveItem(merged[0]);
+        await appendEvent(merged[0].system_id, 1);
+        setLookupStatus(`No direct barcode match. Auto-matched ${merged[0].item_name} and added +1.`);
+        setSyncStatus(`No direct barcode match. Auto-matched ${merged[0].item_name}.`);
+        return;
+      }
+
+      setLookupStatus(
+        merged.length
+          ? `No direct barcode match. Pick the correct item below (${merged.length} candidates).`
+          : `No match found for ${value}.`
+      );
+      setSyncStatus(`No direct barcode match for ${value}.`);
       return;
     }
 
+    setLookupCandidates([]);
+    setLookupStatus('');
     setActiveItem(resolved.item);
     await appendEvent(resolved.item.system_id, 1);
     setSyncStatus(`Scanned ${resolved.item.item_name}. +1 added.`);
+  };
+
+  const applyAbsoluteQty = async (systemId: string) => {
+    const draft = qtyDraftBySystemId[systemId];
+    const target = Number(draft);
+    if (!Number.isFinite(target)) {
+      setSyncStatus('Enter a valid number before applying qty.');
+      return;
+    }
+
+    const current = displayedTotals.get(systemId) ?? 0;
+    const delta = Math.trunc(target) - current;
+    if (delta === 0) {
+      setSyncStatus('Qty unchanged.');
+      return;
+    }
+
+    await appendEvent(systemId, delta);
+    setSyncStatus(`Set ${systemId} from ${current} to ${Math.trunc(target)}.`);
   };
 
   const createSession = async () => {
@@ -996,6 +1062,47 @@ export function InventoryDashboard() {
                       </button>
                     </div>
                   </div>
+
+                  {lookupCandidates.length > 0 ? (
+                    <div className="border border-amber-300 bg-amber-50 p-3">
+                      <h4 className="text-sm font-semibold text-amber-900">Fallback Item Lookup</h4>
+                      <p className="mt-1 text-xs text-amber-900">{lookupStatus}</p>
+                      <div className="mt-2 max-h-56 overflow-auto border border-amber-200 bg-white">
+                        <table className="min-w-full text-left text-xs">
+                          <thead className="bg-amber-100">
+                            <tr>
+                              <th className="border-b border-amber-200 px-2 py-1">Item</th>
+                              <th className="border-b border-amber-200 px-2 py-1">System ID</th>
+                              <th className="border-b border-amber-200 px-2 py-1">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {lookupCandidates.map((candidate) => (
+                              <tr key={candidate.row_id}>
+                                <td className="border-b border-amber-100 px-2 py-1">{candidate.item_name}</td>
+                                <td className="border-b border-amber-100 px-2 py-1">{candidate.system_id}</td>
+                                <td className="border-b border-amber-100 px-2 py-1">
+                                  <button
+                                    className="border border-amber-700 bg-amber-700 px-2 py-1 text-white"
+                                    onClick={async () => {
+                                      setActiveItem(candidate);
+                                      await appendEvent(candidate.system_id, 1);
+                                      setLookupCandidates([]);
+                                      setLookupStatus('');
+                                      setSyncStatus(`Selected ${candidate.item_name}. +1 added.`);
+                                    }}
+                                    type="button"
+                                  >
+                                    Select +1
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
                 </section>
 
                 <section className="space-y-3">
@@ -1008,6 +1115,7 @@ export function InventoryDashboard() {
                             <th className="border-b border-neutral-300 px-2 py-1">System ID</th>
                             <th className="border-b border-neutral-300 px-2 py-1">Item</th>
                             <th className="border-b border-neutral-300 px-2 py-1">Qty</th>
+                            <th className="border-b border-neutral-300 px-2 py-1">Edit</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1016,6 +1124,49 @@ export function InventoryDashboard() {
                               <td className="border-b border-neutral-200 px-2 py-1">{row.system_id}</td>
                               <td className="border-b border-neutral-200 px-2 py-1">{row.item_name}</td>
                               <td className="border-b border-neutral-200 px-2 py-1">{row.qty}</td>
+                              <td className="border-b border-neutral-200 px-2 py-1">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <button
+                                    className="border border-neutral-500 px-2 py-1"
+                                    onClick={() => {
+                                      void appendEvent(row.system_id, -1);
+                                    }}
+                                    type="button"
+                                  >
+                                    -1
+                                  </button>
+                                  <button
+                                    className="border border-neutral-700 bg-neutral-800 px-2 py-1 text-white"
+                                    onClick={() => {
+                                      void appendEvent(row.system_id, 1);
+                                    }}
+                                    type="button"
+                                  >
+                                    +1
+                                  </button>
+                                  <input
+                                    className="w-16 border border-neutral-300 px-1 py-1"
+                                    inputMode="numeric"
+                                    onChange={(event) =>
+                                      setQtyDraftBySystemId((prev) => ({
+                                        ...prev,
+                                        [row.system_id]: event.target.value
+                                      }))
+                                    }
+                                    placeholder={String(row.qty)}
+                                    value={qtyDraftBySystemId[row.system_id] ?? ''}
+                                  />
+                                  <button
+                                    className="border border-brand-maroon bg-brand-maroon px-2 py-1 text-white"
+                                    onClick={() => {
+                                      void applyAbsoluteQty(row.system_id);
+                                    }}
+                                    type="button"
+                                  >
+                                    Set
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
