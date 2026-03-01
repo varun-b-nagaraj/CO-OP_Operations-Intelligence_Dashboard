@@ -898,7 +898,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
       if (next) {
         setActivePanelByEmployeeId((panelPrevious) => ({
           ...panelPrevious,
-          [employeeId]: panelPrevious[employeeId] ?? 'overview'
+          [employeeId]: panelPrevious[employeeId] ?? 'meeting'
         }));
       }
       return next;
@@ -1022,7 +1022,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                 assignedPeriods: employee.assignedPeriods
               };
               const pointsDraft = pointsDrafts[employee.id] ?? { points: '1', type: 'manual', note: '' };
-              const activePanel = activePanelByEmployeeId[employee.id] ?? 'overview';
+              const activePanel = activePanelByEmployeeId[employee.id] ?? 'meeting';
 
               return (
                 <Fragment key={employee.id}>
@@ -1078,54 +1078,50 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               Points: {employee.points} • Strikes: {employee.strikesCount}
                             </div>
                           </div>
-                          <div className="flex flex-wrap gap-1 rounded-md border border-neutral-300 bg-white p-1">
-                            {([
-                              ['overview', 'Overview'],
-                              ['meeting', 'Meeting'],
-                              ['shift', 'Shift'],
-                              ['record', 'Record'],
-                              ['login', 'Login'],
-                              ['offperiods', 'Off-Periods'],
-                              ['strikes', 'Strikes'],
-                              ['points', 'Points']
-                            ] as Array<[EmployeePanelId, string]>).map(([panelId, label]) => (
-                              <button
-                                className={`min-h-[32px] rounded px-2 text-xs ${
-                                  activePanel === panelId
-                                    ? 'bg-brand-maroon text-white'
-                                    : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
-                                }`}
-                                key={`${employee.id}-panel-${panelId}`}
-                                onClick={() =>
-                                  setActivePanelByEmployeeId((previous) => ({
-                                    ...previous,
-                                    [employee.id]: panelId
-                                  }))
-                                }
-                                type="button"
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="grid gap-2 md:grid-cols-2">
-                            <details
-                              className={`border border-neutral-300 bg-white p-2 ${activePanel === 'overview' ? '' : 'hidden'}`}
-                              open
-                            >
-                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">General Overview</summary>
+                          <div className="grid gap-3 xl:grid-cols-[320px_minmax(0,1fr)]">
+                            <div className="border border-neutral-300 bg-white p-3">
+                              <p className="text-sm font-semibold text-neutral-900">General Overview</p>
                               <div className="mt-2 space-y-1 text-sm text-neutral-700">
                                 <p>Username: {employee.username ?? 'N/A'}</p>
                                 <p>s_number: {employee.sNumber || 'N/A'}</p>
                                 <p>Assigned periods: {employee.assignedPeriods || 'N/A'}</p>
                                 <p>Off periods: {employee.offPeriods.join(', ')}</p>
                               </div>
-                            </details>
+                            </div>
 
-                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'meeting' ? '' : 'hidden'}`} open>
-                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">
-                                Meeting Attendance
-                              </summary>
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap gap-1 rounded-md border border-neutral-300 bg-white p-1">
+                                {([
+                                  ['meeting', 'Meeting'],
+                                  ['shift', 'Shift'],
+                                  ['record', 'Record'],
+                                  ['login', 'Login'],
+                                  ['offperiods', 'Off-Periods'],
+                                  ['strikes', 'Strikes'],
+                                  ['points', 'Points']
+                                ] as Array<[EmployeePanelId, string]>).map(([panelId, label]) => (
+                                  <button
+                                    className={`min-h-[32px] rounded px-2 text-xs ${
+                                      activePanel === panelId
+                                        ? 'bg-brand-maroon text-white'
+                                        : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+                                    }`}
+                                    key={`${employee.id}-panel-${panelId}`}
+                                    onClick={() =>
+                                      setActivePanelByEmployeeId((previous) => ({
+                                        ...previous,
+                                        [employee.id]: panelId
+                                      }))
+                                    }
+                                    type="button"
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+
+                              <div className={`border border-neutral-300 bg-white p-2 ${activePanel === 'meeting' ? '' : 'hidden'}`}>
+                                <p className="text-sm font-semibold text-neutral-900">Meeting Attendance</p>
                               <div className="mt-2 space-y-2">
                                 <p className="text-xs text-neutral-600">
                                   {employee.meetingAttended}/{employee.meetingSessions} attended, {employee.meetingExcused} excused
@@ -1236,10 +1232,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   </button>
                                 </div>
                               </div>
-                            </details>
+                              </div>
 
-                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'shift' ? '' : 'hidden'}`} open>
-                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Shift Attendance</summary>
+                              <div className={`border border-neutral-300 bg-white p-2 ${activePanel === 'shift' ? '' : 'hidden'}`}>
+                                <p className="text-sm font-semibold text-neutral-900">Shift Attendance</p>
                               <div className="mt-2 space-y-2">
                                 <FancyDropdown
                                   label="Recent Shift"
@@ -1319,10 +1315,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   <p className="text-xs text-neutral-600">Shift overrides are available on the shift date or after.</p>
                                 )}
                               </div>
-                            </details>
+                              </div>
 
-                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'record' ? '' : 'hidden'}`} open>
-                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Employee Record</summary>
+                              <div className={`border border-neutral-300 bg-white p-2 ${activePanel === 'record' ? '' : 'hidden'}`}>
+                                <p className="text-sm font-semibold text-neutral-900">Employee Record</p>
                               <div className="mt-2 space-y-2">
                                 <label className="block text-sm">
                                   Name
@@ -1401,10 +1397,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   </button>
                                 </div>
                               </div>
-                            </details>
+                              </div>
 
-                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'login' ? '' : 'hidden'}`} open>
-                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Login Credentials</summary>
+                              <div className={`border border-neutral-300 bg-white p-2 ${activePanel === 'login' ? '' : 'hidden'}`}>
+                                <p className="text-sm font-semibold text-neutral-900">Login Credentials</p>
                               <div className="mt-2 space-y-2">
                                 <label className="block text-sm">
                                   Username
@@ -1456,10 +1452,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   Save Login
                                 </button>
                               </div>
-                            </details>
+                              </div>
 
-                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'offperiods' ? '' : 'hidden'}`} open>
-                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Off-Period Settings</summary>
+                              <div className={`border border-neutral-300 bg-white p-2 ${activePanel === 'offperiods' ? '' : 'hidden'}`}>
+                                <p className="text-sm font-semibold text-neutral-900">Off-Period Settings</p>
                               <div className="mt-2 space-y-2">
                                 <div className="grid grid-cols-4 gap-2">
                                   {Array.from({ length: 8 }, (_, index) => index + 1).map((period) => {
@@ -1498,10 +1494,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   Save Off-Periods
                                 </button>
                               </div>
-                            </details>
+                              </div>
 
-                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'strikes' ? '' : 'hidden'}`} open>
-                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Strike Management</summary>
+                              <div className={`border border-neutral-300 bg-white p-2 ${activePanel === 'strikes' ? '' : 'hidden'}`}>
+                                <p className="text-sm font-semibold text-neutral-900">Strike Management</p>
                               <div className="mt-2 space-y-2">
                                 <FancyDropdown
                                   label="Strike View"
@@ -1574,10 +1570,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   ))}
                                 </div>
                               </div>
-                            </details>
+                              </div>
 
-                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'points' ? '' : 'hidden'}`} open>
-                              <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Points Management</summary>
+                              <div className={`border border-neutral-300 bg-white p-2 ${activePanel === 'points' ? '' : 'hidden'}`}>
+                                <p className="text-sm font-semibold text-neutral-900">Points Management</p>
                               <div className="mt-2 space-y-2">
                                 <FancyDropdown
                                   label="Type"
@@ -1644,7 +1640,8 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   Apply Points
                                 </button>
                               </div>
-                            </details>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </td>
