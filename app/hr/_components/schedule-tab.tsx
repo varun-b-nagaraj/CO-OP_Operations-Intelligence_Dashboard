@@ -93,6 +93,8 @@ const MONTH_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 12, label: 'December' }
 ];
 
+const COLLAPSED_ROSTER_SUMMARY_ROWS = 12;
+
 function toDateKey(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
@@ -291,6 +293,7 @@ export function ScheduleTab() {
   const [shiftActionChoice, setShiftActionChoice] = useState<ShiftActionChoice>('volunteer');
   const [assignmentTargetSNumber, setAssignmentTargetSNumber] = useState('');
   const [managerAssigneeSearch, setManagerAssigneeSearch] = useState('');
+  const [isRosterSummaryExpanded, setIsRosterSummaryExpanded] = useState(false);
   const [dragSourceUid, setDragSourceUid] = useState<string | null>(null);
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
   const [emptySlotTarget, setEmptySlotTarget] = useState<EmptySlotTarget | null>(null);
@@ -879,6 +882,23 @@ export function ScheduleTab() {
     () => buildSummaryFromAssignments(visibleAssignments, rosterNameBySNumber),
     [rosterNameBySNumber, visibleAssignments]
   );
+  const visibleRosterRows = useMemo(
+    () =>
+      isRosterSummaryExpanded
+        ? editableRoster
+        : editableRoster.slice(0, COLLAPSED_ROSTER_SUMMARY_ROWS),
+    [editableRoster, isRosterSummaryExpanded]
+  );
+  const visibleSummaryRows = useMemo(
+    () =>
+      isRosterSummaryExpanded
+        ? summaryRows
+        : summaryRows.slice(0, COLLAPSED_ROSTER_SUMMARY_ROWS),
+    [isRosterSummaryExpanded, summaryRows]
+  );
+  const canExpandRosterSummary =
+    editableRoster.length > COLLAPSED_ROSTER_SUMMARY_ROWS ||
+    summaryRows.length > COLLAPSED_ROSTER_SUMMARY_ROWS;
 
   const attendanceByAssignmentKey = useMemo(() => {
     const map = new Map<string, GenericRow>();
@@ -1552,7 +1572,7 @@ export function ScheduleTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {editableRoster.map((entry) => (
+                  {visibleRosterRows.map((entry) => (
                     <tr className="border-b border-neutral-200" key={entry.localId}>
                       <td className="p-2">{entry.name}</td>
                       <td className="p-2">{entry.s_number}</td>
@@ -1604,7 +1624,7 @@ export function ScheduleTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {summaryRows.map((entry) => (
+                    {visibleSummaryRows.map((entry) => (
                       <tr className="border-b border-neutral-200" key={entry.localId}>
                         <td className="p-2">{entry.student}</td>
                         <td className="p-2">{entry.studentSNumber}</td>
@@ -1639,7 +1659,7 @@ export function ScheduleTab() {
 
               <div className="border border-neutral-300">
                 <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Statistics</h3>
-                <div className="max-h-60 overflow-auto p-2 text-sm">
+                <div className="p-2 text-sm">
                   {schedule.statistics.map((stat) => (
                     <p key={stat.metric}>
                       {stat.metric}: {stat.value}
@@ -1650,7 +1670,7 @@ export function ScheduleTab() {
 
               <div className="border border-neutral-300">
                 <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Balance Analysis</h3>
-                <div className="max-h-60 overflow-auto p-2 text-sm">
+                <div className="p-2 text-sm">
                   {schedule.balanceAnalysis.map((item) => (
                     <p key={`${item.category}-${item.metric}`}>
                       {item.category} — {item.metric}: {item.value}
@@ -1660,6 +1680,17 @@ export function ScheduleTab() {
               </div>
             </div>
           </div>
+          {canExpandRosterSummary && (
+            <div className="flex justify-end">
+              <button
+                className="min-h-[44px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={() => setIsRosterSummaryExpanded((previous) => !previous)}
+                type="button"
+              >
+                {isRosterSummaryExpanded ? 'Show less' : 'Show more'}
+              </button>
+            </div>
+          )}
 
           <section className="space-y-3 border border-neutral-300 bg-neutral-50 p-3">
             <div className="grid gap-3 md:grid-cols-4">
