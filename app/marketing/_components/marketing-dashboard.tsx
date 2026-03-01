@@ -53,10 +53,10 @@ const METHODS: Array<{ value: CoordinationMethod; label: string }> = [
 ];
 
 const STATUS_CLASSES: Record<MarketingEventStatus, string> = {
-  draft: 'border border-neutral-300 bg-neutral-100 text-neutral-700',
-  scheduled: 'border border-sky-300 bg-sky-100 text-sky-700',
-  completed: 'border border-emerald-300 bg-emerald-100 text-emerald-700',
-  cancelled: 'border border-red-300 bg-red-100 text-red-700'
+  draft: 'border border-amber-300 bg-amber-100 text-amber-800',
+  scheduled: 'border border-blue-300 bg-blue-100 text-blue-800',
+  completed: 'border border-emerald-300 bg-emerald-100 text-emerald-800',
+  cancelled: 'border border-rose-300 bg-rose-100 text-rose-800'
 };
 
 interface PendingAssetPreview {
@@ -698,6 +698,44 @@ export function MarketingDashboard() {
     }
   };
 
+  const removeEvent = async () => {
+    if (!selectedEventId) return;
+    const selected = events.find((entry) => entry.id === selectedEventId);
+    const confirmed = window.confirm(
+      `Delete event "${selected?.title ?? 'this event'}"? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await repository.deleteEvent(selectedEventId);
+      setEvents((prev) => prev.filter((entry) => entry.id !== selectedEventId));
+      setReports((prev) => prev.filter((entry) => entry.id !== selectedEventId));
+      setEventIndicators((prev) => {
+        const next = { ...prev };
+        delete next[selectedEventId];
+        return next;
+      });
+      setEventSearchIndex((prev) => {
+        const next = { ...prev };
+        delete next[selectedEventId];
+        return next;
+      });
+      setDrawerOpen(false);
+      setSelectedEventId(null);
+      setEventBundle(null);
+      setEventDraft(null);
+      setNotice('Event deleted.');
+    } catch (removeError) {
+      const message = removeError instanceof Error ? removeError.message : 'Unable to delete event.';
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const monthHeading = useMemo(() => {
     return monthAnchor.toLocaleDateString(undefined, {
       month: 'long',
@@ -971,11 +1009,23 @@ export function MarketingDashboard() {
                     return (
                       <div
                         key={key}
-                        className={`min-h-[124px] border-r border-b border-neutral-300 p-2 last:border-r-0 ${inCurrentMonth ? 'bg-white' : 'bg-neutral-50'}`}
+                        className={`min-h-[124px] cursor-pointer border-r border-b border-neutral-300 p-2 last:border-r-0 ${inCurrentMonth ? 'bg-white' : 'bg-neutral-50'}`}
+                        onClick={() => {
+                          void createEvent(day);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            void createEvent(day);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
                       >
                         <button
                           className="mb-2 text-left text-xs font-medium text-neutral-700 underline-offset-2 hover:underline"
-                          onClick={() => {
+                          onClick={(clickEvent) => {
+                            clickEvent.stopPropagation();
                             void createEvent(day);
                           }}
                           type="button"
@@ -984,29 +1034,30 @@ export function MarketingDashboard() {
                         </button>
 
                         <div className="space-y-1">
-                          {dayEvents.slice(0, 3).map((event) => {
-                            const hasImages = (eventIndicators[event.id]?.assets ?? 0) > 0;
-                            const hasExternalContacts = (eventIndicators[event.id]?.externalContacts ?? 0) > 0;
+                          {dayEvents.slice(0, 3).map((dayEvent) => {
+                            const hasImages = (eventIndicators[dayEvent.id]?.assets ?? 0) > 0;
+                            const hasExternalContacts = (eventIndicators[dayEvent.id]?.externalContacts ?? 0) > 0;
                             return (
                               <button
-                                key={event.id}
+                                key={dayEvent.id}
                                 className="w-full border border-neutral-200 bg-neutral-50 px-2 py-1 text-left text-[11px]"
-                                onClick={() => {
-                                  void loadEventBundle(event.id);
+                                onClick={(clickEvent) => {
+                                  clickEvent.stopPropagation();
+                                  void loadEventBundle(dayEvent.id);
                                 }}
                                 type="button"
                               >
                                 <div className="flex items-center justify-between gap-1">
-                                  <span className={`inline-flex px-1 py-0.5 text-[10px] ${STATUS_CLASSES[event.status]}`}>
-                                    {formatLabel(event.status)}
+                                  <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_CLASSES[dayEvent.status]}`}>
+                                    {formatLabel(dayEvent.status)}
                                   </span>
                                   <span className="flex items-center gap-1">
                                     {hasImages ? <span className="text-neutral-600">IMG</span> : null}
                                     {hasExternalContacts ? <span className="text-neutral-600">EXT</span> : null}
                                   </span>
                                 </div>
-                                <p className="mt-1 truncate font-medium">{event.title}</p>
-                                <p className="truncate text-neutral-600">{event.category ?? 'General'}</p>
+                                <p className="mt-1 truncate font-medium">{dayEvent.title}</p>
+                                <p className="truncate text-neutral-600">{dayEvent.category ?? 'General'}</p>
                                 <span className="hidden">
                                   {hasImages ? <span className="text-neutral-600">IMG</span> : null}
                                   {hasExternalContacts ? <span className="text-neutral-600">EXT</span> : null}
@@ -1047,7 +1098,9 @@ export function MarketingDashboard() {
                             </button>
                           </td>
                           <td className="border-b border-neutral-200 px-3 py-2">
-                            <span className={`inline-flex px-2 py-0.5 text-xs ${STATUS_CLASSES[event.status]}`}>{formatLabel(event.status)}</span>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_CLASSES[event.status]}`}>
+                              {formatLabel(event.status)}
+                            </span>
                           </td>
                           <td className="border-b border-neutral-200 px-3 py-2">{event.category ?? 'Uncategorized'}</td>
                           <td className="border-b border-neutral-200 px-3 py-2">{event.location ?? '-'}</td>
@@ -1151,7 +1204,9 @@ export function MarketingDashboard() {
                             </button>
                           </td>
                           <td className="border-b border-neutral-200 px-3 py-2">
-                            <span className={`inline-flex px-2 py-0.5 text-xs ${STATUS_CLASSES[event.status]}`}>{formatLabel(event.status)}</span>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_CLASSES[event.status]}`}>
+                              {formatLabel(event.status)}
+                            </span>
                           </td>
                           <td className="border-b border-neutral-200 px-3 py-2">{event.category ?? '-'}</td>
                           <td className="border-b border-neutral-200 px-3 py-2">{event.location ?? '-'}</td>
@@ -1395,13 +1450,25 @@ export function MarketingDashboard() {
                     <h2 className="text-lg font-semibold">Event Details</h2>
                     <p className="mt-1 text-xs text-neutral-600">Autosave: {autosaveState}</p>
                   </div>
-                  <button
-                    className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
-                    onClick={() => setDrawerOpen(false)}
-                    type="button"
-                  >
-                    Close
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="min-h-[36px] border border-red-300 bg-red-50 px-3 text-sm text-red-700 hover:bg-red-100 disabled:opacity-60"
+                      disabled={saving}
+                      onClick={() => {
+                        void removeEvent();
+                      }}
+                      type="button"
+                    >
+                      Delete Event
+                    </button>
+                    <button
+                      className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
+                      onClick={() => setDrawerOpen(false)}
+                      type="button"
+                    >
+                      Close
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-5 py-4">

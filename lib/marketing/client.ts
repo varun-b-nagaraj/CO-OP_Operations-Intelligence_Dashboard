@@ -171,6 +171,7 @@ export interface MarketingRepository {
   listLinkedEventIdsForContact(contactId: string): Promise<string[]>;
   getEventBundle(eventId: string): Promise<MarketingEventBundle>;
   saveEvent(input: SaveEventInput): Promise<MarketingEventRow>;
+  deleteEvent(eventId: string): Promise<void>;
   saveContact(input: Partial<ExternalContactRow> & { organization: string; person_name: string }): Promise<ExternalContactRow>;
   addInternalCoordinator(input: {
     eventId: string;
@@ -410,6 +411,11 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       const { data, error } = await supabase.from('marketing_events').upsert(payload).select('*').single();
       if (error) throw error;
       return mapEvent((data ?? {}) as Record<string, unknown>);
+    },
+
+    async deleteEvent(eventId) {
+      const { error } = await supabase.from('marketing_events').delete().eq('id', eventId);
+      if (error) throw error;
     },
 
     async saveContact(input) {
