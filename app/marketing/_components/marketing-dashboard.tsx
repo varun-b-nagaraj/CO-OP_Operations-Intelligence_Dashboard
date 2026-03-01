@@ -20,6 +20,7 @@ import { createBrowserClient } from '@/lib/supabase';
 type DashboardTab = 'calendar' | 'events' | 'contacts' | 'reports';
 type CalendarView = 'month' | 'list';
 type HistoryLookback = '3m' | '6m' | '12m' | '24m' | 'all';
+type CalendarScope = 'recent' | 'past';
 
 type EventDraft = MarketingEventRow;
 
@@ -74,6 +75,17 @@ interface PendingAssetPreview {
   fileName: string;
   assetType: AssetType;
 }
+
+interface PastSearchConfig {
+  range: { startKey: string; endKey: string };
+  lookback: HistoryLookback;
+  status: 'all' | MarketingEventStatus;
+  category: string | 'all';
+  query: string;
+  savedAt: string;
+}
+
+const PAST_SEARCH_CACHE_KEY = 'marketing_past_search_cache_v1';
 
 function formatLabel(value: string) {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
@@ -171,19 +183,14 @@ function normalizeRange(startKey: string, endKey: string) {
   return startKey <= endKey ? { startKey, endKey } : { startKey: endKey, endKey: startKey };
 }
 
-function monthDiff(start: Date, end: Date) {
-  return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-}
-
-function buildMonthAnchorsInRange(startKey: string, endKey: string): Date[] {
-  const start = toDateFromKey(startKey);
-  const end = toDateFromKey(endKey);
-  const totalMonths = Math.max(0, monthDiff(start, end));
-  const anchors: Date[] = [];
-  for (let index = 0; index <= totalMonths; index += 1) {
-    anchors.push(new Date(start.getFullYear(), start.getMonth() + index, 1));
-  }
-  return anchors;
+function lookbackStartDateKey(lookback: HistoryLookback) {
+  if (lookback === 'all') return null;
+  const now = new Date();
+  const months = Number.parseInt(lookback.replace('m', ''), 10);
+  if (!Number.isFinite(months)) return null;
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  start.setMonth(start.getMonth() - (months - 1));
+  return dateKey(start);
 }
 
 function toEventSavePayload(draft: EventDraft) {
@@ -231,6 +238,7 @@ export function MarketingDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const [calendarView, setCalendarView] = useState<CalendarView>('month');
+  const [calendarScope, setCalendarScope] = useState<CalendarScope>('recent');
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [statusFilter, setStatusFilter] = useState<'all' | MarketingEventStatus>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -306,8 +314,13 @@ export function MarketingDashboard() {
   const [previewAsset, setPreviewAsset] = useState<EventAssetRow | null>(null);
   const [dragAnchorDate, setDragAnchorDate] = useState<string | null>(null);
   const [dragPreviewDate, setDragPreviewDate] = useState<string | null>(null);
-  const [historyRange, setHistoryRange] = useState<{ startKey: string; endKey: string } | null>(null);
-  const [historyLookback, setHistoryLookback] = useState<HistoryLookback>('12m');
+  const [pendingPastRange, setPendingPastRange] = useState<{ startKey: string; endKey: string } | null>(null);
+  const [pastSearchConfig, setPastSearchConfig] = useState<PastSearchConfig | null>(null);
+  const [pastFilterModalOpen, setPastFilterModalOpen] = useState(false);
+  const [pastLookbackDraft, setPastLookbackDraft] = useState<HistoryLookback>('12m');
+  const [pastStatusDraft, setPastStatusDraft] = useState<'all' | MarketingEventStatus>('all');
+  const [pastCategoryDraft, setPastCategoryDraft] = useState<string>('all');
+  const [pastQueryDraft, setPastQueryDraft] = useState('');
   const suppressDayClickRef = useRef(false);
 
   const categoryOptions = useMemo(() => {
@@ -376,6 +389,23 @@ export function MarketingDashboard() {
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(PAST_SEARCH_CACHE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as PastSearchConfig;
+      if (!parsed?.range?.startKey || !parsed?.range?.endKey) return;
+      setPastSearchConfig(parsed);
+    } catch {
+      // Ignore malformed local cache.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pastSearchConfig) return;
+    window.localStorage.setItem(PAST_SEARCH_CACHE_KEY, JSON.stringify(pastSearchConfig));
+  }, [pastSearchConfig]);
 
   useEffect(() => {
     const run = async () => {
@@ -771,6 +801,32 @@ export function MarketingDashboard() {
     }
   };
 
+  const openPastFromCache = () => {
+    if (!pastSearchConfig) {
+      setNotice('No cached past search yet. Click View Past and drag a range first.');
+      return;
+    }
+    setCalendarScope('past');
+    setNotice('Loaded cached past search.');
+  };
+
+  const applyPastSearchFilters = () => {
+    if (!pendingPastRange) return;
+    const nextConfig: PastSearchConfig = {
+      range: pendingPastRange,
+      lookback: pastLookbackDraft,
+      status: pastStatusDraft,
+      category: pastCategoryDraft,
+      query: pastQueryDraft.trim(),
+      savedAt: new Date().toISOString()
+    };
+    setPastSearchConfig(nextConfig);
+    setCalendarScope('past');
+    setPastFilterModalOpen(false);
+    setPendingPastRange(null);
+    setNotice('Past view updated.');
+  };
+
   const monthHeading = useMemo(() => {
     return monthAnchor.toLocaleDateString(undefined, {
       month: 'long',
@@ -852,81 +908,75 @@ export function MarketingDashboard() {
     }
   };
 
-  const filteredEventsByDay = useMemo(() => {
-    const byDay = new Map<string, MarketingEventRow[]>();
-    visibleEventRows.forEach((event) => {
-      const key = dateKey(event.starts_at);
-      const bucket = byDay.get(key) ?? [];
-      bucket.push(event);
-      byDay.set(key, bucket);
-    });
-    return byDay;
-  }, [visibleEventRows]);
-
   const activeRange = useMemo(() => {
     if (dragAnchorDate && dragPreviewDate) {
       return normalizeRange(dragAnchorDate, dragPreviewDate);
     }
-    return historyRange;
-  }, [dragAnchorDate, dragPreviewDate, historyRange]);
+    if (pendingPastRange) return pendingPastRange;
+    return pastSearchConfig?.range ?? null;
+  }, [dragAnchorDate, dragPreviewDate, pendingPastRange, pastSearchConfig]);
 
-  const lookbackStartKey = useMemo(() => {
-    if (historyLookback === 'all') return null;
-    const now = new Date();
-    const months = Number.parseInt(historyLookback.replace('m', ''), 10);
-    if (!Number.isFinite(months)) return null;
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    start.setMonth(start.getMonth() - (months - 1));
-    return dateKey(start);
-  }, [historyLookback]);
+  const pastVisibleEventRows = useMemo(() => {
+    if (!pastSearchConfig) return [] as MarketingEventRow[];
 
-  const historyEventsByDay = useMemo(() => {
+    const lookbackStartKey = lookbackStartDateKey(pastSearchConfig.lookback);
+    const effectiveStart =
+      lookbackStartKey && pastSearchConfig.range.startKey < lookbackStartKey
+        ? lookbackStartKey
+        : pastSearchConfig.range.startKey;
+    if (effectiveStart > pastSearchConfig.range.endKey) return [] as MarketingEventRow[];
+
+    const search = pastSearchConfig.query.trim().toLowerCase();
+    return events
+      .filter((event) => {
+        const key = dateKey(event.starts_at);
+        if (key < effectiveStart || key > pastSearchConfig.range.endKey) return false;
+        if (pastSearchConfig.status !== 'all' && event.status !== pastSearchConfig.status) return false;
+        if (pastSearchConfig.category !== 'all' && (event.category ?? '').trim() !== pastSearchConfig.category) return false;
+        if (!search) return true;
+        const index = eventSearchIndex[event.id];
+        return [event.title, event.location ?? '', event.category ?? '', index?.external ?? '', index?.internal ?? '']
+          .join(' ')
+          .toLowerCase()
+          .includes(search);
+      })
+      .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime());
+  }, [pastSearchConfig, events, eventSearchIndex]);
+
+  const visibleCalendarRows = useMemo(() => {
+    if (calendarScope === 'past' && pastSearchConfig) return pastVisibleEventRows;
+    return visibleEventRows;
+  }, [calendarScope, pastSearchConfig, pastVisibleEventRows, visibleEventRows]);
+
+  const visibleCalendarRowsByDay = useMemo(() => {
     const byDay = new Map<string, MarketingEventRow[]>();
-    if (!historyRange) return byDay;
-
-    const effectiveStart = lookbackStartKey && historyRange.startKey < lookbackStartKey ? lookbackStartKey : historyRange.startKey;
-    if (effectiveStart > historyRange.endKey) return byDay;
-
-    events.forEach((event) => {
+    visibleCalendarRows.forEach((event) => {
       const key = dateKey(event.starts_at);
-      if (key < effectiveStart || key > historyRange.endKey) return;
       const bucket = byDay.get(key) ?? [];
       bucket.push(event);
       byDay.set(key, bucket);
     });
-
     return byDay;
-  }, [events, historyRange, lookbackStartKey]);
-
-  const historyResultCount = useMemo(() => {
-    let total = 0;
-    historyEventsByDay.forEach((rows) => {
-      total += rows.length;
-    });
-    return total;
-  }, [historyEventsByDay]);
-
-  const historyCalendarAnchors = useMemo(() => {
-    if (!historyRange) return [];
-    const effectiveStart = lookbackStartKey && historyRange.startKey < lookbackStartKey ? lookbackStartKey : historyRange.startKey;
-    if (effectiveStart > historyRange.endKey) return [];
-    return buildMonthAnchorsInRange(effectiveStart, historyRange.endKey);
-  }, [historyRange, lookbackStartKey]);
+  }, [visibleCalendarRows]);
 
   useEffect(() => {
     const onMouseUp = () => {
       if (!dragAnchorDate) return;
-      if (dragPreviewDate) {
-        const next = normalizeRange(dragAnchorDate, dragPreviewDate);
-        setHistoryRange(next);
-      }
+      if (!dragPreviewDate) return;
+      const next = normalizeRange(dragAnchorDate, dragPreviewDate);
+      setPendingPastRange(next);
+      setPastLookbackDraft(pastSearchConfig?.lookback ?? '12m');
+      setPastStatusDraft(pastSearchConfig?.status ?? 'all');
+      setPastCategoryDraft(pastSearchConfig?.category ?? 'all');
+      setPastQueryDraft(pastSearchConfig?.query ?? '');
+      setPastFilterModalOpen(true);
       setDragAnchorDate(null);
       setDragPreviewDate(null);
     };
 
     window.addEventListener('mouseup', onMouseUp);
     return () => window.removeEventListener('mouseup', onMouseUp);
-  }, [dragAnchorDate, dragPreviewDate]);
+  }, [dragAnchorDate, dragPreviewDate, pastSearchConfig]);
 
   if (loading) {
     return (
@@ -1023,6 +1073,30 @@ export function MarketingDashboard() {
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="inline-flex border border-neutral-300 bg-white text-sm">
                     <button
+                      className={`min-h-[34px] px-3 ${calendarScope === 'recent' ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
+                      onClick={() => setCalendarScope('recent')}
+                      type="button"
+                    >
+                      Recent
+                    </button>
+                    <button
+                      className={`min-h-[34px] border-l border-neutral-300 px-3 ${calendarScope === 'past' ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
+                      onClick={() => setCalendarScope('past')}
+                      type="button"
+                    >
+                      View Past
+                    </button>
+                  </div>
+                  <button
+                    className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm disabled:opacity-50"
+                    disabled={!pastSearchConfig}
+                    onClick={openPastFromCache}
+                    type="button"
+                  >
+                    Revisit Past
+                  </button>
+                  <div className="inline-flex border border-neutral-300 bg-white text-sm">
+                    <button
                       className={`min-h-[34px] px-3 ${calendarView === 'month' ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
                       onClick={() => setCalendarView('month')}
                       type="button"
@@ -1065,45 +1139,22 @@ export function MarketingDashboard() {
                 </div>
               </div>
 
-              <div className="space-y-2 border border-neutral-300 bg-white p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium">History Search</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
-                      onChange={(event) => setHistoryLookback(event.target.value as HistoryLookback)}
-                      value={historyLookback}
-                    >
-                      {LOOKBACK_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
-                      onClick={() => {
-                        setHistoryRange(null);
-                        setDragAnchorDate(null);
-                        setDragPreviewDate(null);
-                      }}
-                      type="button"
-                    >
-                      Clear Range
-                    </button>
-                  </div>
+              {calendarScope === 'past' ? (
+                <div className="space-y-2 border border-neutral-300 bg-white p-3">
+                  <p className="text-sm font-medium">Past View</p>
+                  <p className="text-xs text-neutral-600">
+                    Drag across the calendar to select a date range. A filter modal will open when you release.
+                  </p>
+                  <p className="text-xs text-neutral-700">
+                    Last search:{' '}
+                    {pastSearchConfig
+                      ? `${toDateFromKey(pastSearchConfig.range.startKey).toLocaleDateString()} - ${toDateFromKey(
+                          pastSearchConfig.range.endKey
+                        ).toLocaleDateString()}`
+                      : 'No cached range yet'}
+                  </p>
                 </div>
-                <p className="text-xs text-neutral-600">
-                  Drag across calendar days to select a timeframe. Click a day to create a new event.
-                </p>
-                <p className="text-xs text-neutral-700">
-                  Selected:{' '}
-                  {historyRange
-                    ? `${toDateFromKey(historyRange.startKey).toLocaleDateString()} - ${toDateFromKey(historyRange.endKey).toLocaleDateString()}`
-                    : 'No range selected'}
-                  {historyRange ? ` • ${historyResultCount} event(s) in results` : ''}
-                </p>
-              </div>
+              ) : null}
 
               {events.length === 0 ? (
                 <div className="border border-dashed border-neutral-300 bg-neutral-50 p-6 text-center">
@@ -1130,7 +1181,7 @@ export function MarketingDashboard() {
 
                   {calendarGrid.map((day) => {
                     const key = dateKey(day);
-                    const dayEvents = filteredEventsByDay.get(key) ?? [];
+                    const dayEvents = visibleCalendarRowsByDay.get(key) ?? [];
                     const inCurrentMonth = isSameMonth(day, monthAnchor);
                     const inSelectedRange =
                       activeRange !== null && key >= activeRange.startKey && key <= activeRange.endKey;
@@ -1141,12 +1192,14 @@ export function MarketingDashboard() {
                           inSelectedRange ? 'bg-amber-50' : inCurrentMonth ? 'bg-white' : 'bg-neutral-50'
                         }`}
                         onMouseDown={(mouseEvent) => {
+                          if (calendarScope !== 'past') return;
                           if (mouseEvent.button !== 0) return;
                           suppressDayClickRef.current = false;
                           setDragAnchorDate(key);
                           setDragPreviewDate(key);
                         }}
                         onMouseEnter={() => {
+                          if (calendarScope !== 'past') return;
                           if (!dragAnchorDate) return;
                           setDragPreviewDate(key);
                           if (key !== dragAnchorDate) {
@@ -1154,15 +1207,23 @@ export function MarketingDashboard() {
                           }
                         }}
                         onMouseUp={() => {
+                          if (calendarScope !== 'past') return;
                           if (!dragAnchorDate) return;
                           if (key !== dragAnchorDate) {
                             suppressDayClickRef.current = true;
                           }
-                          setHistoryRange(normalizeRange(dragAnchorDate, key));
+                          const selectedRange = normalizeRange(dragAnchorDate, key);
+                          setPendingPastRange(selectedRange);
+                          setPastLookbackDraft(pastSearchConfig?.lookback ?? '12m');
+                          setPastStatusDraft(pastSearchConfig?.status ?? 'all');
+                          setPastCategoryDraft(pastSearchConfig?.category ?? 'all');
+                          setPastQueryDraft(pastSearchConfig?.query ?? '');
+                          setPastFilterModalOpen(true);
                           setDragAnchorDate(null);
                           setDragPreviewDate(null);
                         }}
                         onClick={() => {
+                          if (calendarScope === 'past') return;
                           if (suppressDayClickRef.current) {
                             suppressDayClickRef.current = false;
                             return;
@@ -1170,6 +1231,7 @@ export function MarketingDashboard() {
                           void createEvent(day);
                         }}
                         onKeyDown={(event) => {
+                          if (calendarScope === 'past') return;
                           if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault();
                             void createEvent(day);
@@ -1185,6 +1247,7 @@ export function MarketingDashboard() {
                           }}
                           onClick={(clickEvent) => {
                             clickEvent.stopPropagation();
+                            if (calendarScope === 'past') return;
                             void createEvent(day);
                           }}
                           type="button"
@@ -1245,7 +1308,7 @@ export function MarketingDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleEventRows.map((event) => (
+                      {visibleCalendarRows.map((event) => (
                         <tr key={event.id}>
                           <td className="border-b border-neutral-200 px-3 py-2">{formatDate(event.starts_at)}</td>
                           <td className="border-b border-neutral-200 px-3 py-2">
@@ -1272,71 +1335,6 @@ export function MarketingDashboard() {
                   </table>
                 </div>
               )}
-
-              {historyRange ? (
-                <section className="space-y-3 border border-neutral-300 bg-white p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold">History Results Calendar</h3>
-                    <p className="text-xs text-neutral-600">
-                      {toDateFromKey(historyRange.startKey).toLocaleDateString()} -{' '}
-                      {toDateFromKey(historyRange.endKey).toLocaleDateString()}
-                    </p>
-                  </div>
-
-                  {historyCalendarAnchors.length === 0 ? (
-                    <p className="text-sm text-neutral-600">No events found in that date range for the selected lookback window.</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {historyCalendarAnchors.map((anchor) => {
-                        const monthGrid = buildMonthGrid(anchor);
-                        return (
-                          <div key={`${anchor.getFullYear()}-${anchor.getMonth()}`} className="border border-neutral-300">
-                            <div className="border-b border-neutral-300 bg-neutral-50 px-3 py-2 text-sm font-medium">
-                              {anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-                            </div>
-                            <div className="grid grid-cols-7 bg-white">
-                              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((name) => (
-                                <div key={name} className="border-b border-r border-neutral-300 bg-neutral-50 px-2 py-2 text-[11px] font-medium text-neutral-600 last:border-r-0">
-                                  {name}
-                                </div>
-                              ))}
-                              {monthGrid.map((day) => {
-                                const key = dateKey(day);
-                                const inMonth = isSameMonth(day, anchor);
-                                const rows = historyEventsByDay.get(key) ?? [];
-                                return (
-                                  <div
-                                    key={key}
-                                    className={`min-h-[96px] border-r border-b border-neutral-300 p-2 last:border-r-0 ${
-                                      inMonth ? 'bg-white' : 'bg-neutral-50'
-                                    }`}
-                                  >
-                                    <p className="text-xs font-medium text-neutral-700">{day.getDate()}</p>
-                                    <div className="mt-1 space-y-1">
-                                      {rows.slice(0, 3).map((event) => (
-                                        <button
-                                          key={event.id}
-                                          className="w-full truncate border border-neutral-200 bg-neutral-50 px-1.5 py-1 text-left text-[11px] hover:bg-neutral-100"
-                                          onClick={() => {
-                                            void loadEventBundle(event.id);
-                                          }}
-                                          type="button"
-                                        >
-                                          {event.title}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-              ) : null}
             </section>
           )}
 
@@ -1653,6 +1651,104 @@ export function MarketingDashboard() {
           )}
         </section>
       </section>
+
+      {pastFilterModalOpen && pendingPastRange ? (
+        <>
+          <button
+            aria-label="Close past filter modal"
+            className="fixed inset-0 z-40 bg-black/25"
+            onClick={() => {
+              setPastFilterModalOpen(false);
+              setPendingPastRange(null);
+            }}
+            type="button"
+          />
+          <section className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-xl border border-neutral-300 bg-white p-4 shadow-[0_0_24px_rgba(0,0,0,0.15)]">
+              <h3 className="text-base font-semibold">View Past Filters</h3>
+              <p className="mt-1 text-xs text-neutral-600">
+                Selected range: {toDateFromKey(pendingPastRange.startKey).toLocaleDateString()} -{' '}
+                {toDateFromKey(pendingPastRange.endKey).toLocaleDateString()}
+              </p>
+
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <label className="text-sm">
+                  <span className="mb-1 block text-xs text-neutral-600">How far back</span>
+                  <select
+                    className="min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                    onChange={(event) => setPastLookbackDraft(event.target.value as HistoryLookback)}
+                    value={pastLookbackDraft}
+                  >
+                    {LOOKBACK_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-xs text-neutral-600">Status</span>
+                  <select
+                    className="min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                    onChange={(event) => setPastStatusDraft(event.target.value as 'all' | MarketingEventStatus)}
+                    value={pastStatusDraft}
+                  >
+                    <option value="all">All Statuses</option>
+                    {STATUS_OPTIONS.map((status) => (
+                      <option key={status.value} value={status.value}>
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-xs text-neutral-600">Category</span>
+                  <select
+                    className="min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                    onChange={(event) => setPastCategoryDraft(event.target.value)}
+                    value={pastCategoryDraft}
+                  >
+                    {categoryOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option === 'all' ? 'All Categories' : option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-xs text-neutral-600">Search Text (optional)</span>
+                  <input
+                    className="min-h-[36px] w-full border border-neutral-300 px-2"
+                    onChange={(event) => setPastQueryDraft(event.target.value)}
+                    placeholder="title, category, location..."
+                    value={pastQueryDraft}
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
+                  onClick={() => {
+                    setPastFilterModalOpen(false);
+                    setPendingPastRange(null);
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white"
+                  onClick={applyPastSearchFilters}
+                  type="button"
+                >
+                  Apply Past View
+                </button>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : null}
 
       {drawerOpen && (
         <>
