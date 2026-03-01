@@ -4,7 +4,7 @@
 
 The Marketing Dashboard is a web module inside the CO-OP Operations & Intelligence Portal that centralizes marketing event planning and historical records. It provides a calendar view of all marketing events, detailed event pages, internal notes, attached reference media (images/files), and full coordination/contact information for internal and external collaborators.
 
-This v1 scope intentionally excludes Instagram or social API integrations.
+This v1 scope intentionally excludes Instagram or social API integrations. hi
 
 ---
 
