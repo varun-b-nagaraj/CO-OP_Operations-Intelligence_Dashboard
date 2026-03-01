@@ -61,6 +61,10 @@ function aggregateTotals(events: InventoryCountEvent[]): Map<string, number> {
   return map;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function InventoryDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('Catalog');
 
@@ -107,6 +111,13 @@ export function InventoryDashboard() {
   const [oauthAuthorizeUrl, setOauthAuthorizeUrl] = useState('');
   const [uploadResult, setUploadResult] = useState<Record<string, unknown> | null>(null);
   const [tokenCacheStatus, setTokenCacheStatus] = useState('');
+  const [isUploadingBatch, setIsUploadingBatch] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    completed: number;
+    total: number;
+    percent: number;
+    phase: string;
+  } | null>(null);
 
   const [online, setOnline] = useState(true);
 
@@ -813,8 +824,61 @@ export function InventoryDashboard() {
     );
     if (!confirmed) return;
 
+    setIsUploadingBatch(true);
+    setUploadProgress({
+      completed: 0,
+      total: uploadRows.length,
+      percent: 0,
+      phase: 'Uploading item counts (0.5s pacing)'
+    });
+    setUploadResult(null);
+    setTokenCacheStatus('');
+
     try {
-      const payload = await fetchJson<{ ok: boolean; warning: string; upstream: unknown }>(
+      let latestWarning = '';
+      let latestUpstream: Record<string, unknown> = {};
+
+      for (let index = 0; index < uploadRows.length; index += 1) {
+        const row = uploadRows[index];
+        const itemPayload = await fetchJson<{ ok: boolean; warning: string; upstream: unknown }>(
+          '/api/inventory/upload/submit',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              session_id: targetSessionId,
+              triggered_by: deviceId,
+              actor_role: role,
+              reconcile: false,
+              items: [row]
+            })
+          }
+        );
+
+        latestWarning = itemPayload.warning;
+        latestUpstream = (itemPayload.upstream ?? {}) as Record<string, unknown>;
+        const completed = index + 1;
+        const percent = Math.round((completed / uploadRows.length) * 100);
+        setUploadProgress({
+          completed,
+          total: uploadRows.length,
+          percent,
+          phase: 'Uploading item counts (0.5s pacing)'
+        });
+
+        if (index < uploadRows.length - 1) {
+          await wait(500);
+        }
+      }
+
+      setUploadProgress({
+        completed: uploadRows.length,
+        total: uploadRows.length,
+        percent: 100,
+        phase: 'Reconciling omitted items (set to 0)'
+      });
+
+      const reconcilePayload = await fetchJson<{ ok: boolean; warning: string; upstream: unknown }>(
         '/api/inventory/upload/submit',
         {
           method: 'POST',
@@ -829,12 +893,13 @@ export function InventoryDashboard() {
         }
       );
 
-      const upstream = (payload.upstream ?? {}) as Record<string, unknown>;
-      setUploadResult(upstream);
-      setUploadStatus(payload.warning);
+      latestWarning = reconcilePayload.warning;
+      latestUpstream = (reconcilePayload.upstream ?? latestUpstream) as Record<string, unknown>;
+      setUploadResult(latestUpstream);
+      setUploadStatus(`${latestWarning} Uploaded ${uploadRows.length} item(s) with 0.5s pacing.`);
 
-      const refreshed = Boolean(upstream.token_refreshed);
-      const tokenOutput = upstream.token_refresh_output as
+      const refreshed = Boolean(latestUpstream.token_refreshed);
+      const tokenOutput = latestUpstream.token_refresh_output as
         | { access_token?: string; refresh_token?: string; access_token_expires_at?: number }
         | undefined;
 
@@ -845,11 +910,9 @@ export function InventoryDashboard() {
         };
         localStorage.setItem('inventory_upload_token_cache', JSON.stringify(cacheValue));
         setTokenCacheStatus('Refreshed OAuth tokens cached locally on this device.');
-      } else {
-        setTokenCacheStatus('');
       }
 
-      const upstreamError = String(upstream.error ?? '').toLowerCase();
+      const upstreamError = String(latestUpstream.error ?? '').toLowerCase();
       const authExpired =
         upstreamError.includes('expired') ||
         upstreamError.includes('invalid token') ||
@@ -861,6 +924,9 @@ export function InventoryDashboard() {
     } catch (error) {
       setUploadResult(null);
       setUploadStatus(error instanceof Error ? error.message : 'Upload failed');
+      setUploadProgress(null);
+    } finally {
+      setIsUploadingBatch(false);
     }
   };
 
@@ -1585,6 +1651,7 @@ export function InventoryDashboard() {
 
                 <button
                   className="mt-2 border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white"
+                  disabled={isUploadingBatch}
                   onClick={startOauth}
                   type="button"
                 >
@@ -1593,14 +1660,16 @@ export function InventoryDashboard() {
                 {oauthAuthorizeUrl ? (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <button
-                      className="border border-neutral-400 px-3 py-2 text-xs"
+                      className="border border-neutral-400 px-3 py-2 text-xs disabled:opacity-60"
+                      disabled={isUploadingBatch}
                       onClick={() => window.open(oauthAuthorizeUrl, '_blank', 'noopener,noreferrer')}
                       type="button"
                     >
                       Open authorize_url
                     </button>
                     <button
-                      className="border border-neutral-400 px-3 py-2 text-xs"
+                      className="border border-neutral-400 px-3 py-2 text-xs disabled:opacity-60"
+                      disabled={isUploadingBatch}
                       onClick={async () => {
                         await navigator.clipboard.writeText(oauthAuthorizeUrl);
                         setOauthStatus('authorize_url copied. Paste into browser and complete login + 2FA.');
@@ -1624,14 +1693,15 @@ export function InventoryDashboard() {
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     className="border border-red-800 bg-red-800 px-3 py-2 text-xs text-white disabled:opacity-60"
-                    disabled={role !== 'host'}
+                    disabled={role !== 'host' || isUploadingBatch}
                     onClick={uploadToLightspeed}
                     type="button"
                   >
-                    Upload to R-Series
+                    {isUploadingBatch ? 'Uploading...' : 'Upload to R-Series'}
                   </button>
                   <button
-                    className="border border-neutral-400 px-3 py-2 text-xs"
+                    className="border border-neutral-400 px-3 py-2 text-xs disabled:opacity-60"
+                    disabled={isUploadingBatch}
                     onClick={async () => {
                       if (!sessionId) return;
                       await clearSessionLocalData(sessionId);
@@ -1643,6 +1713,23 @@ export function InventoryDashboard() {
                     Clear Local Offline Cache
                   </button>
                 </div>
+
+                {uploadProgress ? (
+                  <div className="mt-3 border border-red-200 bg-white p-2">
+                    <p className="text-xs font-medium text-red-900">
+                      {uploadProgress.phase}: {uploadProgress.completed}/{uploadProgress.total}
+                    </p>
+                    <p className="mt-1 text-xs text-red-800">
+                      Keep this page open until upload completes.
+                    </p>
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded bg-neutral-200">
+                      <div
+                        className="h-full bg-red-700 transition-all"
+                        style={{ width: `${uploadProgress.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="border border-neutral-300 bg-neutral-50 p-3">
