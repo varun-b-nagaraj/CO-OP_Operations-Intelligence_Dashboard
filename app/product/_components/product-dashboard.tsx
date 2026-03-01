@@ -22,7 +22,7 @@ interface ProductRow {
   preferred_vendor_id: string | null;
   vendor_product_link: string | null;
   default_unit_cost: number | null;
-  retail_price: number | null;
+  units_per_purchase: number;
   sku: string | null;
   barcode_upc: string | null;
   is_active: boolean;
@@ -44,6 +44,7 @@ interface OrderLineRow {
   custom_item_name: string | null;
   quantity: number;
   unit_price: number;
+  units_per_purchase: number;
   product_link: string | null;
   notes: string | null;
 }
@@ -103,6 +104,14 @@ interface AttachmentRow {
   size_bytes: number | null;
 }
 
+interface OrderAttachmentRow {
+  id: string;
+  purchase_order_id: string;
+  description: string | null;
+  attachment_id: string;
+  attachment: AttachmentRow | null;
+}
+
 interface WishlistRow {
   id: string;
   item_name: string;
@@ -115,6 +124,18 @@ interface WishlistRow {
   converted_purchase_order_id: string | null;
   converted_design_id: string | null;
   converted_product_id: string | null;
+}
+
+interface PromptConvertDraft {
+  prompt_id: string;
+  product_name: string;
+  vendor_id: string;
+  quantity: number;
+  unit_price: number;
+  reason: string;
+  notes: string;
+  requested_pickup_date: string;
+  priority: DbPriority;
 }
 
 const NAV_ITEMS: Array<{ id: DashboardView; label: string }> = [
@@ -177,6 +198,7 @@ export function ProductDashboard() {
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
   const [designs, setDesigns] = useState<DesignRow[]>([]);
   const [attachments, setAttachments] = useState<AttachmentRow[]>([]);
+  const [orderAttachments, setOrderAttachments] = useState<OrderAttachmentRow[]>([]);
   const [wishlist, setWishlist] = useState<WishlistRow[]>([]);
 
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
@@ -196,8 +218,11 @@ export function ProductDashboard() {
     sku: '',
     vendor_product_link: '',
     default_unit_cost: '',
-    retail_price: ''
+    units_per_purchase: '1'
   });
+  const [orderAttachmentDrafts, setOrderAttachmentDrafts] = useState<
+    Record<string, { file: File | null; description: string }>
+  >({});
 
   const [newVendor, setNewVendor] = useState({
     name: '',
@@ -227,6 +252,7 @@ export function ProductDashboard() {
     frontFile: null as File | null,
     backFile: null as File | null
   });
+  const [promptConvertDraft, setPromptConvertDraft] = useState<PromptConvertDraft | null>(null);
 
   const vendorById = useMemo(() => {
     const map = new Map<string, VendorRow>();
@@ -246,6 +272,16 @@ export function ProductDashboard() {
     return map;
   }, [attachments]);
 
+  const orderAttachmentsByOrder = useMemo(() => {
+    const map = new Map<string, OrderAttachmentRow[]>();
+    for (const row of orderAttachments) {
+      const bucket = map.get(row.purchase_order_id) ?? [];
+      bucket.push(row);
+      map.set(row.purchase_order_id, bucket);
+    }
+    return map;
+  }, [orderAttachments]);
+
   const promptCount = useMemo(() => prompts.filter((prompt) => prompt.status === 'open').length, [prompts]);
 
   const loadDashboard = useCallback(async () => {
@@ -261,6 +297,7 @@ export function ProductDashboard() {
       promptsResult,
       designsResult,
       attachmentsResult,
+      orderAttachmentsResult,
       wishlistResult
     ] = await Promise.all([
       supabase.from('product_settings').select('key,value'),
@@ -270,7 +307,7 @@ export function ProductDashboard() {
         .order('name', { ascending: true }),
       supabase
         .from('product_products')
-        .select('id,name,category,preferred_vendor_id,vendor_product_link,default_unit_cost,retail_price,sku,barcode_upc,is_active')
+        .select('id,name,category,preferred_vendor_id,vendor_product_link,default_unit_cost,units_per_purchase,sku,barcode_upc,is_active')
         .eq('is_active', true)
         .order('category', { ascending: true })
         .order('name', { ascending: true }),
@@ -280,7 +317,7 @@ export function ProductDashboard() {
         .order('created_at', { ascending: false }),
       supabase
         .from('product_purchase_order_lines')
-        .select('id,purchase_order_id,product_id,custom_item_name,quantity,unit_price,product_link,notes')
+        .select('id,purchase_order_id,product_id,custom_item_name,quantity,unit_price,units_per_purchase,product_link,notes')
         .order('id', { ascending: true }),
       supabase
         .from('product_order_prompts')
@@ -297,6 +334,10 @@ export function ProductDashboard() {
         .order('created_at', { ascending: false })
         .limit(500),
       supabase
+        .from('product_purchase_order_attachments')
+        .select('id,purchase_order_id,description,attachment_id,attachment:product_attachments(id,bucket,storage_path,file_name,mime_type,size_bytes)')
+        .order('created_at', { ascending: false }),
+      supabase
         .from('product_wishlist_items')
         .select('id,item_name,category,vendor_id,estimated_cost,priority,status,notes,converted_purchase_order_id,converted_design_id,converted_product_id')
         .order('created_at', { ascending: false })
@@ -311,6 +352,7 @@ export function ProductDashboard() {
       promptsResult.error,
       designsResult.error,
       attachmentsResult.error,
+      orderAttachmentsResult.error,
       wishlistResult.error
     ].find(Boolean);
 
@@ -333,7 +375,8 @@ export function ProductDashboard() {
       bucket.push({
         ...line,
         quantity: Number(line.quantity),
-        unit_price: Number(line.unit_price)
+        unit_price: Number(line.unit_price),
+        units_per_purchase: Math.max(Number(line.units_per_purchase ?? 1), 1)
       });
       linesByOrder.set(line.purchase_order_id, bucket);
     }
@@ -350,7 +393,7 @@ export function ProductDashboard() {
       ((productsResult.data ?? []) as ProductRow[]).map((product) => ({
         ...product,
         default_unit_cost: product.default_unit_cost === null ? null : Number(product.default_unit_cost),
-        retail_price: product.retail_price === null ? null : Number(product.retail_price)
+        units_per_purchase: Math.max(Number(product.units_per_purchase ?? 1), 1)
       }))
     );
     setOrders(orderRows);
@@ -370,6 +413,21 @@ export function ProductDashboard() {
       }))
     );
     setAttachments((attachmentsResult.data ?? []) as AttachmentRow[]);
+    setOrderAttachments(
+      ((orderAttachmentsResult.data ?? []) as Array<{
+        id: string;
+        purchase_order_id: string;
+        description: string | null;
+        attachment_id: string;
+        attachment: AttachmentRow | AttachmentRow[] | null;
+      }>).map((row) => ({
+        id: row.id,
+        purchase_order_id: row.purchase_order_id,
+        description: row.description,
+        attachment_id: row.attachment_id,
+        attachment: Array.isArray(row.attachment) ? (row.attachment[0] ?? null) : (row.attachment ?? null)
+      }))
+    );
     setWishlist(
       ((wishlistResult.data ?? []) as WishlistRow[]).map((item) => ({
         ...item,
@@ -397,14 +455,7 @@ export function ProductDashboard() {
   }, [orders, orderFilters, vendorById]);
 
   const productsByCategory = useMemo(() => {
-    const grouped = new Map<string, ProductRow[]>();
-    for (const product of products) {
-      const key = product.category?.trim() || 'Uncategorized';
-      const current = grouped.get(key) ?? [];
-      current.push(product);
-      grouped.set(key, current);
-    }
-    return Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+    return [...products].sort((a, b) => a.name.localeCompare(b.name));
   }, [products]);
 
   const withSaveState = useCallback(async (work: () => Promise<void>) => {
@@ -480,7 +531,7 @@ export function ProductDashboard() {
           preferred_vendor_id: product.preferred_vendor_id,
           vendor_product_link: product.vendor_product_link,
           default_unit_cost: product.default_unit_cost,
-          retail_price: product.retail_price,
+          units_per_purchase: Math.max(Number(product.units_per_purchase) || 1, 1),
           sku: product.sku,
           barcode_upc: product.barcode_upc,
           updated_by: 'dashboard'
@@ -505,7 +556,7 @@ export function ProductDashboard() {
         sku: newProduct.sku.trim() || null,
         vendor_product_link: newProduct.vendor_product_link.trim() || null,
         default_unit_cost: newProduct.default_unit_cost ? Number(newProduct.default_unit_cost) : null,
-        retail_price: newProduct.retail_price ? Number(newProduct.retail_price) : null,
+        units_per_purchase: Math.max(Number(newProduct.units_per_purchase) || 1, 1),
         updated_by: 'dashboard'
       });
       if (insertError) throw insertError;
@@ -516,7 +567,7 @@ export function ProductDashboard() {
         sku: '',
         vendor_product_link: '',
         default_unit_cost: '',
-        retail_price: ''
+        units_per_purchase: '1'
       });
       await loadDashboard();
       setNotice('Product added.');
@@ -556,14 +607,27 @@ export function ProductDashboard() {
     });
   };
 
+  const cancelDraftOrder = async (order: OrderRow) => {
+    if (order.status !== 'draft') {
+      setError('Only draft orders can be cancelled from this screen.');
+      return;
+    }
+    await withSaveState(async () => {
+      const { error: deleteError } = await supabase.from('product_purchase_orders').delete().eq('id', order.id);
+      if (deleteError) throw deleteError;
+      if (expandedOrderId === order.id) {
+        setExpandedOrderId(null);
+      }
+      await loadDashboard();
+      setNotice(`Draft order ${order.order_number} cancelled.`);
+    });
+  };
+
   const saveOrderHeader = async (order: OrderRow) => {
     await withSaveState(async () => {
       const { error: updateError } = await supabase
         .from('product_purchase_orders')
         .update({
-          requester_name: order.requester_name,
-          activity_account: order.activity_account,
-          account_number: order.account_number,
           vendor_id: order.vendor_id,
           status: order.status,
           reason: order.reason,
@@ -589,6 +653,7 @@ export function ProductDashboard() {
         custom_item_name: 'New item',
         quantity: 1,
         unit_price: 0,
+        units_per_purchase: 1,
         notes: null
       });
       if (insertError) throw insertError;
@@ -612,6 +677,7 @@ export function ProductDashboard() {
           custom_item_name: customName || null,
           quantity: line.quantity,
           unit_price: line.unit_price,
+          units_per_purchase: Math.max(Number(line.units_per_purchase) || 1, 1),
           product_link: line.product_link,
           notes: line.notes
         })
@@ -632,16 +698,33 @@ export function ProductDashboard() {
   };
 
 
-  const convertPromptToOrder = async (prompt: PromptRow) => {
+  const convertPromptToOrder = async (
+    prompt: PromptRow,
+    overrides?: {
+      vendor_id?: string;
+      quantity?: number;
+      unit_price?: number;
+      reason?: string;
+      notes?: string;
+      requested_pickup_date?: string;
+      priority?: DbPriority;
+    }
+  ) => {
     await withSaveState(async () => {
       const product = productById.get(prompt.product_id);
       if (!product) throw new Error('Prompt product not found.');
-      const vendorId = prompt.vendor_id ?? product.preferred_vendor_id ?? vendors[0]?.id;
+      const vendorId = overrides?.vendor_id || prompt.vendor_id || product.preferred_vendor_id || vendors[0]?.id;
       if (!vendorId) throw new Error('No vendor available for conversion.');
 
       const requester = settingsMap['order.requester_default'] ?? '';
       const activity = settingsMap['order.activity_account_default'] ?? '';
       const account = settingsMap['order.account_number_default'] ?? '';
+      const quantity = Math.max(Math.trunc(overrides?.quantity ?? prompt.suggested_qty), 1);
+      const unitPrice = Number(overrides?.unit_price ?? product.default_unit_cost ?? prompt.last_price ?? 0);
+      const reason = (overrides?.reason ?? `Converted from prompt: ${product.name}`).trim();
+      const notes = (overrides?.notes ?? 'Converted from reorder prompt').trim();
+      const requestedPickupDate = overrides?.requested_pickup_date || new Date().toISOString().slice(0, 10);
+      const priority = overrides?.priority ?? 'normal';
 
       const { data: orderRow, error: orderError } = await supabase
         .from('product_purchase_orders')
@@ -652,11 +735,11 @@ export function ProductDashboard() {
           account_number: account,
           vendor_id: vendorId,
           status: 'draft',
-          priority: 'normal',
-          reason: `Converted from prompt: ${product.name}`,
-          notes: 'Converted from reorder prompt',
+          priority,
+          reason: reason || null,
+          notes: notes || null,
           date_placed: new Date().toISOString().slice(0, 10),
-          requested_pickup_date: new Date().toISOString().slice(0, 10),
+          requested_pickup_date: requestedPickupDate,
           updated_by: 'dashboard'
         })
         .select('id')
@@ -670,10 +753,11 @@ export function ProductDashboard() {
         purchase_order_id: orderId,
         product_id: product.id,
         custom_item_name: null,
-        quantity: Math.max(prompt.suggested_qty, 1),
-        unit_price: product.default_unit_cost ?? prompt.last_price ?? 0,
+        quantity,
+        unit_price: Number.isFinite(unitPrice) ? unitPrice : 0,
+        units_per_purchase: Math.max(Number(product.units_per_purchase) || 1, 1),
         product_link: product.vendor_product_link,
-        notes: 'Auto-created from prompt'
+        notes: notes || 'Auto-created from prompt'
       });
       if (lineError) throw lineError;
 
@@ -686,7 +770,44 @@ export function ProductDashboard() {
       await loadDashboard();
       setActiveView('orders');
       setExpandedOrderId(orderId);
+      setPromptConvertDraft(null);
       setNotice('Prompt converted into a draft order.');
+    });
+  };
+
+  const openPromptConvertModal = (prompt: PromptRow) => {
+    const product = productById.get(prompt.product_id);
+    const vendorId = prompt.vendor_id || product?.preferred_vendor_id || vendors[0]?.id || '';
+    setPromptConvertDraft({
+      prompt_id: prompt.id,
+      product_name: product?.name ?? prompt.product_id,
+      vendor_id: vendorId,
+      quantity: Math.max(Math.trunc(prompt.suggested_qty), 1),
+      unit_price: Number(product?.default_unit_cost ?? prompt.last_price ?? 0),
+      reason: `Converted from prompt: ${product?.name ?? prompt.product_id}`,
+      notes: 'Converted from reorder prompt',
+      requested_pickup_date: new Date().toISOString().slice(0, 10),
+      priority: 'normal'
+    });
+  };
+
+  const confirmPromptConvert = async () => {
+    if (!promptConvertDraft) return;
+    const prompt = prompts.find((entry) => entry.id === promptConvertDraft.prompt_id);
+    if (!prompt) {
+      setError('Prompt no longer exists.');
+      setPromptConvertDraft(null);
+      return;
+    }
+
+    await convertPromptToOrder(prompt, {
+      vendor_id: promptConvertDraft.vendor_id || undefined,
+      quantity: promptConvertDraft.quantity,
+      unit_price: promptConvertDraft.unit_price,
+      reason: promptConvertDraft.reason,
+      notes: promptConvertDraft.notes,
+      requested_pickup_date: promptConvertDraft.requested_pickup_date,
+      priority: promptConvertDraft.priority
     });
   };
 
@@ -702,10 +823,26 @@ export function ProductDashboard() {
     });
   };
 
+  const savePrompt = async (prompt: PromptRow) => {
+    await withSaveState(async () => {
+      const { error: updateError } = await supabase
+        .from('product_order_prompts')
+        .update({
+          suggested_qty: Math.max(0, Math.trunc(prompt.suggested_qty)),
+          vendor_id: prompt.vendor_id,
+          last_price: prompt.last_price
+        })
+        .eq('id', prompt.id);
+      if (updateError) throw updateError;
+      setNotice('Prompt updated.');
+      await loadDashboard();
+    });
+  };
+
   const uploadAttachment = useCallback(
-    async (file: File) => {
+    async (file: File, folder: string = 'designs') => {
       const bucket = 'product-files';
-      const storagePath = `designs/${Date.now()}-${sanitizeFileName(file.name)}`;
+      const storagePath = `${folder}/${Date.now()}-${sanitizeFileName(file.name)}`;
       const { error: uploadError } = await supabase.storage.from(bucket).upload(storagePath, file, {
         upsert: false,
         contentType: file.type || undefined
@@ -730,6 +867,34 @@ export function ProductDashboard() {
     },
     [supabase]
   );
+
+  const uploadOrderAttachment = async (orderId: string) => {
+    const draft = orderAttachmentDrafts[orderId];
+    if (!draft?.file) {
+      setError('Select an image/file first.');
+      return;
+    }
+
+    await withSaveState(async () => {
+      const attachmentId = await uploadAttachment(draft.file as File, `orders/${orderId}`);
+      if (!attachmentId) throw new Error('Failed to create attachment metadata.');
+
+      const { error: relationError } = await supabase.from('product_purchase_order_attachments').insert({
+        purchase_order_id: orderId,
+        attachment_id: attachmentId,
+        description: draft.description.trim() || null,
+        created_by: 'dashboard'
+      });
+      if (relationError) throw relationError;
+
+      setOrderAttachmentDrafts((prev) => ({
+        ...prev,
+        [orderId]: { file: null, description: '' }
+      }));
+      await loadDashboard();
+      setNotice('Order attachment uploaded.');
+    });
+  };
 
   const createDesign = async () => {
     if (!newDesign.name.trim()) {
@@ -1052,42 +1217,6 @@ export function ProductDashboard() {
                                   </label>
 
                                   <label className="text-sm text-neutral-700">
-                                    Requester
-                                    <input
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, requester_name: event.target.value } : entry));
-                                      }}
-                                      type="text"
-                                      value={order.requester_name}
-                                    />
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700">
-                                    Activity Account
-                                    <input
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, activity_account: event.target.value } : entry));
-                                      }}
-                                      type="text"
-                                      value={order.activity_account}
-                                    />
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700">
-                                    Account Number
-                                    <input
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, account_number: event.target.value } : entry));
-                                      }}
-                                      type="text"
-                                      value={order.account_number}
-                                    />
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700">
                                     Date Placed
                                     <input
                                       className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
@@ -1147,14 +1276,41 @@ export function ProductDashboard() {
                                   </label>
                                 </div>
 
+                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                  <button
+                                    className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                                    onClick={() => void saveOrderHeader(order)}
+                                    type="button"
+                                  >
+                                    Save Order
+                                  </button>
+                                  <button
+                                    className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                                    onClick={() => setExpandedOrderId(null)}
+                                    type="button"
+                                  >
+                                    Close
+                                  </button>
+                                  {order.status === 'draft' ? (
+                                    <button
+                                      className="min-h-[34px] border border-red-700 px-3 text-sm text-red-700 hover:bg-red-50"
+                                      onClick={() => void cancelDraftOrder(order)}
+                                      type="button"
+                                    >
+                                      Cancel Draft
+                                    </button>
+                                  ) : null}
+                                </div>
+
                                 <div className="mt-4 overflow-x-auto">
                                   <table className="min-w-full bg-white text-sm">
                                     <thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
                                       <tr>
                                         <th className="border-b border-neutral-300 px-3 py-2">Product</th>
                                         <th className="border-b border-neutral-300 px-3 py-2">Custom Item</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Qty</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Unit Price</th>
+                                        <th className="border-b border-neutral-300 px-3 py-2">How Many Ordered</th>
+                                        <th className="border-b border-neutral-300 px-3 py-2">Cost Of 1 Ordered Item</th>
+                                        <th className="border-b border-neutral-300 px-3 py-2">Items Per Ordered Item</th>
                                         <th className="border-b border-neutral-300 px-3 py-2">Link</th>
                                         <th className="border-b border-neutral-300 px-3 py-2">Notes</th>
                                         <th className="border-b border-neutral-300 px-3 py-2">Actions</th>
@@ -1263,6 +1419,31 @@ export function ProductDashboard() {
                                           </td>
                                           <td className="px-3 py-2">
                                             <input
+                                              className="min-h-[34px] w-28 border border-neutral-300 px-2"
+                                              min={1}
+                                              onChange={(event) => {
+                                                setOrders((prev) =>
+                                                  prev.map((entry) =>
+                                                    entry.id !== order.id
+                                                      ? entry
+                                                      : {
+                                                          ...entry,
+                                                          lines: entry.lines.map((candidate) =>
+                                                            candidate.id === line.id
+                                                              ? { ...candidate, units_per_purchase: Math.max(Number(event.target.value), 1) }
+                                                              : candidate
+                                                          )
+                                                        }
+                                                  )
+                                                );
+                                              }}
+                                              step={1}
+                                              type="number"
+                                              value={line.units_per_purchase}
+                                            />
+                                          </td>
+                                          <td className="px-3 py-2">
+                                            <input
                                               className="min-h-[34px] w-full border border-neutral-300 px-2"
                                               onChange={(event) => {
                                                 setOrders((prev) =>
@@ -1327,6 +1508,79 @@ export function ProductDashboard() {
                                   </table>
                                 </div>
 
+                                <div className="mt-4 border border-neutral-300 bg-white p-3">
+                                  <h4 className="text-sm font-semibold">Order Images / Files</h4>
+                                  <p className="mt-1 text-xs text-neutral-600">
+                                    Upload images/files for this order and add a description for each.
+                                  </p>
+                                  <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[1fr_2fr_auto]">
+                                    <input
+                                      className="border border-neutral-300 p-2 text-xs"
+                                      onChange={(event) =>
+                                        setOrderAttachmentDrafts((prev) => ({
+                                          ...prev,
+                                          [order.id]: {
+                                            file: event.target.files?.[0] ?? null,
+                                            description: prev[order.id]?.description ?? ''
+                                          }
+                                        }))
+                                      }
+                                      type="file"
+                                    />
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                                      onChange={(event) =>
+                                        setOrderAttachmentDrafts((prev) => ({
+                                          ...prev,
+                                          [order.id]: {
+                                            file: prev[order.id]?.file ?? null,
+                                            description: event.target.value
+                                          }
+                                        }))
+                                      }
+                                      placeholder="Image/File description"
+                                      value={orderAttachmentDrafts[order.id]?.description ?? ''}
+                                    />
+                                    <button
+                                      className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-xs text-white hover:bg-neutral-900"
+                                      onClick={() => void uploadOrderAttachment(order.id)}
+                                      type="button"
+                                    >
+                                      Add Image
+                                    </button>
+                                  </div>
+                                  <div className="mt-3 space-y-2">
+                                    {(orderAttachmentsByOrder.get(order.id) ?? []).map((entry) => {
+                                      const publicUrl = entry.attachment
+                                        ? supabase.storage
+                                            .from(entry.attachment.bucket)
+                                            .getPublicUrl(entry.attachment.storage_path).data.publicUrl
+                                        : '';
+                                      return (
+                                        <article
+                                          className="flex items-center justify-between border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs"
+                                          key={entry.id}
+                                        >
+                                          <div className="min-w-0">
+                                            <p className="font-medium">{entry.attachment?.file_name ?? 'Attachment'}</p>
+                                            <p className="text-neutral-600">{entry.description || 'No description'}</p>
+                                          </div>
+                                          {publicUrl ? (
+                                            <a
+                                              className="border border-neutral-400 px-2 py-1 hover:bg-white"
+                                              href={publicUrl}
+                                              rel="noreferrer"
+                                              target="_blank"
+                                            >
+                                              Open
+                                            </a>
+                                          ) : null}
+                                        </article>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
                                 <div className="mt-3 flex flex-wrap items-center gap-2">
                                   <button
                                     className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
@@ -1334,13 +1588,6 @@ export function ProductDashboard() {
                                     type="button"
                                   >
                                     + Add Line
-                                  </button>
-                                  <button
-                                    className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
-                                    onClick={() => void saveOrderHeader(order)}
-                                    type="button"
-                                  >
-                                    Save Order
                                   </button>
                                 </div>
                               </td>
@@ -1364,14 +1611,6 @@ export function ProductDashboard() {
                 </p>
               </header>
 
-              <section className="border-b border-neutral-300 px-4 py-4 md:px-6">
-                <h3 className="text-base font-semibold">Inventory Source</h3>
-                <p className="mt-1 text-sm text-neutral-600">
-                  Product module is read-only for inventory. Run inventory checks in Inventory Dashboard, then upload/sync.
-                  Prompts here update from those synced checks only.
-                </p>
-              </section>
-
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
@@ -1388,20 +1627,82 @@ export function ProductDashboard() {
                   <tbody>
                     {prompts.map((prompt) => {
                       const product = productById.get(prompt.product_id);
-                      const vendorName = prompt.vendor_id ? vendorById.get(prompt.vendor_id)?.name : product?.preferred_vendor_id ? vendorById.get(product.preferred_vendor_id)?.name : 'Unassigned';
+                      const currentVendorId = prompt.vendor_id ?? product?.preferred_vendor_id ?? '';
                       return (
                         <tr className="border-b border-neutral-200" key={prompt.id}>
                           <td className="px-4 py-3 font-medium">{product?.name ?? prompt.product_id}</td>
                           <td className="px-4 py-3">{prompt.current_stock}</td>
                           <td className="px-4 py-3">{prompt.on_order_qty}</td>
-                          <td className="px-4 py-3">{prompt.suggested_qty}</td>
-                          <td className="px-4 py-3">{vendorName ?? 'Unknown'}</td>
-                          <td className="px-4 py-3">{prompt.last_price === null ? '-' : currency.format(prompt.last_price)}</td>
+                          <td className="px-4 py-3">
+                            <input
+                              className="min-h-[34px] w-24 border border-neutral-300 px-2"
+                              min={0}
+                              onChange={(event) => {
+                                const nextValue = Math.max(Number(event.target.value) || 0, 0);
+                                setPrompts((prev) =>
+                                  prev.map((entry) =>
+                                    entry.id === prompt.id ? { ...entry, suggested_qty: nextValue } : entry
+                                  )
+                                );
+                              }}
+                              step={1}
+                              type="number"
+                              value={prompt.suggested_qty}
+                            />
+                          </td>
+                          <td className="px-4 py-3">
+                            <select
+                              className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
+                              onChange={(event) => {
+                                setPrompts((prev) =>
+                                  prev.map((entry) =>
+                                    entry.id === prompt.id
+                                      ? { ...entry, vendor_id: event.target.value || null }
+                                      : entry
+                                  )
+                                );
+                              }}
+                              value={currentVendorId}
+                            >
+                              <option value="">Unassigned</option>
+                              {vendors.map((vendor) => (
+                                <option key={vendor.id} value={vendor.id}>
+                                  {vendor.name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-4 py-3">
+                            <input
+                              className="min-h-[34px] w-28 border border-neutral-300 px-2"
+                              min={0}
+                              onChange={(event) => {
+                                const next = event.target.value;
+                                setPrompts((prev) =>
+                                  prev.map((entry) =>
+                                    entry.id === prompt.id
+                                      ? { ...entry, last_price: next ? Number(next) : null }
+                                      : entry
+                                  )
+                                );
+                              }}
+                              step="0.01"
+                              type="number"
+                              value={prompt.last_price ?? ''}
+                            />
+                          </td>
                           <td className="px-4 py-3">
                             <div className="flex flex-wrap gap-2">
                               <button
+                                className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
+                                onClick={() => void savePrompt(prompt)}
+                                type="button"
+                              >
+                                Save
+                              </button>
+                              <button
                                 className="min-h-[32px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]"
-                                onClick={() => void convertPromptToOrder(prompt)}
+                                onClick={() => openPromptConvertModal(prompt)}
                                 type="button"
                               >
                                 Convert to Order
@@ -1428,7 +1729,9 @@ export function ProductDashboard() {
             <section className="w-full bg-white">
               <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
                 <h2 className="text-lg font-semibold">Products (Catalog)</h2>
-                <p className="mt-1 text-sm text-neutral-600">Catalog-only details: what you sell, category/section, and sourcing vendor.</p>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Catalog details: item cost, units per ordered item, description, and sourcing vendor.
+                </p>
               </header>
 
               <section className="border-b border-neutral-300 px-4 py-4 md:px-6">
@@ -1439,12 +1742,6 @@ export function ProductDashboard() {
                     onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))}
                     placeholder="Product Name"
                     value={newProduct.name}
-                  />
-                  <input
-                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, category: event.target.value }))}
-                    placeholder="Category / Section"
-                    value={newProduct.category}
                   />
                   <select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
@@ -1465,16 +1762,24 @@ export function ProductDashboard() {
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm"
                     onChange={(event) => setNewProduct((prev) => ({ ...prev, default_unit_cost: event.target.value }))}
-                    placeholder="Default Cost"
+                    placeholder="Cost Of 1 Ordered Item"
                     type="number"
                     value={newProduct.default_unit_cost}
                   />
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, retail_price: event.target.value }))}
-                    placeholder="Retail Price"
+                    onChange={(event) => setNewProduct((prev) => ({ ...prev, units_per_purchase: event.target.value }))}
+                    placeholder="How Many Items Per Ordered Item"
                     type="number"
-                    value={newProduct.retail_price}
+                    min={1}
+                    step={1}
+                    value={newProduct.units_per_purchase}
+                  />
+                  <textarea
+                    className="min-h-[72px] border border-neutral-300 px-2 py-2 text-sm md:col-span-3"
+                    onChange={(event) => setNewProduct((prev) => ({ ...prev, category: event.target.value }))}
+                    placeholder="Description"
+                    value={newProduct.category}
                   />
                 </div>
                 <button
@@ -1487,108 +1792,119 @@ export function ProductDashboard() {
               </section>
 
               <section className="space-y-4 px-4 py-4 md:px-6">
-                {productsByCategory.map(([category, rows]) => (
-                  <article className="border border-neutral-300" key={category}>
-                    <header className="border-b border-neutral-300 bg-neutral-100 px-4 py-2 text-sm font-semibold">{category}</header>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full text-sm">
-                        <thead className="bg-white text-left text-xs uppercase tracking-wide text-neutral-600">
-                          <tr>
-                            <th className="border-b border-neutral-200 px-3 py-2">Name</th>
-                            <th className="border-b border-neutral-200 px-3 py-2">Vendor</th>
-                            <th className="border-b border-neutral-200 px-3 py-2">SKU</th>
-                            <th className="border-b border-neutral-200 px-3 py-2">Vendor Link</th>
-                            <th className="border-b border-neutral-200 px-3 py-2">Default Cost</th>
-                            <th className="border-b border-neutral-200 px-3 py-2">Retail Price</th>
-                            <th className="border-b border-neutral-200 px-3 py-2">Save</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((product) => (
-                            <tr className="border-b border-neutral-100" key={product.id}>
-                              <td className="px-3 py-2">
-                                <input
-                                  className="min-h-[34px] w-full border border-neutral-300 px-2"
-                                  onChange={(event) => {
-                                    setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, name: event.target.value } : entry));
-                                  }}
-                                  value={product.name}
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <select
-                                  className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
-                                  onChange={(event) => {
-                                    setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, preferred_vendor_id: event.target.value || null } : entry));
-                                  }}
-                                  value={product.preferred_vendor_id ?? ''}
-                                >
-                                  <option value="">None</option>
-                                  {vendors.map((vendor) => (
-                                    <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="px-3 py-2">
-                                <input
-                                  className="min-h-[34px] w-full border border-neutral-300 px-2"
-                                  onChange={(event) => {
-                                    setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, sku: event.target.value } : entry));
-                                  }}
-                                  value={product.sku ?? ''}
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <input
-                                  className="min-h-[34px] w-full border border-neutral-300 px-2"
-                                  onChange={(event) => {
-                                    setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, vendor_product_link: event.target.value } : entry));
-                                  }}
-                                  value={product.vendor_product_link ?? ''}
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <input
-                                  className="min-h-[34px] w-28 border border-neutral-300 px-2"
-                                  min={0}
-                                  onChange={(event) => {
-                                    const next = event.target.value;
-                                    setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, default_unit_cost: next ? Number(next) : null } : entry));
-                                  }}
-                                  step="0.01"
-                                  type="number"
-                                  value={product.default_unit_cost ?? ''}
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <input
-                                  className="min-h-[34px] w-28 border border-neutral-300 px-2"
-                                  min={0}
-                                  onChange={(event) => {
-                                    const next = event.target.value;
-                                    setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, retail_price: next ? Number(next) : null } : entry));
-                                  }}
-                                  step="0.01"
-                                  type="number"
-                                  value={product.retail_price ?? ''}
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <button
-                                  className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
-                                  onClick={() => void saveProduct(product)}
-                                  type="button"
-                                >
-                                  Save
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </article>
-                ))}
+                <div className="overflow-x-auto border border-neutral-300">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
+                      <tr>
+                        <th className="border-b border-neutral-200 px-3 py-2">Name</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Description</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Vendor</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">SKU</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Cost Of 1 Ordered Item</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Items Per Ordered Item</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Vendor Link</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Save</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {productsByCategory.map((product) => (
+                        <tr className="border-b border-neutral-100" key={product.id}>
+                          <td className="px-3 py-2">
+                            <input
+                              className="min-h-[34px] w-full border border-neutral-300 px-2"
+                              onChange={(event) => {
+                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, name: event.target.value } : entry));
+                              }}
+                              value={product.name}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <textarea
+                              className="min-h-[70px] w-full border border-neutral-300 px-2 py-2"
+                              onChange={(event) => {
+                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, category: event.target.value } : entry));
+                              }}
+                              value={product.category ?? ''}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <select
+                              className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
+                              onChange={(event) => {
+                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, preferred_vendor_id: event.target.value || null } : entry));
+                              }}
+                              value={product.preferred_vendor_id ?? ''}
+                            >
+                              <option value="">None</option>
+                              {vendors.map((vendor) => (
+                                <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              className="min-h-[34px] w-full border border-neutral-300 px-2"
+                              onChange={(event) => {
+                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, sku: event.target.value } : entry));
+                              }}
+                              value={product.sku ?? ''}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              className="min-h-[34px] w-32 border border-neutral-300 px-2"
+                              min={0}
+                              onChange={(event) => {
+                                const next = event.target.value;
+                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, default_unit_cost: next ? Number(next) : null } : entry));
+                              }}
+                              step="0.01"
+                              type="number"
+                              value={product.default_unit_cost ?? ''}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              className="min-h-[34px] w-28 border border-neutral-300 px-2"
+                              min={1}
+                              onChange={(event) => {
+                                const next = event.target.value;
+                                setProducts((prev) =>
+                                  prev.map((entry) =>
+                                    entry.id === product.id
+                                      ? { ...entry, units_per_purchase: Math.max(Number(next) || 1, 1) }
+                                      : entry
+                                  )
+                                );
+                              }}
+                              step={1}
+                              type="number"
+                              value={product.units_per_purchase}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              className="min-h-[34px] w-full border border-neutral-300 px-2"
+                              onChange={(event) => {
+                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, vendor_product_link: event.target.value } : entry));
+                              }}
+                              value={product.vendor_product_link ?? ''}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <button
+                              className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
+                              onClick={() => void saveProduct(product)}
+                              type="button"
+                            >
+                              Save
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             </section>
           )}
@@ -2108,6 +2424,143 @@ export function ProductDashboard() {
           )}
         </section>
       </div>
+
+      {promptConvertDraft ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl border border-neutral-300 bg-white">
+            <header className="border-b border-neutral-300 px-4 py-3">
+              <h3 className="text-base font-semibold">Confirm Move To Order</h3>
+              <p className="mt-1 text-sm text-neutral-600">{promptConvertDraft.product_name}</p>
+            </header>
+            <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-2">
+              <label className="text-sm text-neutral-700">
+                Suggested Qty
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  min={1}
+                  onChange={(event) =>
+                    setPromptConvertDraft((prev) =>
+                      prev ? { ...prev, quantity: Math.max(Number(event.target.value) || 1, 1) } : prev
+                    )
+                  }
+                  step={1}
+                  type="number"
+                  value={promptConvertDraft.quantity}
+                />
+              </label>
+
+              <label className="text-sm text-neutral-700">
+                Unit Price
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  min={0}
+                  onChange={(event) =>
+                    setPromptConvertDraft((prev) =>
+                      prev ? { ...prev, unit_price: Math.max(Number(event.target.value) || 0, 0) } : prev
+                    )
+                  }
+                  step="0.01"
+                  type="number"
+                  value={promptConvertDraft.unit_price}
+                />
+              </label>
+
+              <label className="text-sm text-neutral-700">
+                Vendor
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                  onChange={(event) =>
+                    setPromptConvertDraft((prev) =>
+                      prev ? { ...prev, vendor_id: event.target.value } : prev
+                    )
+                  }
+                  value={promptConvertDraft.vendor_id}
+                >
+                  <option value="">Unassigned</option>
+                  {vendors.map((vendor) => (
+                    <option key={vendor.id} value={vendor.id}>
+                      {vendor.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm text-neutral-700">
+                Priority
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                  onChange={(event) =>
+                    setPromptConvertDraft((prev) =>
+                      prev ? { ...prev, priority: event.target.value as DbPriority } : prev
+                    )
+                  }
+                  value={promptConvertDraft.priority}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </label>
+
+              <label className="text-sm text-neutral-700">
+                Requested Pickup Date
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setPromptConvertDraft((prev) =>
+                      prev ? { ...prev, requested_pickup_date: event.target.value } : prev
+                    )
+                  }
+                  type="date"
+                  value={promptConvertDraft.requested_pickup_date}
+                />
+              </label>
+
+              <label className="text-sm text-neutral-700">
+                Reason
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setPromptConvertDraft((prev) =>
+                      prev ? { ...prev, reason: event.target.value } : prev
+                    )
+                  }
+                  type="text"
+                  value={promptConvertDraft.reason}
+                />
+              </label>
+
+              <label className="text-sm text-neutral-700 md:col-span-2">
+                Notes
+                <textarea
+                  className="mt-1 min-h-[86px] w-full border border-neutral-300 px-2 py-2"
+                  onChange={(event) =>
+                    setPromptConvertDraft((prev) =>
+                      prev ? { ...prev, notes: event.target.value } : prev
+                    )
+                  }
+                  value={promptConvertDraft.notes}
+                />
+              </label>
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
+              <button
+                className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={() => setPromptConvertDraft(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                onClick={() => void confirmPromptConvert()}
+                type="button"
+              >
+                Confirm & Create Order
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
