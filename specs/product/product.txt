@@ -1,0 +1,25 @@
+Product Dashboard
+
+I worked with Arjun on different Product operations I would need to include. Some basic features would include product orders, order completion, product designs, a wish-list, and order scheduling based on inventory checks.
+
+Product Orders:
+There will be a section on the website where all new orders can be placed and the following information will be collected: Item, Qty, Price per Unit, Total price (calculated), Reason, Link, extra information(file uploads), if we have received the product or not(can be archived after this for potential access) etc etc. We can also list a requested pickup date (or as soon as possible). A date of when the order was placed.
+
+At the top include the requester name as Eric Chaverria, Activity account as Round Rock CO-OP (School Store) and the account number as 498-36-001-99-8468-6399. 
+
+Here is a list of registered vendors:
+Coca-Cola
+Sam’s Club
+HEB
+Amazon
+Hobby Lobby
+Home Depot
+Target
+Party City
+All of the above information can be edited via the UI as well as the database.
+
+Product Design:
+A different section of the website can exist where product designs for t-shirts, hoodies, merchandise, or miscellaneous can exist. A picture of the front, back, and other relevant information can be found and you can mark designs as higher priority or mark it for future order etc etc. The information calls are all stored here. A wish-list is also possible for all the new items we want to try to order.
+
+Order Prompting:
+After an inventory check is completed and uploaded but there are items which were ordered recently that are either 0 or low on stock (<5) then it will prompt you to place the order with all relevant information already accessible like link, provider, and everything else so you just click a button and the order is immediately added.

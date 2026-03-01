@@ -2,6 +2,14 @@ import { InventoryCountEvent } from '@/lib/inventory/types';
 
 import { SyncPacket, SyncProvider, SyncResult, SyncSessionContext } from './types';
 
+export interface SessionJoinPacket {
+  type: 'session_join';
+  session_id: string;
+  session_name?: string;
+  host_id?: string;
+  generated_at: string;
+}
+
 function encodeBase64Url(value: string): string {
   if (typeof window !== 'undefined') {
     return btoa(unescape(encodeURIComponent(value)))
@@ -24,6 +32,30 @@ function decodeBase64Url(value: string): string {
 
 export function encodeQrPacket(packet: SyncPacket): string {
   return encodeBase64Url(JSON.stringify(packet));
+}
+
+export function createSessionJoinPacket(input: {
+  session_id: string;
+  session_name?: string;
+  host_id?: string;
+}): string {
+  const packet: SessionJoinPacket = {
+    type: 'session_join',
+    session_id: input.session_id,
+    session_name: input.session_name,
+    host_id: input.host_id,
+    generated_at: new Date().toISOString()
+  };
+  return `coop-inv-join:${encodeBase64Url(JSON.stringify(packet))}`;
+}
+
+export function parseSessionJoinPacket(value: string): SessionJoinPacket {
+  const raw = value.startsWith('coop-inv-join:') ? value.slice('coop-inv-join:'.length) : value;
+  const parsed = JSON.parse(decodeBase64Url(raw)) as SessionJoinPacket;
+  if (parsed.type !== 'session_join' || !parsed.session_id) {
+    throw new Error('Invalid session join QR packet.');
+  }
+  return parsed;
 }
 
 export function createQrPacket(input: { context: SyncSessionContext; events: InventoryCountEvent[] }): string {

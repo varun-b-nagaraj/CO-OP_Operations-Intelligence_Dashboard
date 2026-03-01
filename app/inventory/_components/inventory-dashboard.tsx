@@ -1,6 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import jsQR from 'jsqr';
+import Image from 'next/image';
+import QRCode from 'qrcode';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { BarcodeScanner } from '@/app/inventory/_components/barcode-scanner';
 import { QRSyncPanel } from '@/app/inventory/_components/qr-sync-panel';
@@ -10,12 +13,20 @@ import {
   getPendingEvents,
   getSessionEvents,
   markEventsSynced,
+  readCatalogSnapshot,
   readSnapshot,
+  saveCatalogSnapshot,
   saveLocalEvent,
   saveSnapshot
 } from '@/lib/inventory/indexeddb';
 import { InventoryCatalogItem, InventoryCountEvent, InventorySessionState } from '@/lib/inventory/types';
-import { createQrPacket, encodeQrPacket, parseQrPacket } from '@/lib/inventory/sync';
+import {
+  createQrPacket,
+  createSessionJoinPacket,
+  encodeQrPacket,
+  parseQrPacket,
+  parseSessionJoinPacket
+} from '@/lib/inventory/sync';
 
 const TABS = ['Catalog', 'Sessions', 'Count View', 'Finalize & Upload'] as const;
 type TabId = (typeof TABS)[number];
@@ -70,8 +81,8 @@ export function InventoryDashboard() {
   const [sessionState, setSessionState] = useState<InventorySessionState | null>(null);
   const [sessionStatus, setSessionStatus] = useState('No active session.');
 
-  const [scanInput, setScanInput] = useState('');
-  const [manualSystemId, setManualSystemId] = useState('');
+  const [activeScannedCode, setActiveScannedCode] = useState('');
+  const [activeItem, setActiveItem] = useState<InventoryCatalogItem | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingTotals, setPendingTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
   const [snapshotTotals, setSnapshotTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
@@ -90,6 +101,13 @@ export function InventoryDashboard() {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isEndingSession, setIsEndingSession] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [hostJoinQr, setHostJoinQr] = useState('');
+  const [scanJoinActive, setScanJoinActive] = useState(false);
+  const [scanJoinStatus, setScanJoinStatus] = useState('');
+  const joinScanVideoRef = useRef<HTMLVideoElement | null>(null);
+  const joinScanCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [isCatalogDownloading, setIsCatalogDownloading] = useState(false);
+  const [catalogDownloadStatus, setCatalogDownloadStatus] = useState('');
 
   const [online, setOnline] = useState(true);
 
@@ -128,15 +146,58 @@ export function InventoryDashboard() {
     };
   }, []);
 
-  const loadCatalog = async () => {
+  const loadCatalog = async (opts?: { forceFresh?: boolean }) => {
     try {
-      const payload = await fetchJson<{ ok: true; items: InventoryCatalogItem[] }>(
-        `/api/inventory/catalog/list?q=${encodeURIComponent(catalogQuery.trim())}`
-      );
-      setCatalog(payload.items);
-      setCatalogStatus(`Loaded ${payload.items.length} catalog items.`);
+      if (!opts?.forceFresh && !navigator.onLine) {
+        const cached = await readCatalogSnapshot();
+        if (cached.length) {
+          setCatalog(cached as InventoryCatalogItem[]);
+          setCatalogStatus(`Offline catalog loaded from phone cache (${cached.length} items).`);
+          return;
+        }
+      }
+
+      const payload = await fetchJson<{ ok: true; items: InventoryCatalogItem[] }>(`/api/inventory/catalog/list`);
+      let items = payload.items;
+      const query = catalogQuery.trim().toLowerCase();
+      if (query) {
+        items = items.filter((item) => {
+          return [item.item_name, item.system_id, item.upc, item.ean, item.custom_sku, item.manufact_sku]
+            .join(' ')
+            .toLowerCase()
+            .includes(query);
+        });
+      }
+      setCatalog(items);
+      await saveCatalogSnapshot(payload.items);
+      setCatalogStatus(`Loaded ${items.length} catalog items.`);
     } catch (error) {
-      setCatalogStatus(error instanceof Error ? error.message : 'Failed to load catalog');
+      const cached = await readCatalogSnapshot();
+      if (cached.length) {
+        setCatalog(cached as InventoryCatalogItem[]);
+        setCatalogStatus(`Using cached phone catalog (${cached.length} items).`);
+      } else {
+        setCatalogStatus(error instanceof Error ? error.message : 'Failed to load catalog');
+      }
+    }
+  };
+
+  const downloadCatalogToPhone = async () => {
+    setIsCatalogDownloading(true);
+    setCatalogDownloadStatus(
+      'Downloading full catalog to this phone. Stay outside with signal until this finishes, then go back inside.'
+    );
+    try {
+      const payload = await fetchJson<{ ok: true; items: InventoryCatalogItem[] }>(`/api/inventory/catalog/list`);
+      await saveCatalogSnapshot(payload.items);
+      setCatalog(payload.items);
+      setCatalogDownloadStatus(
+        `Catalog download complete (${payload.items.length} items). You can now return inside and count fully offline.`
+      );
+    } catch (error) {
+      setCatalogDownloadStatus(error instanceof Error ? error.message : 'Catalog download failed.');
+    } finally {
+      setIsCatalogDownloading(false);
     }
   };
 
@@ -186,6 +247,100 @@ export function InventoryDashboard() {
     };
     updatePending();
   }, [sessionId, sessionState]);
+
+  useEffect(() => {
+    const buildHostJoinQr = async () => {
+      if (role !== 'host' || !sessionId) {
+        setHostJoinQr('');
+        return;
+      }
+
+      try {
+        const packet = createSessionJoinPacket({
+          session_id: sessionId,
+          session_name: sessionName,
+          host_id: deviceId
+        });
+        const url = await QRCode.toDataURL(packet, { width: 260, margin: 1, errorCorrectionLevel: 'L' });
+        setHostJoinQr(url);
+      } catch (error) {
+        setScanJoinStatus(error instanceof Error ? error.message : 'Unable to generate host join QR.');
+      }
+    };
+    void buildHostJoinQr();
+  }, [deviceId, role, sessionId, sessionName]);
+
+  useEffect(() => {
+    if (!scanJoinActive) return;
+
+    let stream: MediaStream | null = null;
+    let timer: number | null = null;
+
+    const startScan = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+
+        if (!joinScanVideoRef.current || !joinScanCanvasRef.current) return;
+
+        joinScanVideoRef.current.srcObject = stream;
+        await joinScanVideoRef.current.play();
+
+        timer = window.setInterval(async () => {
+          if (!joinScanVideoRef.current || !joinScanCanvasRef.current) return;
+          const video = joinScanVideoRef.current;
+          const canvas = joinScanCanvasRef.current;
+          if (!video.videoWidth || !video.videoHeight) return;
+
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const context = canvas.getContext('2d');
+          if (!context) return;
+
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+          const decoded = jsQR(imageData.data, imageData.width, imageData.height);
+          if (!decoded?.data) return;
+
+          try {
+            const packet = parseSessionJoinPacket(decoded.data);
+            setSessionId(packet.session_id);
+            await fetchJson('/api/inventory/session/commit-events', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                session_id: packet.session_id,
+                actor_id: deviceId,
+                actor_name: actorName,
+                events: []
+              })
+            });
+            setSessionStatus(`Joined session ${packet.session_id}.`);
+            await loadSessionState(packet.session_id);
+            setScanJoinStatus(`Joined host session ${packet.session_id}.`);
+            setScanJoinActive(false);
+          } catch (error) {
+            setScanJoinStatus(error instanceof Error ? error.message : 'Invalid join QR packet.');
+          }
+        }, 350);
+      } catch (error) {
+        setScanJoinStatus(error instanceof Error ? error.message : 'Unable to start join QR scanner.');
+        setScanJoinActive(false);
+      }
+    };
+
+    void startScan();
+    return () => {
+      if (timer) window.clearInterval(timer);
+      if (stream) {
+        for (const track of stream.getTracks()) {
+          track.stop();
+        }
+      }
+    };
+  }, [actorName, deviceId, scanJoinActive]);
 
   const displayedTotals = useMemo(() => {
     const merged = new Map<string, number>();
@@ -258,14 +413,16 @@ export function InventoryDashboard() {
   };
 
   const onScanValue = async (value: string) => {
+    setActiveScannedCode(value);
     const resolved = resolveCatalogItemByCode(catalog, value);
     if (resolved.item) {
+      setActiveItem(resolved.item);
       await appendEvent(resolved.item.system_id, 1);
-      setSyncStatus(`Matched ${resolved.key}: ${resolved.item.item_name}`);
+      setSyncStatus(`Matched ${resolved.key}: ${resolved.item.item_name} (+1 added).`);
       return;
     }
-
-    setSyncStatus(`No catalog match for ${value}. Enter System ID manually.`);
+    setActiveItem(null);
+    setSyncStatus(`No catalog match for ${value}.`);
   };
 
   const createSession = async () => {
@@ -283,13 +440,17 @@ export function InventoryDashboard() {
       setRole('host');
       setSessionId(payload.session.id);
       setSessionStatus(`Session created: ${payload.session.id}`);
+      setCatalogDownloadStatus(
+        'Session created. Stay outside and download catalog to this phone before counting offline.'
+      );
     } catch (error) {
       setSessionStatus(error instanceof Error ? error.message : 'Failed to create session');
     }
   };
 
-  const joinSession = async () => {
-    if (!sessionId.trim()) {
+  const joinSessionById = async (id: string) => {
+    const nextSessionId = id.trim();
+    if (!nextSessionId) {
       setSessionStatus('Enter a session ID.');
       return;
     }
@@ -299,18 +460,25 @@ export function InventoryDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_id: sessionId.trim(),
+          session_id: nextSessionId,
           actor_id: deviceId,
           actor_name: actorName,
           events: []
         })
       });
-      setSessionId(sessionId.trim());
-      setSessionStatus(`Joined session ${sessionId.trim()}.`);
-      await loadSessionState(sessionId.trim());
+      setSessionId(nextSessionId);
+      setSessionStatus(`Joined session ${nextSessionId}.`);
+      await loadSessionState(nextSessionId);
+      setCatalogDownloadStatus(
+        'Joined session. Stay outside and download catalog to this phone before counting offline.'
+      );
     } catch (error) {
       setSessionStatus(error instanceof Error ? error.message : 'Unable to join session');
     }
+  };
+
+  const joinSession = async () => {
+    await joinSessionById(sessionId);
   };
 
   const syncNow = async (trigger: 'manual' | 'auto' = 'manual') => {
@@ -677,7 +845,9 @@ export function InventoryDashboard() {
                 />
                 <button
                   className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-white"
-                  onClick={loadCatalog}
+                  onClick={() => {
+                    void loadCatalog();
+                  }}
                   type="button"
                 >
                   Search
@@ -911,6 +1081,68 @@ export function InventoryDashboard() {
                 >
                   Refresh Attendance
                 </button>
+                <button
+                  className="border border-emerald-700 bg-emerald-700 px-3 py-2 text-sm text-white disabled:opacity-60"
+                  disabled={isCatalogDownloading}
+                  onClick={downloadCatalogToPhone}
+                  type="button"
+                >
+                  {isCatalogDownloading ? 'Downloading Catalog...' : 'Download Catalog To Phone'}
+                </button>
+              </div>
+              <p className="text-xs text-amber-700">
+                During session start, stay outdoors while downloading the catalog. Once complete, you can return inside and
+                count offline.
+              </p>
+              {catalogDownloadStatus ? <p className="text-xs text-neutral-700">{catalogDownloadStatus}</p> : null}
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="border border-neutral-300 p-3">
+                  <h3 className="text-sm font-semibold text-neutral-900">Host Join QR</h3>
+                  <p className="mt-1 text-xs text-neutral-700">
+                    If you are host, show this QR on your computer/phone so counters can scan and join instantly.
+                  </p>
+                  {role === 'host' && hostJoinQr ? (
+                    <Image
+                      alt="Host Session Join QR"
+                      className="mt-2 border border-neutral-300"
+                      height={260}
+                      src={hostJoinQr}
+                      unoptimized
+                      width={260}
+                    />
+                  ) : (
+                    <p className="mt-2 text-xs text-neutral-500">Create or select a host session to show join QR.</p>
+                  )}
+                </div>
+
+                <div className="border border-neutral-300 p-3">
+                  <h3 className="text-sm font-semibold text-neutral-900">Scan Host QR To Join</h3>
+                  <p className="mt-1 text-xs text-neutral-700">
+                    If you are not creating a session, tap scan and point at the host QR to auto-join.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white"
+                      onClick={() => setScanJoinActive((value) => !value)}
+                      type="button"
+                    >
+                      {scanJoinActive ? 'Stop Scan' : 'Scan Host QR'}
+                    </button>
+                  </div>
+                  {scanJoinActive ? (
+                    <div className="mt-2">
+                      <video
+                        className="max-h-52 w-full border border-neutral-300 bg-black"
+                        muted
+                        playsInline
+                        ref={joinScanVideoRef}
+                      />
+                      <canvas className="hidden" ref={joinScanCanvasRef} />
+                    </div>
+                  ) : null}
+                  {scanJoinStatus ? <p className="mt-2 text-xs text-neutral-700">{scanJoinStatus}</p> : null}
+                </div>
               </div>
 
               <div className="border border-neutral-300 p-3">
@@ -963,49 +1195,43 @@ export function InventoryDashboard() {
                   <BarcodeScanner onDetected={onScanValue} />
 
                   <div className="border border-neutral-300 p-3">
-                    <h3 className="text-sm font-semibold text-neutral-900">Manual Scan Entry</h3>
-                    <div className="mt-2 flex gap-2">
-                      <input
-                        className="w-full border border-neutral-300 px-2 py-2 text-sm"
-                        onChange={(event) => setScanInput(event.target.value)}
-                        placeholder="Scan/enter UPC, EAN, System ID, Custom SKU, Manufact. SKU"
-                        value={scanInput}
-                      />
-                      <button
-                        className="border border-brand-maroon bg-brand-maroon px-3 py-2 text-sm text-white"
-                        onClick={async () => {
-                          await onScanValue(scanInput);
-                          setScanInput('');
-                        }}
-                        type="button"
-                      >
-                        +1
-                      </button>
+                    <h3 className="text-sm font-semibold text-neutral-900">Current Scanned Item</h3>
+                    <p className="mt-1 text-xs text-neutral-700">
+                      Scan an item barcode. If matched, +1 is added automatically and you can adjust with +1/-1.
+                    </p>
+                    <div className="mt-2 border border-neutral-200 p-2 text-xs">
+                      {activeItem ? (
+                        <div className="space-y-1">
+                          <p>
+                            <span className="font-semibold">Item:</span> {activeItem.item_name}
+                          </p>
+                          <p>
+                            <span className="font-semibold">System ID:</span> {activeItem.system_id}
+                          </p>
+                          <p>
+                            <span className="font-semibold">UPC:</span> {activeItem.upc || 'n/a'}
+                          </p>
+                        </div>
+                      ) : (
+                        <p>No matched item selected yet. Last scanned code: {activeScannedCode || 'none'}.</p>
+                      )}
                     </div>
-                  </div>
-
-                  <div className="border border-neutral-300 p-3">
-                    <h3 className="text-sm font-semibold text-neutral-900">Manual System ID Count</h3>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <input
-                        className="min-w-64 border border-neutral-300 px-2 py-2 text-sm"
-                        onChange={(event) => setManualSystemId(event.target.value)}
-                        placeholder="System ID"
-                        value={manualSystemId}
-                      />
+                    <div className="mt-2 flex gap-2">
                       <button
-                        className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white"
-                        onClick={() => appendEvent(manualSystemId, 1)}
+                        className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white disabled:opacity-60"
+                        disabled={!activeItem}
+                        onClick={() => activeItem && appendEvent(activeItem.system_id, 1)}
                         type="button"
                       >
-                        Add +1
+                        +1 Current Item
                       </button>
                       <button
-                        className="border border-neutral-700 px-3 py-2 text-xs"
-                        onClick={() => appendEvent(manualSystemId, -1)}
+                        className="border border-neutral-700 px-3 py-2 text-xs disabled:opacity-60"
+                        disabled={!activeItem}
+                        onClick={() => activeItem && appendEvent(activeItem.system_id, -1)}
                         type="button"
                       >
-                        Subtract -1
+                        -1 Current Item
                       </button>
                     </div>
                   </div>

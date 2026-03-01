@@ -93,3 +93,49 @@ export async function clearSessionLocalData(sessionId: string): Promise<void> {
   await tx.objectStore('snapshots').delete(sessionId);
   await tx.done;
 }
+
+const CATALOG_SNAPSHOT_KEY = 'catalog_snapshot_v1';
+
+export async function saveCatalogSnapshot(
+  items: Array<{
+    row_id: number;
+    system_id: string;
+    upc: string;
+    ean: string;
+    custom_sku: string;
+    manufact_sku: string;
+    item_name: string;
+  }>
+): Promise<void> {
+  const database = await db();
+  await database.put('meta', JSON.stringify(items), CATALOG_SNAPSHOT_KEY);
+}
+
+export async function readCatalogSnapshot(): Promise<
+  Array<{
+    row_id: number;
+    system_id: string;
+    upc: string;
+    ean: string;
+    custom_sku: string;
+    manufact_sku: string;
+    item_name: string;
+  }>
+> {
+  const database = await db();
+  const raw = await database.get('meta', CATALOG_SNAPSHOT_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(String(raw)) as Array<{
+      row_id: number;
+      system_id: string;
+      upc: string;
+      ean: string;
+      custom_sku: string;
+      manufact_sku: string;
+      item_name: string;
+    }>;
+  } catch {
+    return [];
+  }
+}
