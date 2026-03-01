@@ -67,6 +67,16 @@ interface EmployeeRecordDraft {
   assignedPeriods: string;
 }
 
+type EmployeePanelId =
+  | 'overview'
+  | 'meeting'
+  | 'shift'
+  | 'record'
+  | 'login'
+  | 'offperiods'
+  | 'strikes'
+  | 'points';
+
 function toNumber(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -224,6 +234,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
     assignedPeriods: ''
   });
   const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
+  const [activePanelByEmployeeId, setActivePanelByEmployeeId] = useState<Record<string, EmployeePanelId>>({});
   const [strikeScopeByEmployeeId, setStrikeScopeByEmployeeId] = useState<Record<string, 'active' | 'all'>>({});
   const [pointsDrafts, setPointsDrafts] = useState<Record<string, { points: string; type: string; note: string }>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -882,7 +893,16 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
   ]);
 
   const toggleEmployeeExpansion = (employeeId: string, defaultOffPeriods: number[]) => {
-    setExpandedEmployeeId((previous) => (previous === employeeId ? null : employeeId));
+    setExpandedEmployeeId((previous) => {
+      const next = previous === employeeId ? null : employeeId;
+      if (next) {
+        setActivePanelByEmployeeId((panelPrevious) => ({
+          ...panelPrevious,
+          [employeeId]: panelPrevious[employeeId] ?? 'overview'
+        }));
+      }
+      return next;
+    });
     setOffPeriodDrafts((previous) => {
       if (previous[employeeId]) return previous;
       return { ...previous, [employeeId]: defaultOffPeriods };
@@ -1002,6 +1022,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                 assignedPeriods: employee.assignedPeriods
               };
               const pointsDraft = pointsDrafts[employee.id] ?? { points: '1', type: 'manual', note: '' };
+              const activePanel = activePanelByEmployeeId[employee.id] ?? 'overview';
 
               return (
                 <Fragment key={employee.id}>
@@ -1057,8 +1078,41 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               Points: {employee.points} • Strikes: {employee.strikesCount}
                             </div>
                           </div>
+                          <div className="flex flex-wrap gap-1 rounded-md border border-neutral-300 bg-white p-1">
+                            {([
+                              ['overview', 'Overview'],
+                              ['meeting', 'Meeting'],
+                              ['shift', 'Shift'],
+                              ['record', 'Record'],
+                              ['login', 'Login'],
+                              ['offperiods', 'Off-Periods'],
+                              ['strikes', 'Strikes'],
+                              ['points', 'Points']
+                            ] as Array<[EmployeePanelId, string]>).map(([panelId, label]) => (
+                              <button
+                                className={`min-h-[32px] rounded px-2 text-xs ${
+                                  activePanel === panelId
+                                    ? 'bg-brand-maroon text-white'
+                                    : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+                                }`}
+                                key={`${employee.id}-panel-${panelId}`}
+                                onClick={() =>
+                                  setActivePanelByEmployeeId((previous) => ({
+                                    ...previous,
+                                    [employee.id]: panelId
+                                  }))
+                                }
+                                type="button"
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
                           <div className="grid gap-2 md:grid-cols-2">
-                            <details className="border border-neutral-300 bg-white p-2" open>
+                            <details
+                              className={`border border-neutral-300 bg-white p-2 ${activePanel === 'overview' ? '' : 'hidden'}`}
+                              open
+                            >
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">General Overview</summary>
                               <div className="mt-2 space-y-1 text-sm text-neutral-700">
                                 <p>Username: {employee.username ?? 'N/A'}</p>
@@ -1068,7 +1122,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               </div>
                             </details>
 
-                            <details className="border border-neutral-300 bg-white p-2">
+                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'meeting' ? '' : 'hidden'}`} open>
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">
                                 Meeting Attendance
                               </summary>
@@ -1184,7 +1238,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               </div>
                             </details>
 
-                            <details className="border border-neutral-300 bg-white p-2">
+                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'shift' ? '' : 'hidden'}`} open>
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Shift Attendance</summary>
                               <div className="mt-2 space-y-2">
                                 <FancyDropdown
@@ -1267,7 +1321,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               </div>
                             </details>
 
-                            <details className="border border-neutral-300 bg-white p-2">
+                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'record' ? '' : 'hidden'}`} open>
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Employee Record</summary>
                               <div className="mt-2 space-y-2">
                                 <label className="block text-sm">
@@ -1349,7 +1403,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               </div>
                             </details>
 
-                            <details className="border border-neutral-300 bg-white p-2">
+                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'login' ? '' : 'hidden'}`} open>
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Login Credentials</summary>
                               <div className="mt-2 space-y-2">
                                 <label className="block text-sm">
@@ -1404,7 +1458,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               </div>
                             </details>
 
-                            <details className="border border-neutral-300 bg-white p-2">
+                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'offperiods' ? '' : 'hidden'}`} open>
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Off-Period Settings</summary>
                               <div className="mt-2 space-y-2">
                                 <div className="grid grid-cols-4 gap-2">
@@ -1446,7 +1500,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               </div>
                             </details>
 
-                            <details className="border border-neutral-300 bg-white p-2">
+                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'strikes' ? '' : 'hidden'}`} open>
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Strike Management</summary>
                               <div className="mt-2 space-y-2">
                                 <FancyDropdown
@@ -1522,7 +1576,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               </div>
                             </details>
 
-                            <details className="border border-neutral-300 bg-white p-2">
+                            <details className={`border border-neutral-300 bg-white p-2 ${activePanel === 'points' ? '' : 'hidden'}`} open>
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Points Management</summary>
                               <div className="mt-2 space-y-2">
                                 <FancyDropdown
