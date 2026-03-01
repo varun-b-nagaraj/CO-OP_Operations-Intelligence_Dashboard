@@ -150,6 +150,10 @@ function buildGenerationSelection(year: number, month: number, anchorDay: 'A' | 
   };
 }
 
+function generateScheduleSeed(): number {
+  return Math.floor(Math.random() * 2_147_483_647);
+}
+
 function getDefaultGenerationSelection(): GenerationSelection {
   const now = new Date();
   return buildGenerationSelection(now.getUTCFullYear(), now.getUTCMonth() + 1);
@@ -163,10 +167,6 @@ function buildScheduleParams(selection: GenerationSelection): ScheduleParams {
     anchorDay: selection.anchorDay,
     seed: selection.seed
   };
-}
-
-function isOpenVolunteerPeriod(period: number): boolean {
-  return period === 0 || period === 4 || period === 8;
 }
 
 function isAlternateAssignment(assignment: Pick<ScheduleAssignment, 'role' | 'type'>): boolean {
@@ -267,7 +267,6 @@ export function ScheduleTab() {
   const [assignmentTargetSNumber, setAssignmentTargetSNumber] = useState('');
   const [dragSourceUid, setDragSourceUid] = useState<string | null>(null);
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
-  const [attendanceModalUid, setAttendanceModalUid] = useState<string | null>(null);
   const [attendanceReason, setAttendanceReason] = useState('');
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
@@ -534,7 +533,6 @@ export function ScheduleTab() {
     setDragSourceUid(null);
     setDragTargetUid(null);
     setShiftActionModalUid(null);
-    setAttendanceModalUid(null);
   }, [schedule]);
 
   useEffect(() => {
@@ -669,15 +667,32 @@ export function ScheduleTab() {
     return rosterMeta.classPeriod === period || offPeriods.includes(period);
   };
 
-  const canEmployeeTakeAssignment = useCallback((employeeSNumber: string, assignment: EditableAssignment): boolean => {
-    const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
-    if (!rosterMeta || !rosterMeta.scheduleable) return false;
-    if (isOpenVolunteerPeriod(assignment.period)) {
-      return true;
-    }
-    const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
-    return rosterMeta.classPeriod === assignment.period || offPeriods.includes(assignment.period);
-  }, [rosterMetaBySNumber, settingsMap]);
+  const isEmployeeOffPeriod = useCallback(
+    (employeeSNumber: string, period: number): boolean => {
+      const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
+      return offPeriods.includes(period);
+    },
+    [settingsMap]
+  );
+
+  const isOpenVolunteerAssignment = useCallback(
+    (assignment: EditableAssignment): boolean => {
+      if (assignment.period === 0) return true;
+      return isEmployeeOffPeriod(assignment.effectiveWorkerSNumber, assignment.period);
+    },
+    [isEmployeeOffPeriod]
+  );
+
+  const canEmployeeTakeAssignment = useCallback(
+    (employeeSNumber: string, assignment: EditableAssignment): boolean => {
+      const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
+      if (!rosterMeta || !rosterMeta.scheduleable) return false;
+      if (assignment.period === 0) return true;
+      if (isEmployeeOffPeriod(assignment.effectiveWorkerSNumber, assignment.period)) return true;
+      return rosterMeta.classPeriod === assignment.period || isEmployeeOffPeriod(employeeSNumber, assignment.period);
+    },
+    [isEmployeeOffPeriod, rosterMetaBySNumber]
+  );
 
   const canSwapAssignments = (sourceUid: string, targetUid: string): boolean => {
     if (!sourceUid || !targetUid || sourceUid === targetUid) return false;
@@ -728,7 +743,7 @@ export function ScheduleTab() {
     return actingEmployeeOptions.filter((option) => canEmployeeTakeAssignment(option.value, selectedShiftActionAssignment));
   }, [actingEmployeeOptions, canEmployeeTakeAssignment, selectedShiftActionAssignment]);
   const selectedShiftSupportsOpenVolunteer = Boolean(
-    selectedShiftActionAssignment && isOpenVolunteerPeriod(selectedShiftActionAssignment.period)
+    selectedShiftActionAssignment && isOpenVolunteerAssignment(selectedShiftActionAssignment)
   );
   const currentEmployeeCanVolunteerSelectedShift = Boolean(
     selectedShiftActionAssignment &&
@@ -748,6 +763,9 @@ export function ScheduleTab() {
       currentEmployeeOwnsSelectedShift &&
       selectedShiftActionAttendanceStatus === 'expected' &&
       selectedShiftActionAssignment.effectiveWorkerSNumber !== selectedShiftActionAssignment.studentSNumber
+  );
+  const canEditSelectedShiftAttendance = Boolean(
+    selectedShiftActionAssignment && (isManagerMode || currentEmployeeOwnsSelectedShift)
   );
 
   useEffect(() => {
@@ -798,13 +816,13 @@ export function ScheduleTab() {
     shiftActionChoice
   ]);
 
-  const selectedAssignment = useMemo(
-    () => editableAssignments.find((assignment) => assignment.uid === attendanceModalUid) ?? null,
-    [attendanceModalUid, editableAssignments]
-  );
+  useEffect(() => {
+    setAttendanceReason('');
+  }, [shiftActionModalUid]);
+
   const todayKey = getTodayDateKey();
-  const selectedShiftIsFuture = selectedAssignment
-    ? !isDateTodayOrPast(selectedAssignment.date, todayKey)
+  const selectedShiftIsFuture = selectedShiftActionAssignment
+    ? !isDateTodayOrPast(selectedShiftActionAssignment.date, todayKey)
     : false;
 
   const targetYearMonthLabel = `${generationSelection.year}-${String(generationSelection.month).padStart(2, '0')}`;
@@ -916,25 +934,6 @@ export function ScheduleTab() {
 
       {schedule && (
         <div className="space-y-4">
-          <div className="grid gap-3 border border-neutral-300 bg-white p-3 md:grid-cols-4">
-            <div className="border border-neutral-300 p-3">
-              <p className="text-xs text-neutral-500">Generated at</p>
-              <p className="text-sm font-medium">{new Date(schedule.meta.generatedAt).toLocaleString()}</p>
-            </div>
-            <div className="border border-neutral-300 p-3">
-              <p className="text-xs text-neutral-500">Assignments</p>
-              <p className="text-sm font-medium">{schedule.schedule.length}</p>
-            </div>
-            <div className="border border-neutral-300 p-3">
-              <p className="text-xs text-neutral-500">Roster</p>
-              <p className="text-sm font-medium">{editableRoster.length}</p>
-            </div>
-            <div className="border border-neutral-300 p-3">
-              <p className="text-xs text-neutral-500">Calendar days</p>
-              <p className="text-sm font-medium">{Object.keys(schedule.calendar).length}</p>
-            </div>
-          </div>
-
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3 border border-neutral-300 bg-neutral-50 p-2">
               <h3 className="text-sm font-semibold">Schedule — {monthTitle}</h3>
@@ -1224,20 +1223,6 @@ export function ScheduleTab() {
                                           Drag to another employee to swap.
                                         </p>
                                       )}
-                                      {isManagerMode && (
-                                        <button
-                                          className="mt-1 min-h-[30px] border border-neutral-500 px-2 text-[10px]"
-                                          onClick={(event) => {
-                                            event.preventDefault();
-                                            event.stopPropagation();
-                                            setAttendanceReason('');
-                                            setAttendanceModalUid(assignment.uid);
-                                          }}
-                                          type="button"
-                                        >
-                                          Edit attendance
-                                        </button>
-                                      )}
                                     </div>
                                   );
                                 })}
@@ -1329,39 +1314,60 @@ export function ScheduleTab() {
                 </tbody>
               </table>
             </div>
-            <div className="overflow-x-auto border border-neutral-300">
-              <div className="border-b border-neutral-300 bg-neutral-50 p-2">
-                <h3 className="text-sm font-semibold">Summary</h3>
-              </div>
-              <table className="min-w-full text-sm">
-                <thead className="bg-neutral-100">
-                  <tr>
-                    <th className="border-b border-neutral-300 p-2 text-left">Student</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">Regular</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">Alternate</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">Total</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">Periods</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summaryRows.map((entry) => (
-                    <tr className="border-b border-neutral-200" key={entry.localId}>
-                      <td className="p-2">{entry.student}</td>
-                      <td className="p-2">{entry.studentSNumber}</td>
-                      <td className="p-2">{entry.regularShifts}</td>
-                      <td className="p-2">{entry.alternateShifts}</td>
-                      <td className="p-2">{entry.totalShifts}</td>
-                      <td className="p-2">{entry.periodsWorked}</td>
+            <div className="space-y-4">
+              <div className="overflow-x-auto border border-neutral-300">
+                <div className="border-b border-neutral-300 bg-neutral-50 p-2">
+                  <h3 className="text-sm font-semibold">Summary</h3>
+                </div>
+                <table className="min-w-full text-sm">
+                  <thead className="bg-neutral-100">
+                    <tr>
+                      <th className="border-b border-neutral-300 p-2 text-left">Student</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">Regular</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">Alternate</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">Total</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">Periods</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {summaryRows.map((entry) => (
+                      <tr className="border-b border-neutral-200" key={entry.localId}>
+                        <td className="p-2">{entry.student}</td>
+                        <td className="p-2">{entry.studentSNumber}</td>
+                        <td className="p-2">{entry.regularShifts}</td>
+                        <td className="p-2">{entry.alternateShifts}</td>
+                        <td className="p-2">{entry.totalShifts}</td>
+                        <td className="p-2">{entry.periodsWorked}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="grid gap-3 border border-neutral-300 bg-white p-3 md:grid-cols-2">
+                <div className="border border-neutral-300 p-3">
+                  <p className="text-xs text-neutral-500">Generated at</p>
+                  <p className="text-sm font-medium">{new Date(schedule.meta.generatedAt).toLocaleString()}</p>
+                </div>
+                <div className="border border-neutral-300 p-3">
+                  <p className="text-xs text-neutral-500">Assignments</p>
+                  <p className="text-sm font-medium">{schedule.schedule.length}</p>
+                </div>
+                <div className="border border-neutral-300 p-3">
+                  <p className="text-xs text-neutral-500">Roster</p>
+                  <p className="text-sm font-medium">{editableRoster.length}</p>
+                </div>
+                <div className="border border-neutral-300 p-3">
+                  <p className="text-xs text-neutral-500">Calendar days</p>
+                  <p className="text-sm font-medium">{Object.keys(schedule.calendar).length}</p>
+                </div>
+              </div>
             </div>
           </div>
 
           <section className="space-y-3 border border-neutral-300 bg-neutral-50 p-3">
-            <div className="grid gap-3 md:grid-cols-5">
+            <div className="grid gap-3 md:grid-cols-4">
               <label className="text-sm">
                 Year
                 <input
@@ -1427,20 +1433,6 @@ export function ScheduleTab() {
                   <option value="B">B Day</option>
                 </select>
               </label>
-              <label className="text-sm">
-                Seed
-                <input
-                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                  onChange={(event) =>
-                    setGenerationSelection((previous) => ({
-                      ...previous,
-                      seed: Number(event.target.value) || previous.seed
-                    }))
-                  }
-                  type="number"
-                  value={generationSelection.seed}
-                />
-              </label>
             </div>
             <button
               className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -1453,6 +1445,10 @@ export function ScheduleTab() {
             <p className="text-xs text-neutral-600">
               Generation is month-specific. Creating a new month table does not delete other months; use Open month to switch.
             </p>
+            <p className="text-xs text-neutral-600">
+              Reference date/day are editable here. The values you set are used for the next generated table.
+            </p>
+            <p className="text-xs text-neutral-600">Seed is auto-generated each time you create a new table.</p>
           </section>
         </div>
       )}
@@ -1488,7 +1484,7 @@ export function ScheduleTab() {
             </p>
             {selectedShiftSupportsOpenVolunteer && (
               <p className="mt-2 text-xs text-neutral-600">
-                Morning / period 4 / period 8 shift: schedulable employees can volunteer.
+                Open slot: this shift is morning or off-period for the current worker, so eligible employees can volunteer.
               </p>
             )}
 
@@ -1559,7 +1555,7 @@ export function ScheduleTab() {
                     </label>
                     {!currentEmployeeCanVolunteerSelectedShift && shiftActionChoice === 'volunteer' && (
                       <p className="text-sm text-neutral-700">
-                        Volunteer is only available for expected morning/period 4/period 8 shifts you are eligible to cover.
+                        Volunteer is only available for expected open slots (morning or off-period) that you are eligible to cover.
                       </p>
                     )}
                     {!currentEmployeeCanRemoveSelfSelectedShift && shiftActionChoice === 'remove' && (
@@ -1603,100 +1599,74 @@ export function ScheduleTab() {
                   )}
               </div>
             )}
-          </div>
-        </div>
-      )}
 
-      {selectedAssignment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
-          <div className="w-full max-w-lg border border-neutral-400 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-neutral-900">Edit Attendance</h3>
-                <p className="mt-1 text-sm text-neutral-700">
-                  {rosterNameBySNumber.get(selectedAssignment.effectiveWorkerSNumber) ??
-                    selectedAssignment.effectiveWorkerSNumber}{' '}
-                  • {selectedAssignment.date} • P{selectedAssignment.period}
+            <div className="mt-4 border-t border-neutral-200 pt-3">
+              <p className="text-sm font-medium text-neutral-900">Attendance</p>
+              {!canEditSelectedShiftAttendance && (
+                <p className="mt-2 text-sm text-neutral-700">
+                  You can only edit attendance for your own shift entries.
                 </p>
-              </div>
-              <button
-                className="min-h-[36px] border border-neutral-500 px-2 text-sm"
-                onClick={() => setAttendanceModalUid(null)}
-                type="button"
-              >
-                Close
-              </button>
+              )}
+              {canEditSelectedShiftAttendance && (
+                <>
+                  <label className="mt-2 block text-sm">
+                    Reason (required for Excused)
+                    <textarea
+                      className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                      onChange={(event) => setAttendanceReason(event.target.value)}
+                      value={attendanceReason}
+                    />
+                  </label>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <button
+                      className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={updateAttendanceMutation.isPending || selectedShiftIsFuture}
+                      onClick={() =>
+                        updateAttendanceMutation.mutate({
+                          assignment: selectedShiftActionAssignment,
+                          status: 'present'
+                        })
+                      }
+                      type="button"
+                    >
+                      Mark Present
+                    </button>
+                    <button
+                      className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={updateAttendanceMutation.isPending}
+                      onClick={() =>
+                        updateAttendanceMutation.mutate({
+                          assignment: selectedShiftActionAssignment,
+                          status: 'absent'
+                        })
+                      }
+                      type="button"
+                    >
+                      Mark Absent
+                    </button>
+                    <button
+                      className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={updateAttendanceMutation.isPending || !attendanceReason.trim() || selectedShiftIsFuture}
+                      onClick={() =>
+                        updateAttendanceMutation.mutate({
+                          assignment: selectedShiftActionAssignment,
+                          status: 'excused',
+                          reason: attendanceReason.trim()
+                        })
+                      }
+                      type="button"
+                    >
+                      Mark Excused
+                    </button>
+                  </div>
+                  {selectedShiftIsFuture && (
+                    <p className="mt-2 text-xs text-neutral-600">
+                      Present and excused overrides are only allowed on the shift date or after.
+                    </p>
+                  )}
+                </>
+              )}
             </div>
-            <p className="mt-3 text-sm text-neutral-700">
-              Current status:{' '}
-              <span className="font-medium">
-                {normalizeAttendanceStatus(
-                  attendanceByAssignmentKey.get(
-                    [
-                      selectedAssignment.date,
-                      selectedAssignment.period,
-                      selectedAssignment.shiftSlotKey,
-                      selectedAssignment.effectiveWorkerSNumber
-                    ].join('|')
-                  )?.status
-                )}
-              </span>
-            </p>
-            <label className="mt-3 block text-sm">
-              Reason (required for Excused)
-              <textarea
-                className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
-                onChange={(event) => setAttendanceReason(event.target.value)}
-                value={attendanceReason}
-              />
-            </label>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <button
-                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={updateAttendanceMutation.isPending || selectedShiftIsFuture}
-                onClick={() =>
-                  updateAttendanceMutation.mutate({
-                    assignment: selectedAssignment,
-                    status: 'present'
-                  })
-                }
-                type="button"
-              >
-                Mark Present
-              </button>
-              <button
-                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={updateAttendanceMutation.isPending}
-                onClick={() =>
-                  updateAttendanceMutation.mutate({
-                    assignment: selectedAssignment,
-                    status: 'absent'
-                  })
-                }
-                type="button"
-              >
-                Mark Absent
-              </button>
-              <button
-                className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={updateAttendanceMutation.isPending || !attendanceReason.trim() || selectedShiftIsFuture}
-                onClick={() =>
-                  updateAttendanceMutation.mutate({
-                    assignment: selectedAssignment,
-                    status: 'excused',
-                    reason: attendanceReason.trim()
-                  })
-                }
-                type="button"
-              >
-                Mark Excused
-              </button>
-            </div>
-            {selectedShiftIsFuture && (
-              <p className="mt-2 text-xs text-neutral-600">
-                Present and excused overrides are only allowed on the shift date or after.
-              </p>
-            )}
           </div>
         </div>
       )}
@@ -1727,7 +1697,10 @@ export function ScheduleTab() {
                 className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                 disabled={manualRefresh.isPending}
                 onClick={() => {
-                  const nextParams = buildScheduleParams(generationSelection);
+                  const nextSeed = generateScheduleSeed();
+                  const nextGenerationSelection = { ...generationSelection, seed: nextSeed };
+                  const nextParams = buildScheduleParams(nextGenerationSelection);
+                  setGenerationSelection(nextGenerationSelection);
                   setParams(nextParams);
                   setMonthSelection({ year: generationSelection.year, month: generationSelection.month });
                   manualRefresh.mutate(nextParams);
