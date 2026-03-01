@@ -23,6 +23,33 @@ function resolveOverrideByDate(overrides: AttendanceOverride[]): Map<string, 'ex
   return map;
 }
 
+function resolveShiftOverrideByDatePeriod(
+  overrides: AttendanceOverride[]
+): Map<string, 'excused' | 'present_override'> {
+  const map = new Map<string, 'excused' | 'present_override'>();
+
+  for (const override of overrides) {
+    if (override.scope !== 'shift') continue;
+    if (typeof override.shift_period !== 'number') continue;
+    const key = `${override.checkin_date}|${override.shift_period}`;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, override.override_type);
+      continue;
+    }
+
+    if (existing === override.override_type) continue;
+    map.set(
+      key,
+      existing === 'present_override' || override.override_type === 'present_override'
+        ? 'present_override'
+        : 'excused'
+    );
+  }
+
+  return map;
+}
+
 export function calculateMeetingAttendanceRate(inputs: {
   attendanceRecords: Array<{ date: string; status: 'present' | 'absent' }>;
   overrides: AttendanceOverride[];
@@ -74,7 +101,9 @@ export function calculateShiftAttendanceRate(inputs: {
     status: 'expected' | 'present' | 'absent' | 'excused';
     rawStatus?: 'expected' | 'present' | 'absent' | 'excused' | null;
     date?: string | null;
+    shiftPeriod?: number | null;
   }>;
+  overrides?: AttendanceOverride[];
 }): {
   raw_rate: number | null;
   adjusted_rate: number | null;
@@ -87,6 +116,7 @@ export function calculateShiftAttendanceRate(inputs: {
     if (!item.date) return true;
     return item.date <= today;
   });
+  const shiftOverrideByDatePeriod = resolveShiftOverrideByDatePeriod(inputs.overrides ?? []);
 
   const expected_shifts = eligibleRecords.length;
   if (expected_shifts === 0) {
@@ -97,13 +127,72 @@ export function calculateShiftAttendanceRate(inputs: {
     const status = item.rawStatus ?? item.status;
     return status === 'present';
   }).length;
-  const attended = eligibleRecords.filter((item) => item.status === 'present').length;
-  const excused = eligibleRecords.filter((item) => item.status === 'excused').length;
+  const attended = eligibleRecords.filter((item) => {
+    const key = `${String(item.date ?? '')}|${Number(item.shiftPeriod ?? -1)}`;
+    const overrideType = shiftOverrideByDatePeriod.get(key);
+    if (overrideType === 'present_override') return true;
+    if (overrideType === 'excused') return false;
+    return item.status === 'present';
+  }).length;
+  const excused = eligibleRecords.filter((item) => {
+    const key = `${String(item.date ?? '')}|${Number(item.shiftPeriod ?? -1)}`;
+    const overrideType = shiftOverrideByDatePeriod.get(key);
+    if (overrideType === 'excused') return true;
+    if (overrideType === 'present_override') return false;
+    return item.status === 'excused';
+  }).length;
   const raw_rate = (rawAttended / expected_shifts) * 100;
   const adjustedDenominator = expected_shifts - excused;
   const adjusted_rate = adjustedDenominator <= 0 ? null : (attended / adjustedDenominator) * 100;
 
   return { raw_rate, adjusted_rate, expected_shifts, attended, excused };
+}
+
+export function summarizeShiftAttendanceCounts(inputs: {
+  shiftAttendanceRecords: Array<{
+    status: 'expected' | 'present' | 'absent' | 'excused';
+    date?: string | null;
+    shiftPeriod?: number | null;
+  }>;
+  throughTodayOnly?: boolean;
+  overrides?: AttendanceOverride[];
+}): {
+  scheduled: number;
+  expected: number;
+  present: number;
+  absent: number;
+  excused: number;
+  morningPresent: number;
+} {
+  const today = new Date().toISOString().slice(0, 10);
+  const eligibleRecords = inputs.throughTodayOnly
+    ? inputs.shiftAttendanceRecords.filter((item) => {
+        if (!item.date) return true;
+        return item.date <= today;
+      })
+    : inputs.shiftAttendanceRecords;
+  const shiftOverrideByDatePeriod = resolveShiftOverrideByDatePeriod(inputs.overrides ?? []);
+
+  const resolvedStatus = (
+    item: (typeof eligibleRecords)[number]
+  ): 'expected' | 'present' | 'absent' | 'excused' => {
+    const key = `${String(item.date ?? '')}|${Number(item.shiftPeriod ?? -1)}`;
+    const overrideType = shiftOverrideByDatePeriod.get(key);
+    if (overrideType === 'present_override') return 'present';
+    if (overrideType === 'excused') return 'excused';
+    return item.status;
+  };
+
+  return {
+    scheduled: eligibleRecords.length,
+    expected: eligibleRecords.filter((item) => resolvedStatus(item) === 'expected').length,
+    present: eligibleRecords.filter((item) => resolvedStatus(item) === 'present').length,
+    absent: eligibleRecords.filter((item) => resolvedStatus(item) === 'absent').length,
+    excused: eligibleRecords.filter((item) => resolvedStatus(item) === 'excused').length,
+    morningPresent: eligibleRecords.filter(
+      (item) => resolvedStatus(item) === 'present' && Number(item.shiftPeriod ?? -1) === 0
+    ).length
+  };
 }
 
 export function extractMeetingAttendanceRecords(payload: Record<string, unknown>): MeetingAttendanceRecord[] {

@@ -39,9 +39,6 @@ export async function fetchScheduleWithCache(
       .select('schedule_data, generated_at')
       .eq('year', params.year)
       .eq('month', params.month)
-      .eq('anchor_date', params.anchorDate)
-      .eq('anchor_day', params.anchorDay)
-      .eq('seed', params.seed)
       .gte('generated_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
       .order('generated_at', { ascending: false })
       .limit(1)
@@ -83,20 +80,37 @@ export async function fetchScheduleWithCache(
   const normalized = normalizeScheduleResponse(validated);
   const generatedAt = normalized.meta.generatedAt;
 
-  await supabase.from('schedules').upsert(
-    {
-      year: params.year,
-      month: params.month,
-      anchor_date: params.anchorDate,
-      anchor_day: params.anchorDay,
-      seed: params.seed,
-      schedule_data: normalized,
-      generated_at: generatedAt
-    },
-    {
-      onConflict: 'year,month,anchor_date,anchor_day,seed'
+  const payload = {
+    year: params.year,
+    month: params.month,
+    anchor_date: params.anchorDate,
+    anchor_day: params.anchorDay,
+    seed: params.seed,
+    schedule_data: normalized,
+    generated_at: generatedAt
+  };
+
+  // Canonical behavior: one stored schedule row per month; regenerate rewrites it.
+  const { error: upsertYearMonthError } = await supabase.from('schedules').upsert(payload, {
+    onConflict: 'year,month'
+  });
+
+  if (upsertYearMonthError) {
+    // Back-compat fallback for databases that have not yet applied year/month uniqueness.
+    const { error: deleteMonthError } = await supabase
+      .from('schedules')
+      .delete()
+      .eq('year', params.year)
+      .eq('month', params.month);
+    if (deleteMonthError) {
+      throw new Error(deleteMonthError.message);
     }
-  );
+
+    const { error: insertError } = await supabase.from('schedules').insert(payload);
+    if (insertError) {
+      throw new Error(insertError.message);
+    }
+  }
 
   logInfo('schedule_cached', {
     correlationId,

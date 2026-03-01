@@ -2261,8 +2261,8 @@ export function ScheduleTab() {
                 <div className="border border-neutral-300">
                 <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Statistics</h3>
                 <div className="p-2 text-sm">
-                  {schedule.statistics.map((stat) => (
-                    <p key={stat.metric}>
+                  {schedule.statistics.map((stat, index) => (
+                    <p key={`${String(stat.metric || 'metric')}-${String(stat.value || 'value')}-${index}`}>
                       {stat.metric}: {stat.value}
                     </p>
                   ))}
@@ -2272,8 +2272,12 @@ export function ScheduleTab() {
                 <div className="border border-neutral-300">
                 <h3 className="border-b border-neutral-300 bg-neutral-50 p-2 text-sm font-semibold">Balance Analysis</h3>
                 <div className="p-2 text-sm">
-                  {schedule.balanceAnalysis.map((item) => (
-                    <p key={`${item.category}-${item.metric}`}>
+                  {schedule.balanceAnalysis.map((item, index) => (
+                    <p
+                      key={`${String(item.category || 'category')}-${String(item.metric || 'metric')}-${String(
+                        item.value || 'value'
+                      )}-${index}`}
+                    >
                       {item.category} — {item.metric}: {item.value}
                     </p>
                   ))}

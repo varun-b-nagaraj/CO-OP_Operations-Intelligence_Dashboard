@@ -320,7 +320,8 @@ export async function getShiftAttendance(
       shiftAttendanceRecords: rows.map((row) => ({
         status: row.status,
         rawStatus: row.raw_status ?? null,
-        date: row.shift_date
+        date: row.shift_date,
+        shiftPeriod: row.shift_period
       }))
     });
 

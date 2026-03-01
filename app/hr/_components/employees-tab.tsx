@@ -19,7 +19,11 @@ import { updateEmployeeOffPeriods } from '@/app/actions/employee-settings';
 import { excuseShiftAbsence, markShiftPresent } from '@/app/actions/shift-attendance';
 import { fetchMeetingAttendance } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
-import { calculateMeetingAttendanceRate, calculateShiftAttendanceRate } from '@/lib/server/attendance';
+import {
+  calculateMeetingAttendanceRate,
+  calculateShiftAttendanceRate,
+  summarizeShiftAttendanceCounts
+} from '@/lib/server/attendance';
 import { AttendanceOverride } from '@/lib/types';
 
 import {
@@ -48,6 +52,7 @@ interface EmployeeMetric {
   totalShifts: number;
   morningShifts: number;
   offPeriodShifts: number;
+  shiftExpected: number;
   shiftPresent: number;
   shiftAbsent: number;
   shiftExcused: number;
@@ -334,6 +339,20 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
         .from('attendance_overrides')
         .select('*')
         .eq('scope', 'meeting')
+        .gte('checkin_date', range.from)
+        .lte('checkin_date', range.to);
+      if (error) throw new Error(error.message);
+      return (data ?? []) as GenericRow[];
+    }
+  });
+
+  const shiftOverridesQuery = useQuery({
+    queryKey: ['hr-shift-overrides', range],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('attendance_overrides')
+        .select('*')
+        .eq('scope', 'shift')
         .gte('checkin_date', range.from)
         .lte('checkin_date', range.to);
       if (error) throw new Error(error.message);
@@ -819,6 +838,15 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
       meetingStatusBySNumberDate.set(record.s_number, bucket);
     }
 
+    const shiftOverridesBySNumber = new Map<string, AttendanceOverride[]>();
+    for (const row of shiftOverridesQuery.data ?? []) {
+      const sNumber = String(row.s_number ?? '');
+      if (!sNumber) continue;
+      const bucket = shiftOverridesBySNumber.get(sNumber) ?? [];
+      bucket.push(row as unknown as AttendanceOverride);
+      shiftOverridesBySNumber.set(sNumber, bucket);
+    }
+
     const recentMeetingDatesBySNumber = new Map<string, string[]>();
     const globalMeetingDates = [...(meetingAttendanceQuery.data?.dates ?? [])].sort((left, right) =>
       right.localeCompare(left)
@@ -846,8 +874,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
         shiftAttendanceRecords: shifts.map((item) => ({
           status: item.status as 'expected' | 'present' | 'absent' | 'excused',
           rawStatus: (item.raw_status as 'expected' | 'present' | 'absent' | 'excused' | null) ?? null,
-          date: String(item.shift_date ?? '')
-        }))
+          date: String(item.shift_date ?? ''),
+          shiftPeriod: toNumber(item.shift_period)
+        })),
+        overrides: shiftOverridesBySNumber.get(sNumber) ?? []
       });
 
       const attendanceRecords =
@@ -857,9 +887,18 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
         overrides: (overridesBySNumber.get(sNumber) ?? []) as unknown as AttendanceOverride[]
       });
 
-      const shiftPresent = shifts.filter((item) => item.status === 'present').length;
-      const shiftAbsent = shifts.filter((item) => item.status === 'absent').length;
-      const shiftExcused = shifts.filter((item) => item.status === 'excused').length;
+      const shiftCounts = summarizeShiftAttendanceCounts({
+        shiftAttendanceRecords: shifts.map((item) => ({
+          status: item.status as 'expected' | 'present' | 'absent' | 'excused',
+          date: String(item.shift_date ?? ''),
+          shiftPeriod: toNumber(item.shift_period)
+        })),
+        throughTodayOnly: false,
+        overrides: shiftOverridesBySNumber.get(sNumber) ?? []
+      });
+      const shiftPresent = shiftCounts.present;
+      const shiftAbsent = shiftCounts.absent;
+      const shiftExcused = shiftCounts.excused;
       const morningShifts = shifts.filter(
         (item) => toNumber(item.shift_period) === 0 && item.status === 'present'
       ).length;
@@ -882,6 +921,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
         totalShifts: shifts.length,
         morningShifts,
         offPeriodShifts,
+        shiftExpected: shiftCounts.expected,
         shiftPresent,
         shiftAbsent,
         shiftExcused,
@@ -910,6 +950,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
     meetingAttendanceQuery.data?.records,
     meetingAttendanceQuery.data?.dates,
     overridesQuery.data,
+    shiftOverridesQuery.data,
     pointsQuery.data,
     settingsQuery.data,
     shiftAttendanceQuery.data,
@@ -1097,7 +1138,8 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               Shift: {formatRate(employee.shiftRate)}
                             </div>
                             <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
-                              Shift P/A/E: {employee.shiftPresent}/{employee.shiftAbsent}/{employee.shiftExcused}
+                              Shift E/P/A/X: {employee.shiftExpected}/{employee.shiftPresent}/{employee.shiftAbsent}/
+                              {employee.shiftExcused}
                             </div>
                             <div className="border border-neutral-300 bg-white px-2 py-1 text-xs">
                               Points: {employee.points} • Strikes: {employee.strikesCount}

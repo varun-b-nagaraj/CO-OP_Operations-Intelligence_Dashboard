@@ -3,8 +3,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
-import { calculateShiftAttendanceRate } from '@/lib/server/attendance';
+import { calculateShiftAttendanceRate, summarizeShiftAttendanceCounts } from '@/lib/server/attendance';
 import { usePermission } from '@/lib/permissions';
+import { AttendanceOverride } from '@/lib/types';
 
 import {
   formatRate,
@@ -25,7 +26,6 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
   const attendanceQuery = useQuery({
     queryKey: ['hr-shift-attendance', range, employeeSNumber, periodFilter, canOverride],
     queryFn: async () => {
-      const todayKey = new Date().toISOString().slice(0, 10);
       let query = supabase
         .from('shift_attendance')
         .select('*')
@@ -39,42 +39,26 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
 
       const { data, error } = await query;
       if (error) throw new Error(error.message);
-      const rows = (data ?? []) as Array<Record<string, unknown>>;
+      return (data ?? []) as Array<Record<string, unknown>>;
+    }
+  });
 
-      const autoPresentRows = rows.filter(
-        (row) => String(row.status ?? '') === 'expected' && String(row.shift_date ?? '') < todayKey
-      );
+  const shiftOverridesQuery = useQuery({
+    queryKey: ['hr-shift-attendance-overrides', range, employeeSNumber, periodFilter],
+    queryFn: async () => {
+      let query = supabase
+        .from('attendance_overrides')
+        .select('*')
+        .eq('scope', 'shift')
+        .gte('checkin_date', range.from)
+        .lte('checkin_date', range.to);
 
-      // Keep DB in sync when a manager with override access opens this tab.
-      if (canOverride && autoPresentRows.length > 0) {
-        const nowIso = new Date().toISOString();
-        await Promise.all(
-          autoPresentRows.map((row) =>
-            supabase
-              .from('shift_attendance')
-              .update({
-                status: 'present',
-                raw_status: row.raw_status ?? 'present',
-                marked_by: 'auto_past_shift',
-                marked_at: nowIso
-              })
-              .eq('shift_date', String(row.shift_date ?? ''))
-              .eq('shift_period', Number(row.shift_period ?? 0))
-              .eq('shift_slot_key', String(row.shift_slot_key ?? ''))
-              .eq('employee_s_number', String(row.employee_s_number ?? ''))
-          )
-        );
-      }
+      if (employeeSNumber.trim()) query = query.eq('s_number', employeeSNumber.trim());
+      if (periodFilter.trim()) query = query.eq('shift_period', Number(periodFilter));
 
-      return rows.map((row) =>
-        String(row.status ?? '') === 'expected' && String(row.shift_date ?? '') < todayKey
-          ? {
-              ...row,
-              status: 'present',
-              raw_status: row.raw_status ?? 'present'
-            }
-          : row
-      );
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      return (data ?? []) as Array<Record<string, unknown>>;
     }
   });
 
@@ -113,6 +97,15 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
   });
 
   const byEmployee = useMemo(() => {
+    const shiftOverridesBySNumber = new Map<string, AttendanceOverride[]>();
+    for (const row of shiftOverridesQuery.data ?? []) {
+      const sNumber = String(row.s_number ?? '');
+      if (!sNumber) continue;
+      const bucket = shiftOverridesBySNumber.get(sNumber) ?? [];
+      bucket.push(row as unknown as AttendanceOverride);
+      shiftOverridesBySNumber.set(sNumber, bucket);
+    }
+
     const map = new Map<string, Array<Record<string, unknown>>>();
     for (const row of attendanceQuery.data ?? []) {
       const key = row.employee_s_number as string;
@@ -121,25 +114,37 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
       map.set(key, bucket);
     }
     return [...map.entries()].map(([sNumber, rows]) => {
+      const overrides = shiftOverridesBySNumber.get(sNumber) ?? [];
+      const counts = summarizeShiftAttendanceCounts({
+        shiftAttendanceRecords: rows.map((row) => ({
+          status: row.status as 'expected' | 'present' | 'absent' | 'excused',
+          date: String(row.shift_date ?? ''),
+          shiftPeriod: Number(row.shift_period ?? -1)
+        })),
+        throughTodayOnly: false,
+        overrides
+      });
       const rates = calculateShiftAttendanceRate({
         shiftAttendanceRecords: rows.map((row) => ({
           status: row.status as 'expected' | 'present' | 'absent' | 'excused',
           rawStatus: (row.raw_status as 'expected' | 'present' | 'absent' | 'excused' | null) ?? null,
-          date: String(row.shift_date ?? '')
-        }))
+          date: String(row.shift_date ?? ''),
+          shiftPeriod: Number(row.shift_period ?? -1)
+        })),
+        overrides
       });
       const student = (studentsQuery.data ?? []).find((item) => getStudentSNumber(item) === sNumber);
       return {
         sNumber,
         name: student ? getStudentDisplayName(student) : sNumber,
-        expected: rates.expected_shifts,
-        present: rows.filter((row) => row.status === 'present').length,
-        absent: rows.filter((row) => row.status === 'absent').length,
-        excused: rows.filter((row) => row.status === 'excused').length,
+        expected: counts.expected,
+        present: counts.present,
+        absent: counts.absent,
+        excused: counts.excused,
         shiftRate: rates.adjusted_rate ?? rates.raw_rate
       };
     });
-  }, [attendanceQuery.data, studentsQuery.data]);
+  }, [attendanceQuery.data, shiftOverridesQuery.data, studentsQuery.data]);
 
   if (!canView) {
     return <p className="text-sm text-neutral-700">You do not have permission to view shift attendance.</p>;
