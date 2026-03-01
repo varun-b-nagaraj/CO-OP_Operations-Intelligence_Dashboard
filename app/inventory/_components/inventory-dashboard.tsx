@@ -96,12 +96,16 @@ export function InventoryDashboard() {
   const joinScanCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [finalizedTotals, setFinalizedTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
+  const [lastCommittedSessionId, setLastCommittedSessionId] = useState('');
+  const [lastCommittedTotals, setLastCommittedTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
   const [uploadStatus, setUploadStatus] = useState('');
   const [finalAction, setFinalAction] = useState<FinalAction>('none');
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isEndingSession, setIsEndingSession] = useState(false);
   const [oauthStatus, setOauthStatus] = useState('');
   const [oauthAuthorizeUrl, setOauthAuthorizeUrl] = useState('');
+  const [uploadResult, setUploadResult] = useState<Record<string, unknown> | null>(null);
+  const [tokenCacheStatus, setTokenCacheStatus] = useState('');
 
   const [online, setOnline] = useState(true);
 
@@ -340,9 +344,12 @@ export function InventoryDashboard() {
   }, [catalog, displayedTotals]);
 
   const uploadRows = useMemo(() => {
+    if (!sessionId && lastCommittedTotals.length) {
+      return lastCommittedTotals;
+    }
     if (finalizedTotals.length) return finalizedTotals;
     return countRows.map((row) => ({ system_id: row.system_id, qty: row.qty }));
-  }, [countRows, finalizedTotals]);
+  }, [countRows, finalizedTotals, lastCommittedTotals, sessionId]);
 
   const appendEvent = async (systemId: string, deltaQty: number) => {
     if (!sessionId) {
@@ -715,8 +722,37 @@ export function InventoryDashboard() {
         }
       );
 
-      setUploadStatus(`${payload.warning} Upload response: ${JSON.stringify(payload.upstream)}`);
+      const upstream = (payload.upstream ?? {}) as Record<string, unknown>;
+      setUploadResult(upstream);
+      setUploadStatus(payload.warning);
+
+      const refreshed = Boolean(upstream.token_refreshed);
+      const tokenOutput = upstream.token_refresh_output as
+        | { access_token?: string; refresh_token?: string; access_token_expires_at?: number }
+        | undefined;
+
+      if (refreshed && tokenOutput?.access_token && tokenOutput?.refresh_token) {
+        const cacheValue = {
+          ...tokenOutput,
+          cached_at: new Date().toISOString()
+        };
+        localStorage.setItem('inventory_upload_token_cache', JSON.stringify(cacheValue));
+        setTokenCacheStatus('Refreshed OAuth tokens cached locally on this device.');
+      } else {
+        setTokenCacheStatus('');
+      }
+
+      const upstreamError = String(upstream.error ?? '').toLowerCase();
+      const authExpired =
+        upstreamError.includes('expired') ||
+        upstreamError.includes('invalid token') ||
+        upstreamError.includes('unauthorized') ||
+        upstreamError.includes('oauth');
+      if (authExpired) {
+        setOauthStatus('OAuth appears expired. Start OAuth (2FA) again before uploading.');
+      }
     } catch (error) {
+      setUploadResult(null);
       setUploadStatus(error instanceof Error ? error.message : 'Upload failed');
     }
   };
@@ -1303,7 +1339,41 @@ export function InventoryDashboard() {
                 </div>
               </div>
 
-              <p className="text-xs text-neutral-700">{uploadStatus}</p>
+              <div className="border border-neutral-300 bg-neutral-50 p-3">
+                <h4 className="text-sm font-semibold text-neutral-900">Upload Result</h4>
+                <p className="mt-1 text-xs text-neutral-700">{uploadStatus}</p>
+                {tokenCacheStatus ? <p className="mt-1 text-xs text-emerald-700">{tokenCacheStatus}</p> : null}
+
+                {uploadResult ? (
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="border border-neutral-200 bg-white p-2 text-xs">
+                      <p><span className="font-semibold">ok:</span> {String(uploadResult.ok ?? '')}</p>
+                      <p><span className="font-semibold">mode:</span> {String(uploadResult.mode ?? '')}</p>
+                      <p><span className="font-semibold">shop_id:</span> {String(uploadResult.shop_id ?? '')}</p>
+                      <p><span className="font-semibold">employee_id:</span> {String(uploadResult.employee_id ?? '')}</p>
+                    </div>
+                    <div className="border border-neutral-200 bg-white p-2 text-xs">
+                      <p><span className="font-semibold">summary:</span></p>
+                      <p>rows: {String((uploadResult.summary as Record<string, unknown> | undefined)?.total_rows ?? '')}</p>
+                      <p>created: {String((uploadResult.summary as Record<string, unknown> | undefined)?.created ?? '')}</p>
+                      <p>failed: {String((uploadResult.summary as Record<string, unknown> | undefined)?.failed ?? '')}</p>
+                      <p>not_found: {String((uploadResult.summary as Record<string, unknown> | undefined)?.not_found ?? '')}</p>
+                    </div>
+                    <div className="border border-neutral-200 bg-white p-2 text-xs">
+                      <p><span className="font-semibold">reconcile:</span></p>
+                      <p>attempted: {String((uploadResult.reconcile as Record<string, unknown> | undefined)?.attempted ?? '')}</p>
+                      <p>ok: {String((uploadResult.reconcile as Record<string, unknown> | undefined)?.ok ?? '')}</p>
+                      <p>message: {String((uploadResult.reconcile as Record<string, unknown> | undefined)?.message ?? '')}</p>
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-3 border border-neutral-200 bg-white p-2 text-xs">
+                      <p className="font-semibold">Raw response</p>
+                      <pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap break-words">
+                        {JSON.stringify(uploadResult, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </section>
           ) : null}
         </section>
