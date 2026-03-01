@@ -97,6 +97,12 @@ function toDateKey(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
+function isWeekendDateKey(dateKey: string): boolean {
+  const value = new Date(`${dateKey}T00:00:00Z`);
+  const day = value.getUTCDay();
+  return day === 0 || day === 6;
+}
+
 function toMonthRange(year: number, month: number): { from: string; to: string } {
   const from = new Date(Date.UTC(year, month - 1, 1));
   const to = new Date(Date.UTC(year, month, 0));
@@ -284,6 +290,7 @@ export function ScheduleTab() {
   const [shiftActionModalUid, setShiftActionModalUid] = useState<string | null>(null);
   const [shiftActionChoice, setShiftActionChoice] = useState<ShiftActionChoice>('volunteer');
   const [assignmentTargetSNumber, setAssignmentTargetSNumber] = useState('');
+  const [managerAssigneeSearch, setManagerAssigneeSearch] = useState('');
   const [dragSourceUid, setDragSourceUid] = useState<string | null>(null);
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
   const [emptySlotTarget, setEmptySlotTarget] = useState<EmptySlotTarget | null>(null);
@@ -845,6 +852,17 @@ export function ScheduleTab() {
     [isEmployeeOffPeriod, rosterMetaBySNumber]
   );
 
+  const canEmployeeSelfSignUpForPeriod = useCallback(
+    (employeeSNumber: string, date: string, period: number): boolean => {
+      const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
+      if (!rosterMeta || !rosterMeta.scheduleable) return false;
+      if (isWeekendDateKey(date)) return false;
+      if (period === 0) return true;
+      return isEmployeeOffPeriod(employeeSNumber, period);
+    },
+    [isEmployeeOffPeriod, rosterMetaBySNumber]
+  );
+
   const canSwapAssignments = (sourceUid: string, targetUid: string): boolean => {
     if (!sourceUid || !targetUid || sourceUid === targetUid) return false;
     const source = assignmentByUid.get(sourceUid);
@@ -913,6 +931,14 @@ export function ScheduleTab() {
     emptySlotTarget,
     selectedShiftActionAssignment
   ]);
+  const filteredManagerAssignableOptions = useMemo(() => {
+    const term = managerAssigneeSearch.trim().toLowerCase();
+    if (!term) return managerAssignableOptions;
+    return managerAssignableOptions.filter(
+      (option) =>
+        option.label.toLowerCase().includes(term) || option.value.toLowerCase().includes(term)
+    );
+  }, [managerAssigneeSearch, managerAssignableOptions]);
   const selectedShiftSupportsOpenVolunteer = Boolean(
     selectedShiftActionAssignment && isOpenVolunteerAssignment(selectedShiftActionAssignment)
   );
@@ -922,8 +948,17 @@ export function ScheduleTab() {
         selectedShiftSupportsOpenVolunteer &&
         selectedShiftActionAttendanceStatus === 'expected' &&
         actingEmployeeSNumber !== selectedShiftActionAssignment.effectiveWorkerSNumber &&
-        canEmployeeTakeAssignment(actingEmployeeSNumber, selectedShiftActionAssignment)) ||
-        (emptySlotTarget && canEmployeeWorkPeriod(actingEmployeeSNumber, emptySlotTarget.period)))
+        canEmployeeSelfSignUpForPeriod(
+          actingEmployeeSNumber,
+          selectedShiftActionAssignment.date,
+          selectedShiftActionAssignment.period
+        )) ||
+        (emptySlotTarget &&
+          canEmployeeSelfSignUpForPeriod(
+            actingEmployeeSNumber,
+            emptySlotTarget.date,
+            emptySlotTarget.period
+          )))
   );
   const currentEmployeeOwnsSelectedShift = Boolean(
     selectedShiftActionAssignment &&
@@ -997,6 +1032,7 @@ export function ScheduleTab() {
 
   useEffect(() => {
     setAttendanceReason('');
+    setManagerAssigneeSearch('');
   }, [emptySlotTarget, shiftActionModalUid]);
 
   const todayKey = getTodayDateKey();
@@ -1046,6 +1082,7 @@ export function ScheduleTab() {
   const closeShiftActionModal = () => {
     setShiftActionModalUid(null);
     setEmptySlotTarget(null);
+    setManagerAssigneeSearch('');
   };
 
   const handleSubmitShiftAction = () => {
@@ -1058,7 +1095,7 @@ export function ScheduleTab() {
       if (shiftActionChoice === 'volunteer') {
         if (selectedShiftActionAssignment) {
           if (!currentEmployeeCanVolunteerSelectedShift) {
-            setMessage('You can only sign up for open morning/off-period shifts that you are allowed to take.');
+            setMessage('You can only sign up on weekdays for morning shifts and your configured off-periods.');
             return;
           }
           volunteerForShiftMutation.mutate({
@@ -1071,8 +1108,15 @@ export function ScheduleTab() {
           return;
         }
 
-        if (!emptySlotTarget || !canEmployeeWorkPeriod(actingEmployeeSNumber, emptySlotTarget.period)) {
-          setMessage('You can only sign up for slots where you are eligible to work.');
+        if (
+          !emptySlotTarget ||
+          !canEmployeeSelfSignUpForPeriod(
+            actingEmployeeSNumber,
+            emptySlotTarget.date,
+            emptySlotTarget.period
+          )
+        ) {
+          setMessage('You can only sign up for weekday morning shifts or your configured off-periods.');
           return;
         }
         manualSlotMutation.mutate({
@@ -1751,21 +1795,30 @@ export function ScheduleTab() {
             {isManagerMode ? (
               <div className="mt-3 space-y-3">
                 <label className="block text-sm">
+                  Search employee
+                  <input
+                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                    onChange={(event) => setManagerAssigneeSearch(event.target.value)}
+                    placeholder="Type name or s_number"
+                    value={managerAssigneeSearch}
+                  />
+                </label>
+                <label className="block text-sm">
                   Assign to employee
                   <select
                     className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
                     disabled={
-                      managerAssignableOptions.length === 0 ||
+                      filteredManagerAssignableOptions.length === 0 ||
                       volunteerForShiftMutation.isPending ||
                       manualSlotMutation.isPending
                     }
                     onChange={(event) => setAssignmentTargetSNumber(event.target.value)}
                     value={assignmentTargetSNumber}
                   >
-                    {managerAssignableOptions.length === 0 && (
+                    {filteredManagerAssignableOptions.length === 0 && (
                       <option value="">No eligible employees</option>
                     )}
-                    {managerAssignableOptions.map((option) => (
+                    {filteredManagerAssignableOptions.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
@@ -1824,7 +1877,7 @@ export function ScheduleTab() {
                     </label>
                     {!currentEmployeeCanVolunteerSelectedShift && shiftActionChoice === 'volunteer' && (
                       <p className="text-sm text-neutral-700">
-                        Volunteer is only available for expected open slots (morning or off-period) that you are eligible to cover.
+                        Volunteer is only available on weekdays for morning shifts and your configured off-periods.
                       </p>
                     )}
                     {!currentEmployeeCanRemoveSelfSelectedShift && shiftActionChoice === 'remove' && (
