@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
-import { overrideMeetingAttendance, pardonMeetingAbsence } from '@/app/actions/attendance';
+import { markMeetingAbsent, overrideMeetingAttendance, pardonMeetingAbsence } from '@/app/actions/attendance';
 import { fetchMeetingAttendance } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
 
@@ -17,7 +17,7 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
   const [meetingActionDraft, setMeetingActionDraft] = useState<{
     sNumber: string;
     name: string;
-    mode: 'pardon' | 'present';
+    mode: 'pardon' | 'present' | 'absent';
     date: string;
     reason: string;
   } | null>(null);
@@ -58,6 +58,19 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
     },
     onError: (error) =>
       setStatus(error instanceof Error ? error.message : 'Unable to override meeting attendance.')
+  });
+
+  const markAbsentMutation = useMutation({
+    mutationFn: async (payload: { sNumber: string; date: string; reason: string }) => {
+      const result = await markMeetingAbsent(payload.sNumber, payload.date, payload.reason);
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
+    onSuccess: () => {
+      setStatus('Meeting marked absent (attendance row removed).');
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-attendance'] });
+    },
+    onError: (error) => setStatus(error instanceof Error ? error.message : 'Unable to mark meeting absent.')
   });
 
   if (!canView) {
@@ -147,6 +160,22 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
                           >
                             Mark Present
                           </button>
+                          <button
+                            className="min-h-[44px] border border-neutral-500 px-2 text-xs"
+                            onClick={() => {
+                              const date = meetingQuery.data?.dates[meetingQuery.data.dates.length - 1] ?? '';
+                              setMeetingActionDraft({
+                                sNumber: student.s_number,
+                                name: student.name,
+                                mode: 'absent',
+                                date,
+                                reason: ''
+                              });
+                            }}
+                            type="button"
+                          >
+                            Mark Absent
+                          </button>
                         </div>
                       )}
                     </td>
@@ -162,7 +191,11 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
           <div className="w-full max-w-lg border border-neutral-400 bg-white p-4">
             <h3 className="text-base font-semibold text-neutral-900">
-              {meetingActionDraft.mode === 'pardon' ? 'Pardon Meeting Absence' : 'Mark Meeting Present'}
+              {meetingActionDraft.mode === 'pardon'
+                ? 'Pardon Meeting Absence'
+                : meetingActionDraft.mode === 'present'
+                  ? 'Mark Meeting Present'
+                  : 'Mark Meeting Absent'}
             </h3>
             <p className="mt-1 text-sm text-neutral-700">{meetingActionDraft.name}</p>
             <label className="mt-3 block text-sm">
@@ -207,9 +240,11 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
                 className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                 disabled={
                   !meetingActionDraft.date ||
-                  !meetingActionDraft.reason.trim() ||
+                  ((meetingActionDraft.mode === 'pardon' || meetingActionDraft.mode === 'present') &&
+                    !meetingActionDraft.reason.trim()) ||
                   pardonMutation.isPending ||
-                  overrideMutation.isPending
+                  overrideMutation.isPending ||
+                  markAbsentMutation.isPending
                 }
                 onClick={() => {
                   const payload = {
@@ -219,8 +254,10 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
                   };
                   if (meetingActionDraft.mode === 'pardon') {
                     pardonMutation.mutate(payload);
-                  } else {
+                  } else if (meetingActionDraft.mode === 'present') {
                     overrideMutation.mutate(payload);
+                  } else {
+                    markAbsentMutation.mutate(payload);
                   }
                   setMeetingActionDraft(null);
                 }}

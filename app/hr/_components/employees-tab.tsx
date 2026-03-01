@@ -5,6 +5,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 
 import {
   clearMeetingOverride,
+  markMeetingAbsent,
   overrideMeetingAttendance,
   pardonMeetingAbsence
 } from '@/app/actions/attendance';
@@ -100,6 +101,40 @@ function shiftRowKey(row: GenericRow): string {
   return `${String(row.shift_date ?? '')}|${String(row.shift_period ?? '')}|${String(row.shift_slot_key ?? '')}`;
 }
 
+function getMeetingSessionVisual(status: 'present' | 'absent' | null, overrideType: string | null): {
+  label: string;
+  badgeClass: string;
+} {
+  if (overrideType === 'present_override') {
+    return {
+      label: 'Present (override)',
+      badgeClass: 'border-emerald-500 bg-emerald-100 text-emerald-800'
+    };
+  }
+  if (overrideType === 'excused') {
+    return {
+      label: 'Pardoned',
+      badgeClass: 'border-sky-500 bg-sky-100 text-sky-800'
+    };
+  }
+  if (status === 'present') {
+    return {
+      label: 'Present',
+      badgeClass: 'border-emerald-400 bg-emerald-50 text-emerald-700'
+    };
+  }
+  if (status === 'absent') {
+    return {
+      label: 'Absent',
+      badgeClass: 'border-red-400 bg-red-50 text-red-700'
+    };
+  }
+  return {
+    label: 'No check-in',
+    badgeClass: 'border-neutral-300 bg-neutral-100 text-neutral-700'
+  };
+}
+
 export function EmployeesTab(props: { dateRange: { from: string; to: string } }) {
   const canViewAttendance = usePermission('hr.attendance.view');
   const canOverrideAttendance = usePermission('hr.attendance.override');
@@ -127,6 +162,9 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
   const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
   const [showMoreByEmployeeId, setShowMoreByEmployeeId] = useState<Record<string, boolean>>({});
   const [strikeScopeByEmployeeId, setStrikeScopeByEmployeeId] = useState<Record<string, 'active' | 'all'>>({});
+  const [meetingDatePickerOpenByEmployeeId, setMeetingDatePickerOpenByEmployeeId] = useState<Record<string, boolean>>(
+    {}
+  );
   const [pointsDrafts, setPointsDrafts] = useState<Record<string, { points: string; type: string; note: string }>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -492,6 +530,22 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
     },
     onError: (error) => {
       setStatusMessage(error instanceof Error ? error.message : 'Unable to mark meeting present.');
+    }
+  });
+
+  const markMeetingAbsentMutation = useMutation({
+    mutationFn: async (payload: { sNumber: string; date: string; reason: string }) => {
+      const result = await markMeetingAbsent(payload.sNumber, payload.date, payload.reason);
+      if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-data-for-employees'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-meeting-overrides'] });
+      setStatusMessage('Meeting marked absent (attendance row removed).');
+    },
+    onError: (error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to mark meeting absent.');
     }
   });
 
@@ -973,26 +1027,64 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               <p className="text-xs text-neutral-600">
                                 {employee.meetingAttended}/{employee.meetingSessions} attended, {employee.meetingExcused} excused
                               </p>
-                              <label className="block text-sm">
-                                Session Date
-                                <select
-                                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                                  onChange={(event) =>
-                                    setMeetingDateDrafts((previous) => ({
-                                      ...previous,
-                                      [employee.id]: event.target.value
-                                    }))
-                                  }
-                                  value={meetingDate}
-                                >
-                                  {recentMeetingDates.length === 0 && <option value="">No recent sessions</option>}
-                                  {recentMeetingDates.map((date) => (
-                                    <option key={`${employee.id}-meeting-${date}`} value={date}>
-                                      {date}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
+                              <div className="space-y-1">
+                                <p className="text-sm">Session Date</p>
+                                <div className="relative">
+                                  <button
+                                    className="flex min-h-[40px] w-full items-center justify-between rounded-md border border-neutral-300 bg-white px-3 text-left text-sm hover:border-neutral-400"
+                                    onClick={() =>
+                                      setMeetingDatePickerOpenByEmployeeId((previous) => ({
+                                        ...previous,
+                                        [employee.id]: !previous[employee.id]
+                                      }))
+                                    }
+                                    type="button"
+                                  >
+                                    <span>{meetingDate || 'No session selected'}</span>
+                                    <span aria-hidden="true" className="text-xs text-neutral-500">
+                                      {meetingDatePickerOpenByEmployeeId[employee.id] ? '▴' : '▾'}
+                                    </span>
+                                  </button>
+                                  {meetingDatePickerOpenByEmployeeId[employee.id] && (
+                                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-neutral-300 bg-white shadow-lg">
+                                      {recentMeetingDates.length === 0 && (
+                                        <p className="p-2 text-xs text-neutral-600">No recent sessions</p>
+                                      )}
+                                      {recentMeetingDates.map((date) => {
+                                        const baseStatus =
+                                          derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
+                                        const overrideType =
+                                          derived.overrideTypeBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
+                                        const visual = getMeetingSessionVisual(baseStatus, overrideType);
+                                        return (
+                                          <button
+                                            className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-neutral-100 ${
+                                              date === meetingDate ? 'bg-neutral-100' : ''
+                                            }`}
+                                            key={`${employee.id}-meeting-option-${date}`}
+                                            onClick={() => {
+                                              setMeetingDateDrafts((previous) => ({
+                                                ...previous,
+                                                [employee.id]: date
+                                              }));
+                                              setMeetingDatePickerOpenByEmployeeId((previous) => ({
+                                                ...previous,
+                                                [employee.id]: false
+                                              }));
+                                            }}
+                                            type="button"
+                                          >
+                                            <span className="font-medium text-neutral-800">{date}</span>
+                                            <span className={`rounded border px-1 py-0.5 ${visual.badgeClass}`}>
+                                              {visual.label}
+                                            </span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
                               <p className="text-xs text-neutral-600">
                                 Current status:{' '}
                                 {selectedMeetingStatus ? selectedMeetingStatus : 'No record for selected session'}
@@ -1013,7 +1105,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   value={meetingReason}
                                 />
                               </label>
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="grid grid-cols-2 gap-2">
                                 <button
                                   className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                                   disabled={!canOverrideAttendance || !meetingDate || pardonMeetingMutation.isPending}
@@ -1051,6 +1143,22 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   type="button"
                                 >
                                   Mark Meeting Present
+                                </button>
+                                <button
+                                  className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={
+                                    !canOverrideAttendance || !meetingDate || markMeetingAbsentMutation.isPending
+                                  }
+                                  onClick={() => {
+                                    markMeetingAbsentMutation.mutate({
+                                      sNumber: employee.sNumber,
+                                      date: meetingDate,
+                                      reason: meetingReason.trim() || 'Marked absent from manager panel'
+                                    });
+                                  }}
+                                  type="button"
+                                >
+                                  Mark Meeting Absent
                                 </button>
                                 <button
                                   className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"

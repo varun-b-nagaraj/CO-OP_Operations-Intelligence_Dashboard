@@ -266,6 +266,107 @@ export async function overrideMeetingAttendance(
   );
 }
 
+export async function markMeetingAbsent(
+  sNumber: string,
+  date: string,
+  reason: string
+): Promise<Result<{ removed: number }>> {
+  const correlationId = generateCorrelationId();
+
+  try {
+    const allowed = await ensureServerPermission('hr.attendance.override');
+    if (!allowed) {
+      return errorResult(
+        correlationId,
+        'FORBIDDEN',
+        'You do not have permission to override attendance.'
+      );
+    }
+
+    const parsed = AttendanceOverrideSchema.safeParse({
+      s_number: sNumber,
+      checkin_date: date,
+      scope: 'meeting',
+      shift_period: null,
+      override_type: 'excused',
+      reason: reason.trim() || 'Marked absent from attendance table'
+    });
+    if (!parsed.success) {
+      return errorResult(
+        correlationId,
+        'VALIDATION_ERROR',
+        'Invalid meeting absent payload',
+        zodFieldErrors(parsed.error)
+      );
+    }
+
+    const supabase = createServerClient();
+    const student = await getStudentBySNumber(supabase, parsed.data.s_number);
+    if (!student) {
+      return errorResult(correlationId, 'VALIDATION_ERROR', 'Employee does not exist', {
+        s_number: 's_number was not found in students table'
+      });
+    }
+
+    const { data: existingAttendance, error: existingAttendanceError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('s_number', parsed.data.s_number)
+      .eq('checkin_date', parsed.data.checkin_date)
+      .maybeSingle();
+    if (existingAttendanceError) {
+      return errorResult(correlationId, 'DB_ERROR', existingAttendanceError.message);
+    }
+
+    const { error: deleteAttendanceError } = await supabase
+      .from('attendance')
+      .delete()
+      .eq('s_number', parsed.data.s_number)
+      .eq('checkin_date', parsed.data.checkin_date);
+    if (deleteAttendanceError) {
+      return errorResult(correlationId, 'DB_ERROR', deleteAttendanceError.message);
+    }
+
+    const { error: clearOverridesError } = await supabase
+      .from('attendance_overrides')
+      .delete()
+      .eq('s_number', parsed.data.s_number)
+      .eq('checkin_date', parsed.data.checkin_date)
+      .eq('scope', 'meeting');
+    if (clearOverridesError) {
+      return errorResult(correlationId, 'DB_ERROR', clearOverridesError.message);
+    }
+
+    await insertAuditEntry(
+      supabase,
+      {
+        action: 'meeting_marked_absent',
+        tableName: 'attendance',
+        recordId: `${parsed.data.s_number}:${parsed.data.checkin_date}`,
+        oldValue: existingAttendance ?? null,
+        newValue: { removed: existingAttendance ? 1 : 0, reason: parsed.data.reason },
+        userId: 'open_access'
+      },
+      correlationId
+    );
+
+    logInfo('meeting_marked_absent', {
+      correlationId,
+      sNumber: parsed.data.s_number,
+      checkinDate: parsed.data.checkin_date,
+      removed: existingAttendance ? 1 : 0
+    });
+
+    return successResult({ removed: existingAttendance ? 1 : 0 }, correlationId);
+  } catch (error) {
+    logError('mark_meeting_absent_failed', {
+      correlationId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return errorResult(correlationId, 'UNKNOWN_ERROR', 'Failed to mark meeting absent.');
+  }
+}
+
 export async function getAttendanceOverrides(
   sNumber: string,
   scope: 'meeting' | 'shift'

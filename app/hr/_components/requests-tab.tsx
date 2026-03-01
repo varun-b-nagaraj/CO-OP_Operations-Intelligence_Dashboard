@@ -154,12 +154,14 @@ export function RequestsTab(props: { dateRange: { from: string; to: string } }) 
   const requestsQuery = useQuery({
     queryKey: ['hr-shift-requests', statusFilter, page],
     queryFn: async () => {
+      const requestedFromTs = `${props.dateRange.from}T00:00:00.000Z`;
+      const requestedToTs = `${props.dateRange.to}T23:59:59.999Z`;
       let query = supabase
         .from('shift_change_requests')
         .select('*')
         .eq('request_source', 'employee_form')
-        .gte('shift_date', props.dateRange.from)
-        .lte('shift_date', props.dateRange.to)
+        .gte('requested_at', requestedFromTs)
+        .lte('requested_at', requestedToTs)
         .order('requested_at', { ascending: false })
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
 
