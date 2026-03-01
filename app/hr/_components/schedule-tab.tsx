@@ -2005,7 +2005,7 @@ export function ScheduleTab() {
 
                                   return (
                                     <div
-                                      className={`${isSwapModeEnabled && !isManualAssignment ? 'cursor-grab' : 'cursor-pointer'} border p-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
+                                      className={`${isSwapModeEnabled && !isManualAssignment ? 'cursor-grab' : 'cursor-pointer'} flex min-h-[52px] flex-col justify-center border px-1 py-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
                                         isDragTarget ? 'ring-2 ring-brand-maroon' : ''
                                       } ${dragSourceUid && !isValidDropTarget ? 'opacity-60' : ''}`}
                                       draggable={isSwapModeEnabled && !isManualAssignment}
@@ -2084,7 +2084,7 @@ export function ScheduleTab() {
                                       role="button"
                                       tabIndex={0}
                                     >
-                                      <div className="flex items-start gap-1">
+                                      <div className="flex items-center gap-1">
                                         {periodBand.periods.length > 1 && (
                                           <span className="shrink-0 text-[10px] text-neutral-500">P{assignment.period}</span>
                                         )}
