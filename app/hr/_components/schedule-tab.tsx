@@ -933,8 +933,10 @@ export function ScheduleTab() {
     selectedShiftActionAssignment && isManualShiftSlotKey(selectedShiftActionAssignment.shiftSlotKey)
   );
   const selectedActionDate = selectedShiftActionAssignment?.date ?? emptySlotTarget?.date ?? '';
+  const selectedActionIsWeekend = selectedActionDate ? isWeekendDateKey(selectedActionDate) : false;
   const selectedActionPeriod = selectedShiftActionAssignment?.period ?? emptySlotTarget?.period ?? null;
   const managerAssignableOptions = useMemo(() => {
+    if (selectedActionIsWeekend) return [];
     if (selectedShiftActionAssignment) {
       return actingEmployeeOptions.filter((option) =>
         canEmployeeTakeAssignment(option.value, selectedShiftActionAssignment)
@@ -949,6 +951,7 @@ export function ScheduleTab() {
     canEmployeeTakeAssignment,
     canEmployeeWorkPeriod,
     emptySlotTarget,
+    selectedActionIsWeekend,
     selectedShiftActionAssignment
   ]);
   const filteredManagerAssignableOptions = useMemo(() => {
@@ -1179,6 +1182,11 @@ export function ScheduleTab() {
       return;
     }
 
+    if (selectedActionIsWeekend) {
+      setMessage('Assignments are disabled on Saturdays and Sundays.');
+      return;
+    }
+
     if (selectedShiftActionAssignment) {
       if (selectedShiftActionAttendanceStatus !== 'expected') {
         setMessage('Only expected shifts can be reassigned.');
@@ -1394,6 +1402,7 @@ export function ScheduleTab() {
                       </th>
                       {activeWeek.map((day) => {
                         const dayType = schedule.calendar[day.dateKey];
+                        const isWeekend = isWeekendDateKey(day.dateKey);
                         const baseCellTone = !day.inCurrentMonth
                           ? 'bg-neutral-100'
                           : dayType === 'A'
@@ -1414,16 +1423,22 @@ export function ScheduleTab() {
                           <td className={`border-b border-neutral-300 p-2 align-top ${baseCellTone}`} key={`${day.dateKey}-${periodBand.id}`}>
                             {!day.inCurrentMonth && <span className="text-[11px] text-neutral-400">—</span>}
                             {day.inCurrentMonth && assignments.length === 0 && (
-                              <button
-                                className="min-h-[44px] w-full border border-dashed border-neutral-400 px-2 py-2 text-left text-[11px] text-neutral-600 hover:border-brand-maroon hover:text-brand-maroon"
-                                onClick={() => {
-                                  setEmptySlotTarget({ date: day.dateKey, period: targetPeriod });
-                                  setShiftActionModalUid(null);
-                                }}
-                                type="button"
-                              >
-                                No assignment
-                              </button>
+                              isWeekend ? (
+                                <p className="min-h-[44px] border border-dashed border-neutral-300 px-2 py-2 text-left text-[11px] text-neutral-500">
+                                  Weekend unavailable
+                                </p>
+                              ) : (
+                                <button
+                                  className="min-h-[44px] w-full border border-dashed border-neutral-400 px-2 py-2 text-left text-[11px] text-neutral-600 hover:border-brand-maroon hover:text-brand-maroon"
+                                  onClick={() => {
+                                    setEmptySlotTarget({ date: day.dateKey, period: targetPeriod });
+                                    setShiftActionModalUid(null);
+                                  }}
+                                  type="button"
+                                >
+                                  No assignment
+                                </button>
+                              )
                             )}
                             {day.inCurrentMonth && assignments.length > 0 && (
                               <div className="space-y-1">
@@ -1822,6 +1837,11 @@ export function ScheduleTab() {
                 Open slot: assign an employee directly for this date/period.
               </p>
             )}
+            {selectedActionIsWeekend && (
+              <p className="mt-2 text-xs text-neutral-600">
+                Assigning and volunteering are disabled on Saturdays and Sundays.
+              </p>
+            )}
 
             {isManagerMode ? (
               <div className="mt-3 space-y-3">
@@ -1839,6 +1859,7 @@ export function ScheduleTab() {
                   <select
                     className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
                     disabled={
+                      selectedActionIsWeekend ||
                       filteredManagerAssignableOptions.length === 0 ||
                       volunteerForShiftMutation.isPending ||
                       manualSlotMutation.isPending
@@ -1867,6 +1888,7 @@ export function ScheduleTab() {
                   <button
                     className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                     disabled={
+                      selectedActionIsWeekend ||
                       volunteerForShiftMutation.isPending ||
                       manualSlotMutation.isPending ||
                       (selectedShiftActionAssignment
