@@ -1,75 +1,80 @@
-requirements.md — Inventory Dashboard + Offline Multi-iPhone Inventory Check
+requirements.md — Inventory Dashboard (Web) + Offline Inventory Counting
 1. Goal
 
-Provide an Inventory Dashboard that supports collaborative inventory counting using iPhone-to-iPhone offline synchronization (no internet required during counting), while integrating with the public."Inventory" catalog table and enabling a single manager/host to upload finalized counts to Lightspeed once connectivity is available (e.g., stepping outside briefly).
+Provide a web-based Inventory Dashboard that enables collaborative inventory counting in low-connectivity environments. Multiple iPhones record scans offline and periodically sync wirelessly when near each other. A host finalizes the count and uploads results to Lightspeed once connectivity is available.
 
-The system must support barcode-driven identification (primarily UPC), catalog management, auditability, and offline-first reliability.
+The system must support barcode-driven identification, catalog management, auditability, and offline-first reliability.
 
 2. Key Constraints
+Offline Operation
 
-During counting: the system MUST function with no infrastructure Wi-Fi and no cellular data.
+Counting MUST function with no infrastructure Wi-Fi and no cellular data.
 
-Sync transport: MUST use iOS Multipeer Connectivity (Bluetooth + Apple peer-to-peer transport).
+Devices MUST be able to operate independently and store events locally.
 
-Connectivity moments: users MAY step outside briefly to:
+Sync Strategy
 
-improve peer connectivity for sync bursts
+Devices sync wirelessly via Bluetooth Low Energy (BLE).
 
-upload final results at session end
+Sync may occur in short bursts when users step near each other.
 
-Counting MUST NOT require sustained internet connectivity.
+Continuous connectivity is NOT required.
 
-System MUST tolerate intermittent peer connectivity (drops, re-joins) without losing or duplicating scan results.
+Upload Connectivity
+
+Final upload occurs only when the host has internet access.
+
+Upload may occur after stepping outside.
 
 3. Roles
 3.1 Host (Manager)
 
-Starts and ends inventory sessions.
+Creates and ends sessions.
 
-Advertises the session and accepts participants.
+Maintains authoritative state.
 
-Maintains authoritative session state.
+Reviews and locks results.
 
-Finalizes/locks results.
+Initiates Lightspeed upload.
 
-Initiates Lightspeed upload when connectivity becomes available.
-
-Controls zero-out behavior and final reconciliation.
+Confirms backend reconciliation behavior.
 
 3.2 Participant (Counter)
 
-Joins nearby sessions automatically (no login required in v1).
+Joins session.
 
-Scans items and submits count deltas.
+Scans items and submits count events.
 
-Sees real-time aggregated totals.
+Sees totals after sync.
 
-May leave and rejoin without data loss.
+Can disconnect/rejoin without data loss.
 
-4. Inventory Catalog Source (Database)
-4.1 Source of Truth Table
+4. Inventory Catalog Source
+4.1 Canonical Table
 
 The system MUST use:
 
 public."Inventory"
 
-as the canonical catalog table.
+as the catalog source of truth.
 
-The dashboard MUST read and display at minimum:
+4.2 Required Display Fields
 
-"Item" (name)
+Item (name)
 
-"System ID"
+System ID
 
-"UPC"
+UPC
 
-"EAN"
+EAN
 
-"Custom SKU"
+Custom SKU
 
-"Manufact. SKU"
+Manufacturer SKU
 
-Optional metadata for filtering:
+4.3 Optional Metadata
+
+Used for filtering & reporting:
 
 Vendor
 
@@ -77,58 +82,54 @@ Brand
 
 Department
 
-Category & Subcategories
+Category & subcategories
 
 Season
 
 MSRP
 
-Tax Class
-
-Default Cost
+Tax class
 
 5. Identifier Handling (Critical)
-5.1 Valid Identifiers
+5.1 Accepted Identifiers
 
-The system MUST treat the following as valid item identifiers:
+The system MUST support identification using:
 
-"UPC" (primary barcode in practice)
+UPC (primary)
 
-"EAN"
+EAN
 
-"System ID"
+System ID
 
-"Custom SKU"
+Custom SKU
 
-"Manufact. SKU"
+Manufacturer SKU
 
 5.2 String Handling Requirement
 
-Identifiers MUST be handled as strings in the application layer, even if stored as bigint in the database.
+Identifiers MUST be treated as strings.
 
 Reasons:
 
-UPC/System ID may contain:
+leading zeros must be preserved
 
-leading zeros
+identifiers may include non-numeric characters (e.g. 13+)
 
-non-numeric characters (13+)
+numeric casting may cause precision loss
 
-long numeric strings exceeding safe integer precision
+5.3 Lookup Order
 
-5.3 Lookup Matching Order
+Barcode resolution MUST attempt:
 
-When a barcode is scanned, lookup MUST attempt:
+UPC
 
-exact match "UPC"
+EAN
 
-exact match "EAN"
+System ID
 
-exact match "System ID"
+Custom SKU
 
-exact match "Custom SKU"
-
-exact match "Manufact. SKU"
+Manufacturer SKU
 
 Normalization rules:
 
@@ -136,46 +137,30 @@ trim whitespace
 
 preserve leading zeros
 
-DO NOT coerce to integer
+exact string match only
 
-exact string equality only
+no integer conversion
 
-6. Inventory Counts Ownership
+6. Inventory Count Ownership
 
-The "Qty." column MUST NOT be treated as a live updating count field.
+"Qty." MUST NOT be treated as a live count.
 
-Working counts MUST be derived ONLY from:
+Working counts MUST derive ONLY from:
 
-inventory check session events
+inventory session scan events
 
-manual edits in the dashboard followed by explicit upload
+manual edits followed by explicit upload
 
-No other process may modify counts.
+7. Catalog Import & Management
+7.1 CSV Drag-and-Drop Import
 
-7. Inventory Baseline Input
+CSV format matches Lightspeed export structure.
 
-Baseline inventory MUST be loadable via:
-
-database table (public."Inventory")
-
-spreadsheet upload (CSV)
-
-manual dashboard edits
-
-Baseline dataset MUST include identifiers that can map to Lightspeed upload format (system_id preferred).
-
-8. CSV Drag-and-Drop Import (Catalog Upsert Only)
-8.1 Supported Format
-
-CSV format MUST match the Lightspeed export shape.
-
-8.2 Import Behavior
-
-CSV import MUST be catalog-only:
+Import MUST be catalog-only.
 
 Allowed:
 
-add new items
+insert new items
 
 update metadata
 
@@ -183,23 +168,20 @@ NOT allowed:
 
 change counts (ignore "Qty.")
 
-8.3 Upsert Rules
+7.2 Upsert Behavior
 
 For each row:
 
-If identifier match exists →
-→ update metadata only
-
-If no match exists →
-→ insert new catalog item
+If identifier match exists → update metadata
+If no match → insert new item
 
 Counts remain unchanged.
 
-9. Manual Catalog Management
+8. Manual Catalog Management
 
-Dashboard MUST allow managers to:
+Managers MUST be able to:
 
-9.1 Add Items
+Add Items
 
 Required:
 
@@ -211,101 +193,100 @@ Recommended:
 
 UPC
 
+Optional:
+
 EAN / SKUs
 
-9.2 Edit Metadata
+Edit Metadata
 
-Managers can edit descriptive/catalog fields.
+Managers can edit descriptive fields.
 
-9.3 Remove Items
+Remove Items
 
 soft delete preferred
 
 hard delete optional
 
-9.4 Manual Count Edits
+Manual Count Edits
 
-Manual count adjustments are allowed in UI, but:
+Manual adjustments are allowed locally, but MUST NOT upload until explicitly confirmed.
 
-Counts MUST NOT be uploaded until user explicitly selects Upload to R-Series.
+9. Session Workflow
+9.1 Create Session
 
-10. Session Creation & Discovery
-10.1 Session Creation
-
-Host creates session with:
-
-session_id (UUID)
-
-session_name
-
-timestamp
-
-optional metadata
-
-10.2 Discovery
-
-Host advertises via Multipeer.
-
-Participants discover and join.
-
-Join Behavior (v1)
-
-join by default when selecting session
-
-host approval optional
-
-11. Offline Sync Architecture (Core)
-11.1 Real-Time Sync
-
-Participant scans MUST update:
-
-host authoritative totals
-
-all participant views
-
-11.2 Event-Based Counting Model (Required)
-
-Each event MUST include:
-
-event_type (SCAN, ADJUST, UNDO)
-
-event_id (deviceUUID:counter)
+Host creates session:
 
 session_id
 
-system_id
-
-delta_qty
-
-actor_id
+name
 
 timestamp
 
-Host Responsibilities
+9.2 Join Session
 
-deduplicate by event_id
+Participants join session and begin scanning.
 
-apply events deterministically
+9.3 Offline Counting
 
-broadcast updates
+Scans are stored locally immediately.
 
-Participant Responsibilities
+No connectivity required.
 
-queue unacknowledged events
+9.4 Burst Sync
 
-retry on reconnect
+When devices are near each other:
 
-accept host snapshot as truth
+devices exchange pending events
 
-12. Snapshot & Recovery
+reconcile with host state
 
-Host MUST periodically broadcast STATE_SNAPSHOT.
+update totals
 
-Participants MUST reconcile to snapshot.
+9.5 Disconnect & Rejoin
 
-Rejoining participants MUST receive latest snapshot automatically.
+Participants may leave and rejoin.
+Un-synced events MUST be preserved and synced later.
 
-13. Counting UX
+10. Event-Based Counting Model
+10.1 Event Structure
+{
+  "event_type": "SCAN",
+  "event_id": "deviceUUID:counter",
+  "session_id": "uuid",
+  "system_id": "string",
+  "delta_qty": 1,
+  "actor_id": "deviceUUID",
+  "timestamp": 1700000000
+}
+10.2 Event Requirements
+
+events must be uniquely identifiable
+
+host deduplicates events
+
+events applied deterministically
+
+host snapshot is authoritative
+
+11. Snapshot & Recovery
+
+Host periodically produces session snapshot.
+
+Clients reconcile with snapshot during sync.
+
+Rejoining devices receive latest snapshot.
+
+12. Attendance & Accountability
+
+System MUST record:
+
+participant roster
+
+join & leave times
+
+number of events submitted per participant
+
+13. Counting UX Requirements
 
 Participants MUST:
 
@@ -313,80 +294,54 @@ scan UPC quickly
 
 increment/decrement counts
 
-view personal contributions & totals
+view totals
 
 Host MUST:
 
-view total progress
-
-view per-user contributions
+monitor progress
 
 identify mismatches vs baseline
 
 identify uncounted items
 
-highlight large deltas
+highlight large discrepancies
 
-14. Attendance Tracking
+14. Finalization Workflow
+14.1 End Session
 
-Per session, system MUST record:
-
-participant roster
-
-join/leave timestamps
-
-event counts per participant
-
-15. Session Finalization
-
-Host may end session:
+Host ends session:
 
 stops new events
 
 freezes dataset
 
-Host MAY review/edit before lock.
+14.2 Review & Lock
 
-After lock:
+Host reviews discrepancies and locks session.
 
-results exportable
+14.3 Export
 
-ready for upload
-
-16. Export & Upload Workflow
-16.1 Export
-
-Host can export:
+Host may export:
 
 CSV
 
-JSON payload (upload-ready)
+JSON upload payload
 
-Fields:
+15. Lightspeed Upload Workflow
+15.1 Upload Timing
 
-system_id
+Upload occurs when host has connectivity.
 
-counted_qty
+15.2 Upload API Integration
 
-expected_qty
+System must support:
 
-delta_qty
-
-16.2 Upload Timing
-
-Counting MUST work offline.
-
-Upload occurs later when connectivity is available.
-
-16.3 Lightspeed Upload API Integration
-
-1️⃣ OAuth start
+OAuth Start
 GET /api/oauth/start
 
-2️⃣ Upload
+Upload
 POST /api
-
-Required payload:
+with:
 
 items[].system_id
 
@@ -404,105 +359,80 @@ reconcile
 
 rps
 
-16.4 Zero-Out Uncounted Items
+16. Backend Reconciliation & Auto Zero-Out
 
-System MUST support optional zeroing of uncounted items.
+The upload backend performs reconciliation.
 
-This MUST be:
+Items NOT included in upload are automatically set to quantity 0.
 
-host controlled
+The dashboard MUST NOT pre-zero items.
 
-accompanied by warning
+Host MUST confirm:
 
-16.4 Backend Reconciliation + Auto Zero-Out (Authoritative)
+Items omitted from upload will be set to zero.
 
-The system MUST treat inventory-upload.vercel.app as the authority for reconciliation behavior.
+17. Upload Result Handling
 
-On upload, the backend MUST zero out any items not included in the uploaded items[] list (i.e., items not counted are set to qty=0) as part of its reconciliation process.
+System MUST display and log:
 
-The dashboard MUST NOT attempt to pre-zero items locally; it only uploads the finalized counted set and relies on the backend to apply the zero-out rule.
+upload batch ID
 
-The dashboard MUST clearly warn the host that omitting an item from the upload implies it will be zeroed by the backend.
+summary results
 
-16.5 Upload Payload Implication
+reconcile status
 
-Upload payload MUST include only items that should retain non-zero QOH after reconciliation.
+per-item results
 
-The host MUST have an explicit confirmation step acknowledging:
+Audit log MUST include:
 
-“Items not present in this upload will be set to 0 by the backend.”
+session id
 
-16.6 Upload Result Handling (unchanged behavior, but log zero-out implication)
+upload timestamp
 
-Upload results MUST display/log:
+payload hash
 
-the backend reconcile status
+manager identity
 
-summary counts
+18. Offline Storage Requirements
 
-and a note that “zero-out is applied backend-side for omitted items.”
+Client MUST store offline data using:
 
-17. Upload Rules
+IndexedDB for event logs & session state
 
-Upload is host-only action.
+local caching for catalog subset
 
-Upload uses finalized counts only.
+No data loss permitted.
 
-Catalog changes are NOT uploaded.
-
-18. Data Type & Schema Safety
-
-Because "System ID" and "UPC" may contain non-numeric values:
-
-System SHOULD:
-
-migrate these columns to TEXT
-OR
-
-provide text-safe parallel storage
-
-CSV importer MUST:
-
-avoid integer casting failures
-
-reject invalid rows with clear error report if necessary
-
-19. Non-Functional Requirements
-Offline First
-
-No internet required during counting.
-
-No data loss under disconnects.
-
-Performance
+19. Performance Requirements
 
 scan feedback < 200ms
 
-sync latency target < 2 seconds
+sync reconciliation < 2 seconds typical
 
-Data Integrity
+event storage must scale to full inventory count sessions
 
-no duplicate counts
+20. Security & Integrity
 
-host snapshot canonical
+sync must prevent duplicate event application
 
-Security (v1)
+session data is local to participants
 
-encrypted Multipeer transport where possible
+upload actions restricted to host role
 
-upload restricted to host
+21. Assumptions
 
-20. Assumptions
+users operate iPhones
 
-all participants use iPhones
+users may step outside briefly for sync or upload
 
-users may briefly step outside to sync/upload
+UPC is primary identifier for most items
 
-21. Acceptance Criteria
+22. Acceptance Criteria
 
-✅ host starts session and participants join
-✅ scans update across devices offline
-✅ disconnect/rejoin maintains consistency
-✅ session finalizes and exports correctly
-✅ upload succeeds when connectivity available
-✅ audit logs stored
+✔ inventory can be counted fully offline
+✔ devices can sync events wirelessly in bursts
+✔ rejoining devices remain consistent
+✔ catalog import does not alter counts
+✔ host finalizes and uploads successfully
+✔ backend reconciliation zeroes omitted items
+✔ audit logs stored

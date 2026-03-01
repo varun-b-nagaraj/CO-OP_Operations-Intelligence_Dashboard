@@ -21,6 +21,12 @@ export default function HomePage() {
           >
             Open Chick-fil-A
           </Link>
+          <Link
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center border border-emerald-700 bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+            href="/inventory"
+          >
+            Open Inventory
+          </Link>
         </div>
       </div>
     </main>

@@ -2,7 +2,42 @@ Inventory Dashboard
 
 I worked with Akshainie on different Inventory operations I would need to include. Some basic features would include inventory count tracking, checking to see if inventory counts match previous volumes, automatic uploads to Lightspeed Backend, inventory check attendance, and others.
 
-Current inventory will be made available first through a database upload and then can be manually edited via the application or a new spreadsheet can also be uploaded.
+Current inventory will be made available first through a database upload and then can be manually edited via the application or a new spreadsheet can also be uploaded. I have attached database SQL below:
+
+
+
+create table public."Inventory" (
+  "System ID" bigint null,
+  "UPC" bigint null,
+  "EAN" text null,
+  "Custom SKU" text null,
+  "Manufact. SKU" text null,
+  "Item" text null,
+  "Vendor ID" text null,
+  "Qty." text null,
+  "Price" text null,
+  "Tax" text null,
+  "Brand" text null,
+  "Publish to eCom" text null,
+  "Season" text null,
+  "Department" text null,
+  "MSRP" text null,
+  "Tax Class" text null,
+  "Default Cost" double precision null,
+  "Vendor" text null,
+  "Category" text null,
+  "Subcategory 1" text null,
+  "Subcategory 2" text null,
+  "Subcategory 3" text null,
+  "Subcategory 4" text null,
+  "Subcategory 5" text null,
+  "Subcategory 6" text null,
+  "Subcategory 7" text null,
+  "Subcategory 8" text null,
+  "Subcategory 9" text null
+) TABLESPACE pg_default;
+
+
 
 Automatic Inventory Counter:
 After taking the information from the database to create an iOS-only offline inventory sync system using Multipeer Connectivity (Bluetooth + peer-to-peer Wi-Fi transport) where a privileged host advertises a session with a short join code, accepts authenticated peers, and maintains authoritative state while clients submit scan events (SKU/UPC deltas) that are deduplicated and broadcast for real-time consistency. When the session ends, peers disconnect and the host exports the finalized dataset (CSV/JSON) for upload.
