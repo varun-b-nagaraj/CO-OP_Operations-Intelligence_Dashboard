@@ -98,6 +98,7 @@ export function InventoryDashboard() {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isEndingSession, setIsEndingSession] = useState(false);
   const [oauthStatus, setOauthStatus] = useState('');
+  const [oauthAuthorizeUrl, setOauthAuthorizeUrl] = useState('');
 
   const [online, setOnline] = useState(true);
 
@@ -115,7 +116,7 @@ export function InventoryDashboard() {
     count_name: '',
     shop_id: '1',
     employee_id: '1',
-    reconcile: true,
+    reconcile: false,
     rps: '0.3'
   });
 
@@ -604,10 +605,13 @@ export function InventoryDashboard() {
         throw new Error('OAuth start response missing authorize_url');
       }
 
-      window.open(payload.authorize_url, '_blank', 'noopener,noreferrer');
+      setOauthAuthorizeUrl(payload.authorize_url);
+      const opened = window.open(payload.authorize_url, '_blank', 'noopener,noreferrer');
       setOauthStatus(
-        payload.instructions ??
-          'OAuth window opened. Complete Lightspeed login + 2FA, then return here to run upload.'
+        opened
+          ? payload.instructions ??
+            'OAuth window opened. Complete Lightspeed login + 2FA there, then return and run upload.'
+          : 'Popup blocked. Use the Open OAuth Link button below, then complete login + 2FA.'
       );
     } catch (error) {
       setOauthStatus(error instanceof Error ? error.message : 'Unable to start OAuth');
@@ -1099,6 +1103,20 @@ export function InventoryDashboard() {
                 >
                   Start OAuth (2FA)
                 </button>
+                {oauthAuthorizeUrl ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      className="border border-neutral-400 px-3 py-2 text-xs"
+                      onClick={() => window.open(oauthAuthorizeUrl, '_blank', 'noopener,noreferrer')}
+                      type="button"
+                    >
+                      Open OAuth Link
+                    </button>
+                    <span className="text-xs text-neutral-700">
+                      Use `authorize_url` only. Do not open `redirect_uri` directly.
+                    </span>
+                  </div>
+                ) : null}
                 {oauthStatus ? <p className="mt-2 text-xs text-neutral-700">{oauthStatus}</p> : null}
 
                 <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
