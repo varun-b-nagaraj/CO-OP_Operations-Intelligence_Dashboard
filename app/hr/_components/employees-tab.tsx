@@ -136,6 +136,71 @@ function getMeetingSessionVisual(status: 'present' | 'absent' | null, overrideTy
   };
 }
 
+type FancyOption = {
+  value: string;
+  label: string;
+  meta?: string;
+  metaClassName?: string;
+};
+
+function FancyDropdown(props: {
+  label?: string;
+  value: string;
+  options: FancyOption[];
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = props.options.find((option) => option.value === props.value) ?? null;
+
+  return (
+    <div className="space-y-1">
+      {props.label && <p className="text-sm text-neutral-800">{props.label}</p>}
+      <button
+        className="flex min-h-[40px] w-full items-center justify-between rounded-md border border-neutral-300 bg-white px-3 text-left text-sm transition-colors hover:border-neutral-500"
+        onClick={() => setOpen((previous) => !previous)}
+        type="button"
+      >
+        <span className="truncate">{selected?.label ?? props.placeholder ?? 'Select'}</span>
+        <span aria-hidden="true" className="text-xs text-neutral-500">
+          {open ? '▴' : '▾'}
+        </span>
+      </button>
+      <div className={`grid transition-all duration-200 ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+        <div className="overflow-hidden">
+          <div className="mt-1 max-h-56 overflow-y-auto rounded-md border border-neutral-300 bg-white shadow-md">
+            {props.options.length === 0 && <p className="px-3 py-2 text-xs text-neutral-600">No options</p>}
+            {props.options.map((option) => (
+              <button
+                className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-100 ${
+                  option.value === props.value ? 'bg-neutral-100' : ''
+                }`}
+                key={option.value}
+                onClick={() => {
+                  props.onChange(option.value);
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                <span className="font-medium text-neutral-800">{option.label}</span>
+                {option.meta && (
+                  <span
+                    className={`rounded border px-1 py-0.5 ${
+                      option.metaClassName ?? 'border-neutral-300 bg-neutral-100 text-neutral-700'
+                    }`}
+                  >
+                    {option.meta}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function EmployeesTab(props: { dateRange: { from: string; to: string } }) {
   const canViewAttendance = usePermission('hr.attendance.view');
   const canOverrideAttendance = usePermission('hr.attendance.override');
@@ -162,9 +227,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
   });
   const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
   const [strikeScopeByEmployeeId, setStrikeScopeByEmployeeId] = useState<Record<string, 'active' | 'all'>>({});
-  const [meetingDatePickerOpenByEmployeeId, setMeetingDatePickerOpenByEmployeeId] = useState<Record<string, boolean>>(
-    {}
-  );
   const [pointsDrafts, setPointsDrafts] = useState<Record<string, { points: string; type: string; note: string }>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -1018,64 +1080,27 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                 <p className="text-xs text-neutral-600">
                                   {employee.meetingAttended}/{employee.meetingSessions} attended, {employee.meetingExcused} excused
                                 </p>
-                                <div className="space-y-1">
-                                  <p className="text-sm">Session Date</p>
-                                  <div className="relative">
-                                    <button
-                                      className="flex min-h-[40px] w-full items-center justify-between rounded-md border border-neutral-300 bg-white px-3 text-left text-sm hover:border-neutral-400"
-                                      onClick={() =>
-                                        setMeetingDatePickerOpenByEmployeeId((previous) => ({
-                                          ...previous,
-                                          [employee.id]: !previous[employee.id]
-                                        }))
-                                      }
-                                      type="button"
-                                    >
-                                      <span>{meetingDate || 'No session selected'}</span>
-                                      <span aria-hidden="true" className="text-xs text-neutral-500">
-                                        {meetingDatePickerOpenByEmployeeId[employee.id] ? '▴' : '▾'}
-                                      </span>
-                                    </button>
-                                    {meetingDatePickerOpenByEmployeeId[employee.id] && (
-                                      <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-neutral-300 bg-white shadow-lg">
-                                        {recentMeetingDates.length === 0 && (
-                                          <p className="p-2 text-xs text-neutral-600">No recent sessions</p>
-                                        )}
-                                        {recentMeetingDates.map((date) => {
-                                          const baseStatus =
-                                            derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
-                                          const overrideType =
-                                            derived.overrideTypeBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
-                                          const visual = getMeetingSessionVisual(baseStatus, overrideType);
-                                          return (
-                                            <button
-                                              className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-neutral-100 ${
-                                                date === meetingDate ? 'bg-neutral-100' : ''
-                                              }`}
-                                              key={`${employee.id}-meeting-option-${date}`}
-                                              onClick={() => {
-                                                setMeetingDateDrafts((previous) => ({
-                                                  ...previous,
-                                                  [employee.id]: date
-                                                }));
-                                                setMeetingDatePickerOpenByEmployeeId((previous) => ({
-                                                  ...previous,
-                                                  [employee.id]: false
-                                                }));
-                                              }}
-                                              type="button"
-                                            >
-                                              <span className="font-medium text-neutral-800">{date}</span>
-                                              <span className={`rounded border px-1 py-0.5 ${visual.badgeClass}`}>
-                                                {visual.label}
-                                              </span>
-                                            </button>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
+                                <FancyDropdown
+                                  label="Session Date"
+                                  onChange={(value) =>
+                                    setMeetingDateDrafts((previous) => ({ ...previous, [employee.id]: value }))
+                                  }
+                                  options={recentMeetingDates.map((date) => {
+                                    const baseStatus =
+                                      derived.meetingStatusBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
+                                    const overrideType =
+                                      derived.overrideTypeBySNumberDate.get(employee.sNumber)?.get(date) ?? null;
+                                    const visual = getMeetingSessionVisual(baseStatus, overrideType);
+                                    return {
+                                      value: date,
+                                      label: date,
+                                      meta: visual.label,
+                                      metaClassName: visual.badgeClass
+                                    };
+                                  })}
+                                  placeholder="No session selected"
+                                  value={meetingDate}
+                                />
                                 <p className="text-xs text-neutral-600">
                                   Current status: {selectedMeetingStatus ? selectedMeetingStatus : 'No record for selected session'}
                                 </p>
@@ -1166,26 +1191,19 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                             <details className="border border-neutral-300 bg-white p-2">
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Shift Attendance</summary>
                               <div className="mt-2 space-y-2">
-                                <label className="block text-sm">
-                                  Recent Shift
-                                  <select
-                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                                    onChange={(event) =>
-                                      setSelectedShiftDrafts((previous) => ({
-                                        ...previous,
-                                        [employee.id]: event.target.value
-                                      }))
-                                    }
-                                    value={selectedShiftKey}
-                                  >
-                                    {recentShiftRows.length === 0 && <option value="">No recent shifts</option>}
-                                    {recentShiftRows.map((row) => (
-                                      <option key={`${employee.id}-${shiftRowKey(row)}`} value={shiftRowKey(row)}>
-                                        {String(row.shift_date)} P{String(row.shift_period)} ({String(row.shift_slot_key)}) — {String(row.status)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
+                                <FancyDropdown
+                                  label="Recent Shift"
+                                  onChange={(value) =>
+                                    setSelectedShiftDrafts((previous) => ({ ...previous, [employee.id]: value }))
+                                  }
+                                  options={recentShiftRows.map((row) => ({
+                                    value: shiftRowKey(row),
+                                    label: `${String(row.shift_date)} P${String(row.shift_period)}`,
+                                    meta: String(row.status ?? 'expected')
+                                  }))}
+                                  placeholder="No recent shifts"
+                                  value={selectedShiftKey}
+                                />
                                 <p className="text-xs text-neutral-600">
                                   Selected status: {selectedShift ? String(selectedShift.status) : 'N/A'}
                                 </p>
@@ -1435,22 +1453,20 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                             <details className="border border-neutral-300 bg-white p-2">
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Strike Management</summary>
                               <div className="mt-2 space-y-2">
-                                <label className="block text-sm">
-                                  Strike view
-                                  <select
-                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                                    onChange={(event) =>
-                                      setStrikeScopeByEmployeeId((previous) => ({
-                                        ...previous,
-                                        [employee.id]: event.target.value === 'all' ? 'all' : 'active'
-                                      }))
-                                    }
-                                    value={strikeScope}
-                                  >
-                                    <option value="active">Active strikes</option>
-                                    <option value="all">All-time strikes</option>
-                                  </select>
-                                </label>
+                                <FancyDropdown
+                                  label="Strike View"
+                                  onChange={(value) =>
+                                    setStrikeScopeByEmployeeId((previous) => ({
+                                      ...previous,
+                                      [employee.id]: value === 'all' ? 'all' : 'active'
+                                    }))
+                                  }
+                                  options={[
+                                    { value: 'active', label: 'Active strikes' },
+                                    { value: 'all', label: 'All-time strikes' }
+                                  ]}
+                                  value={strikeScope}
+                                />
                                 <label className="block text-sm">
                                   Reason
                                   <textarea
@@ -1513,25 +1529,23 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                             <details className="border border-neutral-300 bg-white p-2">
                               <summary className="cursor-pointer text-sm font-semibold text-neutral-900">Points Management</summary>
                               <div className="mt-2 space-y-2">
-                                <label className="block text-sm">
-                                  Type
-                                  <select
-                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                                    onChange={(event) =>
-                                      setPointsDrafts((previous) => ({
-                                        ...previous,
-                                        [employee.id]: { ...pointsDraft, type: event.target.value }
-                                      }))
-                                    }
-                                    value={pointsDraft.type}
-                                  >
-                                    <option value="manual">Manual</option>
-                                    <option value="meeting">Meeting</option>
-                                    <option value="morning_shift">Morning Shift</option>
-                                    <option value="off_period_shift">Off-Period Shift</option>
-                                    <option value="project">Project</option>
-                                  </select>
-                                </label>
+                                <FancyDropdown
+                                  label="Type"
+                                  onChange={(value) =>
+                                    setPointsDrafts((previous) => ({
+                                      ...previous,
+                                      [employee.id]: { ...pointsDraft, type: value }
+                                    }))
+                                  }
+                                  options={[
+                                    { value: 'manual', label: 'Manual' },
+                                    { value: 'meeting', label: 'Meeting' },
+                                    { value: 'morning_shift', label: 'Morning Shift' },
+                                    { value: 'off_period_shift', label: 'Off-Period Shift' },
+                                    { value: 'project', label: 'Project' }
+                                  ]}
+                                  value={pointsDraft.type}
+                                />
                                 <label className="block text-sm">
                                   Points
                                   <input
