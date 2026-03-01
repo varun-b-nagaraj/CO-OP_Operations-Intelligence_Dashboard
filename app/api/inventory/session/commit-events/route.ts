@@ -35,6 +35,19 @@ export async function POST(request: NextRequest) {
       .filter((event) => event.event_id && event.system_id && event.delta_qty !== 0);
 
     const supabase = createServerClient();
+    const { data: sessionRow, error: sessionError } = await supabase
+      .from('inventory_sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .maybeSingle();
+
+    if (sessionError || !sessionRow) {
+      return NextResponse.json({ ok: false, error: 'Session not found' }, { status: 404 });
+    }
+    if ((sessionRow as { status: string }).status !== 'active') {
+      return NextResponse.json({ ok: false, error: 'Session is not active. Rejoin a new session.' }, { status: 409 });
+    }
+
     const result = await commitEvents(supabase, {
       session_id: sessionId,
       actor_id: actorId,

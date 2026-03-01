@@ -597,14 +597,34 @@ export function InventoryDashboard() {
 
     setIsEndingSession(true);
     try {
-      await commitLocalEventsToServer();
+      const committed = await commitLocalEventsToServer();
       await fetchJson('/api/inventory/session/finalize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId, finalized_by: deviceId, lock: false })
       });
-      await loadSessionState(sessionId);
-      setUploadStatus('Session ended and committed to backend.');
+      setLastCommittedSessionId(sessionId);
+      setLastCommittedTotals(committed.totals);
+
+      await clearSessionLocalData(sessionId);
+
+      // Hard reset active counting context after ending session.
+      setSessionId('');
+      setSessionName('Inventory Session');
+      setActiveScannedCode('');
+      setActiveItem(null);
+      setPendingCount(0);
+      setPendingTotals([]);
+      setSnapshotTotals([]);
+      setServerTotals([]);
+      setFinalizedTotals([]);
+      setHostJoinQr('');
+      setScanJoinActive(false);
+      setScanJoinStatus('');
+      setSyncStatus('');
+      setSessionStatus('No active session.');
+      setFinalAction('none');
+      setUploadStatus('Session ended. All local counting state cleared. Committed payload is ready for upload.');
     } catch (error) {
       setUploadStatus(error instanceof Error ? error.message : 'Unable to end session');
     } finally {
@@ -688,7 +708,8 @@ export function InventoryDashboard() {
   };
 
   const uploadToLightspeed = async () => {
-    if (!sessionId) {
+    const targetSessionId = sessionId || lastCommittedSessionId;
+    if (!targetSessionId) {
       setUploadStatus('No session selected');
       return;
     }
@@ -713,7 +734,7 @@ export function InventoryDashboard() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            session_id: sessionId,
+            session_id: targetSessionId,
             triggered_by: deviceId,
             actor_role: role,
             reconcile: true,
@@ -1210,7 +1231,9 @@ export function InventoryDashboard() {
             <section className="space-y-3">
               <div className="border border-neutral-300 p-3">
                 <h3 className="text-sm font-semibold text-neutral-900">Session State</h3>
-                <p className="mt-1 text-xs text-neutral-700">End session to commit host copy, then finalize or lock.</p>
+                <p className="mt-1 text-xs text-neutral-700">
+                  End Session commits and immediately clears all active session state (ID, join QR, count view data) and kicks participants out.
+                </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white disabled:opacity-60"
@@ -1251,6 +1274,11 @@ export function InventoryDashboard() {
 
               <div className="border border-neutral-300 p-3">
                 <h3 className="text-sm font-semibold text-neutral-900">Upload Payload Preview</h3>
+                {lastCommittedSessionId && !sessionId ? (
+                  <p className="mt-1 text-xs text-neutral-700">
+                    Showing last committed session payload: <span className="font-medium">{lastCommittedSessionId}</span>
+                  </p>
+                ) : null}
                 <div className="mt-2 max-h-64 overflow-auto border border-neutral-200">
                   <table className="min-w-full text-left text-xs">
                     <thead className="bg-neutral-100">
