@@ -3,7 +3,7 @@
 import jsQR from 'jsqr';
 import Image from 'next/image';
 import QRCode from 'qrcode';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 import { BarcodeScanner } from '@/app/inventory/_components/barcode-scanner';
 import { resolveCatalogItemByCode } from '@/lib/inventory/identifiers';
@@ -118,6 +118,24 @@ export function InventoryDashboard() {
     custom_sku: '',
     manufact_sku: ''
   });
+  const [expandedCatalogRowId, setExpandedCatalogRowId] = useState<number | null>(null);
+  const [catalogRowDrafts, setCatalogRowDrafts] = useState<
+    Record<
+      number,
+      {
+        system_id: string;
+        item_name: string;
+        upc: string;
+        ean: string;
+        custom_sku: string;
+        manufact_sku: string;
+        brand: string;
+        vendor: string;
+        department: string;
+        category: string;
+      }
+    >
+  >({});
 
   useEffect(() => {
     setDeviceId(getOrCreateDeviceId());
@@ -176,6 +194,64 @@ export function InventoryDashboard() {
 
     setCatalog(filtered);
     setCatalogStatus(`Catalog cached locally (${allItems.length} total items).`);
+  };
+
+  const openCatalogRowEditor = (item: InventoryCatalogItem) => {
+    setExpandedCatalogRowId(item.row_id);
+    setCatalogRowDrafts((prev) => ({
+      ...prev,
+      [item.row_id]: {
+        system_id: item.system_id ?? '',
+        item_name: item.item_name ?? '',
+        upc: item.upc ?? '',
+        ean: item.ean ?? '',
+        custom_sku: item.custom_sku ?? '',
+        manufact_sku: item.manufact_sku ?? '',
+        brand: item.brand ?? '',
+        vendor: item.vendor ?? '',
+        department: item.department ?? '',
+        category: item.category ?? ''
+      }
+    }));
+  };
+
+  const saveCatalogRowEditor = async (rowId: number) => {
+    if (!online) {
+      setCatalogStatus('You must be online to save catalog edits.');
+      return;
+    }
+
+    const draft = catalogRowDrafts[rowId];
+    if (!draft) return;
+
+    try {
+      await fetchJson('/api/inventory/catalog/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upsert',
+          item: {
+            row_id: rowId,
+            system_id: draft.system_id,
+            item_name: draft.item_name,
+            upc: draft.upc,
+            ean: draft.ean,
+            custom_sku: draft.custom_sku,
+            manufact_sku: draft.manufact_sku,
+            brand: draft.brand,
+            vendor: draft.vendor,
+            department: draft.department,
+            category: draft.category
+          }
+        })
+      });
+
+      setCatalogStatus(`Saved edits for row ${rowId}.`);
+      setExpandedCatalogRowId(null);
+      await loadCatalog();
+    } catch (error) {
+      setCatalogStatus(error instanceof Error ? error.message : 'Catalog row save failed.');
+    }
   };
 
   const loadSessionState = async (sid: string) => {
@@ -939,6 +1015,197 @@ export function InventoryDashboard() {
               </div>
 
               <p className="text-xs text-neutral-700">{catalogStatus}</p>
+
+              <div className="border border-neutral-300 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-neutral-900">All Cached Items</h3>
+                  <span className="text-xs text-neutral-600">
+                    {catalog.length} rows {online ? '(editable online)' : '(view-only offline)'}
+                  </span>
+                </div>
+
+                <div className="mt-2 max-h-[28rem] overflow-auto border border-neutral-200">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="bg-neutral-100">
+                      <tr>
+                        <th className="border-b border-neutral-300 px-2 py-1">Item</th>
+                        <th className="border-b border-neutral-300 px-2 py-1">System ID</th>
+                        <th className="border-b border-neutral-300 px-2 py-1">UPC</th>
+                        <th className="border-b border-neutral-300 px-2 py-1">EAN</th>
+                        <th className="border-b border-neutral-300 px-2 py-1">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {catalog.map((item) => {
+                        const draft = catalogRowDrafts[item.row_id];
+                        const expanded = expandedCatalogRowId === item.row_id;
+                        return (
+                          <Fragment key={item.row_id}>
+                            <tr>
+                              <td className="border-b border-neutral-200 px-2 py-1">{item.item_name}</td>
+                              <td className="border-b border-neutral-200 px-2 py-1">{item.system_id}</td>
+                              <td className="border-b border-neutral-200 px-2 py-1">{item.upc}</td>
+                              <td className="border-b border-neutral-200 px-2 py-1">{item.ean}</td>
+                              <td className="border-b border-neutral-200 px-2 py-1">
+                                <button
+                                  className="border border-neutral-400 px-2 py-1"
+                                  onClick={() => {
+                                    if (expanded) {
+                                      setExpandedCatalogRowId(null);
+                                    } else {
+                                      openCatalogRowEditor(item);
+                                    }
+                                  }}
+                                  type="button"
+                                >
+                                  {expanded ? 'Hide' : 'Edit'}
+                                </button>
+                              </td>
+                            </tr>
+                            {expanded && draft ? (
+                              <tr>
+                                <td className="border-b border-neutral-200 px-2 py-2" colSpan={5}>
+                                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, item_name: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="Item"
+                                      value={draft.item_name}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, system_id: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="System ID"
+                                      value={draft.system_id}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, upc: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="UPC"
+                                      value={draft.upc}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, ean: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="EAN"
+                                      value={draft.ean}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, custom_sku: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="Custom SKU"
+                                      value={draft.custom_sku}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, manufact_sku: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="Manufact. SKU"
+                                      value={draft.manufact_sku}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, brand: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="Brand"
+                                      value={draft.brand}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, vendor: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="Vendor"
+                                      value={draft.vendor}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, department: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="Department"
+                                      value={draft.department}
+                                    />
+                                    <input
+                                      className="border border-neutral-300 px-2 py-1"
+                                      onChange={(event) =>
+                                        setCatalogRowDrafts((prev) => ({
+                                          ...prev,
+                                          [item.row_id]: { ...draft, category: event.target.value }
+                                        }))
+                                      }
+                                      placeholder="Category"
+                                      value={draft.category}
+                                    />
+                                  </div>
+                                  <div className="mt-2 flex gap-2">
+                                    <button
+                                      className="border border-brand-maroon bg-brand-maroon px-3 py-1 text-white disabled:opacity-60"
+                                      disabled={!online}
+                                      onClick={() => {
+                                        void saveCatalogRowEditor(item.row_id);
+                                      }}
+                                      type="button"
+                                    >
+                                      Save Row
+                                    </button>
+                                    <button
+                                      className="border border-neutral-400 px-3 py-1"
+                                      onClick={() => setExpandedCatalogRowId(null)}
+                                      type="button"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : null}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </section>
           ) : null}
 
