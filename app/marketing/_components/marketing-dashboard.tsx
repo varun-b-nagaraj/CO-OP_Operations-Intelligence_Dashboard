@@ -19,6 +19,7 @@ import { createBrowserClient } from '@/lib/supabase';
 
 type DashboardTab = 'calendar' | 'events' | 'contacts' | 'reports';
 type CalendarView = 'month' | 'list';
+type HistoryLookback = '3m' | '6m' | '12m' | '24m' | 'all';
 
 type EventDraft = MarketingEventRow;
 
@@ -50,6 +51,14 @@ const METHODS: Array<{ value: CoordinationMethod; label: string }> = [
   { value: 'in_person', label: 'In-person' },
   { value: 'text', label: 'Text' },
   { value: 'other', label: 'Other' }
+];
+
+const LOOKBACK_OPTIONS: Array<{ value: HistoryLookback; label: string }> = [
+  { value: '3m', label: 'Last 3 months' },
+  { value: '6m', label: 'Last 6 months' },
+  { value: '12m', label: 'Last 12 months' },
+  { value: '24m', label: 'Last 24 months' },
+  { value: 'all', label: 'All time' }
 ];
 
 const STATUS_CLASSES: Record<MarketingEventStatus, string> = {
@@ -154,6 +163,29 @@ function isSameMonth(date: Date, monthAnchor: Date) {
   return date.getMonth() === monthAnchor.getMonth() && date.getFullYear() === monthAnchor.getFullYear();
 }
 
+function toDateFromKey(key: string) {
+  return new Date(`${key}T00:00:00`);
+}
+
+function normalizeRange(startKey: string, endKey: string) {
+  return startKey <= endKey ? { startKey, endKey } : { startKey: endKey, endKey: startKey };
+}
+
+function monthDiff(start: Date, end: Date) {
+  return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+}
+
+function buildMonthAnchorsInRange(startKey: string, endKey: string): Date[] {
+  const start = toDateFromKey(startKey);
+  const end = toDateFromKey(endKey);
+  const totalMonths = Math.max(0, monthDiff(start, end));
+  const anchors: Date[] = [];
+  for (let index = 0; index <= totalMonths; index += 1) {
+    anchors.push(new Date(start.getFullYear(), start.getMonth() + index, 1));
+  }
+  return anchors;
+}
+
 function toEventSavePayload(draft: EventDraft) {
   return {
     id: draft.id,
@@ -196,7 +228,6 @@ export function MarketingDashboard() {
   );
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('calendar');
-  const [recentOnly, setRecentOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [calendarView, setCalendarView] = useState<CalendarView>('month');
@@ -273,6 +304,11 @@ export function MarketingDashboard() {
   const [assetDraftType, setAssetDraftType] = useState<AssetType>('photo');
   const [assetDraftCaption, setAssetDraftCaption] = useState('');
   const [previewAsset, setPreviewAsset] = useState<EventAssetRow | null>(null);
+  const [dragAnchorDate, setDragAnchorDate] = useState<string | null>(null);
+  const [dragPreviewDate, setDragPreviewDate] = useState<string | null>(null);
+  const [historyRange, setHistoryRange] = useState<{ startKey: string; endKey: string } | null>(null);
+  const [historyLookback, setHistoryLookback] = useState<HistoryLookback>('12m');
+  const suppressDayClickRef = useRef(false);
 
   const categoryOptions = useMemo(() => {
     const values = new Set<string>();
@@ -301,7 +337,6 @@ export function MarketingDashboard() {
     try {
       const [eventRows, contactRows, reportRows] = await Promise.all([
         repository.listEvents({
-          recentOnly,
           query: '',
           status: statusFilter,
           category: categoryFilter
@@ -336,7 +371,7 @@ export function MarketingDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [repository, recentOnly, statusFilter, categoryFilter, contactSearch, reportSearch, selectedContactId]);
+  }, [repository, statusFilter, categoryFilter, contactSearch, reportSearch, selectedContactId]);
 
   useEffect(() => {
     void loadDashboard();
@@ -828,6 +863,71 @@ export function MarketingDashboard() {
     return byDay;
   }, [visibleEventRows]);
 
+  const activeRange = useMemo(() => {
+    if (dragAnchorDate && dragPreviewDate) {
+      return normalizeRange(dragAnchorDate, dragPreviewDate);
+    }
+    return historyRange;
+  }, [dragAnchorDate, dragPreviewDate, historyRange]);
+
+  const lookbackStartKey = useMemo(() => {
+    if (historyLookback === 'all') return null;
+    const now = new Date();
+    const months = Number.parseInt(historyLookback.replace('m', ''), 10);
+    if (!Number.isFinite(months)) return null;
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    start.setMonth(start.getMonth() - (months - 1));
+    return dateKey(start);
+  }, [historyLookback]);
+
+  const historyEventsByDay = useMemo(() => {
+    const byDay = new Map<string, MarketingEventRow[]>();
+    if (!historyRange) return byDay;
+
+    const effectiveStart = lookbackStartKey && historyRange.startKey < lookbackStartKey ? lookbackStartKey : historyRange.startKey;
+    if (effectiveStart > historyRange.endKey) return byDay;
+
+    events.forEach((event) => {
+      const key = dateKey(event.starts_at);
+      if (key < effectiveStart || key > historyRange.endKey) return;
+      const bucket = byDay.get(key) ?? [];
+      bucket.push(event);
+      byDay.set(key, bucket);
+    });
+
+    return byDay;
+  }, [events, historyRange, lookbackStartKey]);
+
+  const historyResultCount = useMemo(() => {
+    let total = 0;
+    historyEventsByDay.forEach((rows) => {
+      total += rows.length;
+    });
+    return total;
+  }, [historyEventsByDay]);
+
+  const historyCalendarAnchors = useMemo(() => {
+    if (!historyRange) return [];
+    const effectiveStart = lookbackStartKey && historyRange.startKey < lookbackStartKey ? lookbackStartKey : historyRange.startKey;
+    if (effectiveStart > historyRange.endKey) return [];
+    return buildMonthAnchorsInRange(effectiveStart, historyRange.endKey);
+  }, [historyRange, lookbackStartKey]);
+
+  useEffect(() => {
+    const onMouseUp = () => {
+      if (!dragAnchorDate) return;
+      if (dragPreviewDate) {
+        const next = normalizeRange(dragAnchorDate, dragPreviewDate);
+        setHistoryRange(next);
+      }
+      setDragAnchorDate(null);
+      setDragPreviewDate(null);
+    };
+
+    window.addEventListener('mouseup', onMouseUp);
+    return () => window.removeEventListener('mouseup', onMouseUp);
+  }, [dragAnchorDate, dragPreviewDate]);
+
   if (loading) {
     return (
       <main className="min-h-screen w-full">
@@ -870,23 +970,6 @@ export function MarketingDashboard() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex border border-neutral-300 bg-white text-sm">
-                <button
-                  className={`min-h-[38px] px-3 ${!recentOnly ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
-                  onClick={() => setRecentOnly(false)}
-                  type="button"
-                >
-                  All Events
-                </button>
-                <button
-                  className={`min-h-[38px] border-l border-neutral-300 px-3 ${recentOnly ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-700'}`}
-                  onClick={() => setRecentOnly(true)}
-                  type="button"
-                >
-                  Recent Events
-                </button>
-              </div>
-
               <input
                 className="min-h-[38px] w-[240px] border border-neutral-300 bg-white px-3 text-sm"
                 onChange={(event) => setSearchQuery(event.target.value)}
@@ -975,13 +1058,49 @@ export function MarketingDashboard() {
                 </div>
               </div>
 
+              <div className="space-y-2 border border-neutral-300 bg-white p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">History Search</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
+                      onChange={(event) => setHistoryLookback(event.target.value as HistoryLookback)}
+                      value={historyLookback}
+                    >
+                      {LOOKBACK_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
+                      onClick={() => {
+                        setHistoryRange(null);
+                        setDragAnchorDate(null);
+                        setDragPreviewDate(null);
+                      }}
+                      type="button"
+                    >
+                      Clear Range
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-neutral-600">
+                  Drag across calendar days to select a timeframe. Click a day to create a new event.
+                </p>
+                <p className="text-xs text-neutral-700">
+                  Selected:{' '}
+                  {historyRange
+                    ? `${toDateFromKey(historyRange.startKey).toLocaleDateString()} - ${toDateFromKey(historyRange.endKey).toLocaleDateString()}`
+                    : 'No range selected'}
+                  {historyRange ? ` • ${historyResultCount} event(s) in results` : ''}
+                </p>
+              </div>
+
               {events.length === 0 ? (
                 <div className="border border-dashed border-neutral-300 bg-neutral-50 p-6 text-center">
-                  <p className="text-sm text-neutral-700">
-                    {recentOnly
-                      ? 'No events in the recent window (last 30 days and next 30 days). Switch to All Events or create a new event.'
-                      : 'No events yet. Create your first event.'}
-                  </p>
+                  <p className="text-sm text-neutral-700">No events yet. Create your first event.</p>
                   <button
                     className="mt-3 min-h-[38px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white"
                     onClick={() => {
@@ -1006,11 +1125,41 @@ export function MarketingDashboard() {
                     const key = dateKey(day);
                     const dayEvents = filteredEventsByDay.get(key) ?? [];
                     const inCurrentMonth = isSameMonth(day, monthAnchor);
+                    const inSelectedRange =
+                      activeRange !== null && key >= activeRange.startKey && key <= activeRange.endKey;
                     return (
                       <div
                         key={key}
-                        className={`min-h-[124px] cursor-pointer border-r border-b border-neutral-300 p-2 last:border-r-0 ${inCurrentMonth ? 'bg-white' : 'bg-neutral-50'}`}
+                        className={`min-h-[124px] cursor-pointer border-r border-b border-neutral-300 p-2 last:border-r-0 ${
+                          inSelectedRange ? 'bg-amber-50' : inCurrentMonth ? 'bg-white' : 'bg-neutral-50'
+                        }`}
+                        onMouseDown={(mouseEvent) => {
+                          if (mouseEvent.button !== 0) return;
+                          suppressDayClickRef.current = false;
+                          setDragAnchorDate(key);
+                          setDragPreviewDate(key);
+                        }}
+                        onMouseEnter={() => {
+                          if (!dragAnchorDate) return;
+                          setDragPreviewDate(key);
+                          if (key !== dragAnchorDate) {
+                            suppressDayClickRef.current = true;
+                          }
+                        }}
+                        onMouseUp={() => {
+                          if (!dragAnchorDate) return;
+                          if (key !== dragAnchorDate) {
+                            suppressDayClickRef.current = true;
+                          }
+                          setHistoryRange(normalizeRange(dragAnchorDate, key));
+                          setDragAnchorDate(null);
+                          setDragPreviewDate(null);
+                        }}
                         onClick={() => {
+                          if (suppressDayClickRef.current) {
+                            suppressDayClickRef.current = false;
+                            return;
+                          }
                           void createEvent(day);
                         }}
                         onKeyDown={(event) => {
@@ -1024,6 +1173,9 @@ export function MarketingDashboard() {
                       >
                         <button
                           className="mb-2 text-left text-xs font-medium text-neutral-700 underline-offset-2 hover:underline"
+                          onMouseDown={(mouseEvent) => {
+                            mouseEvent.stopPropagation();
+                          }}
                           onClick={(clickEvent) => {
                             clickEvent.stopPropagation();
                             void createEvent(day);
@@ -1041,6 +1193,9 @@ export function MarketingDashboard() {
                               <button
                                 key={dayEvent.id}
                                 className="w-full border border-neutral-200 bg-neutral-50 px-2 py-1 text-left text-[11px]"
+                                onMouseDown={(mouseEvent) => {
+                                  mouseEvent.stopPropagation();
+                                }}
                                 onClick={(clickEvent) => {
                                   clickEvent.stopPropagation();
                                   void loadEventBundle(dayEvent.id);
@@ -1110,6 +1265,71 @@ export function MarketingDashboard() {
                   </table>
                 </div>
               )}
+
+              {historyRange ? (
+                <section className="space-y-3 border border-neutral-300 bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">History Results Calendar</h3>
+                    <p className="text-xs text-neutral-600">
+                      {toDateFromKey(historyRange.startKey).toLocaleDateString()} -{' '}
+                      {toDateFromKey(historyRange.endKey).toLocaleDateString()}
+                    </p>
+                  </div>
+
+                  {historyCalendarAnchors.length === 0 ? (
+                    <p className="text-sm text-neutral-600">No events found in that date range for the selected lookback window.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {historyCalendarAnchors.map((anchor) => {
+                        const monthGrid = buildMonthGrid(anchor);
+                        return (
+                          <div key={`${anchor.getFullYear()}-${anchor.getMonth()}`} className="border border-neutral-300">
+                            <div className="border-b border-neutral-300 bg-neutral-50 px-3 py-2 text-sm font-medium">
+                              {anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                            </div>
+                            <div className="grid grid-cols-7 bg-white">
+                              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((name) => (
+                                <div key={name} className="border-b border-r border-neutral-300 bg-neutral-50 px-2 py-2 text-[11px] font-medium text-neutral-600 last:border-r-0">
+                                  {name}
+                                </div>
+                              ))}
+                              {monthGrid.map((day) => {
+                                const key = dateKey(day);
+                                const inMonth = isSameMonth(day, anchor);
+                                const rows = historyEventsByDay.get(key) ?? [];
+                                return (
+                                  <div
+                                    key={key}
+                                    className={`min-h-[96px] border-r border-b border-neutral-300 p-2 last:border-r-0 ${
+                                      inMonth ? 'bg-white' : 'bg-neutral-50'
+                                    }`}
+                                  >
+                                    <p className="text-xs font-medium text-neutral-700">{day.getDate()}</p>
+                                    <div className="mt-1 space-y-1">
+                                      {rows.slice(0, 3).map((event) => (
+                                        <button
+                                          key={event.id}
+                                          className="w-full truncate border border-neutral-200 bg-neutral-50 px-1.5 py-1 text-left text-[11px] hover:bg-neutral-100"
+                                          onClick={() => {
+                                            void loadEventBundle(event.id);
+                                          }}
+                                          type="button"
+                                        >
+                                          {event.title}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              ) : null}
             </section>
           )}
 

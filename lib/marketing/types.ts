@@ -98,7 +98,6 @@ export interface MarketingEventBundle {
 }
 
 export interface MarketingEventFilters {
-  recentOnly: boolean;
   query: string;
   status: 'all' | MarketingEventStatus;
   category: string | 'all';

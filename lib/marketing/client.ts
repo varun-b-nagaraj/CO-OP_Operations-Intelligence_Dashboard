@@ -14,18 +14,6 @@ import type {
   MarketingEventStatus
 } from '@/lib/marketing/types';
 
-function startOfDay(date: Date) {
-  const copy = new Date(date);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-function endOfDay(date: Date) {
-  const copy = new Date(date);
-  copy.setHours(23, 59, 59, 999);
-  return copy;
-}
-
 function asNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -211,13 +199,6 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
 
       if (filters.category !== 'all') {
         query = query.eq('category', filters.category);
-      }
-
-      if (filters.recentOnly) {
-        const now = new Date();
-        const from = startOfDay(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)).toISOString();
-        const to = endOfDay(new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)).toISOString();
-        query = query.gte('starts_at', from).lte('starts_at', to);
       }
 
       if (filters.query.trim()) {
