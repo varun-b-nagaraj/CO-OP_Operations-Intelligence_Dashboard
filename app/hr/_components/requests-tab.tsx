@@ -29,6 +29,12 @@ type ShiftAttendanceSlotRow = {
   employee_s_number: string | null;
   shift_slot_key: string | null;
 };
+type ApprovedShiftRequestRow = {
+  shift_slot_key: string | null;
+  from_employee_s_number: string | null;
+  to_employee_s_number: string | null;
+  requested_at: string | null;
+};
 type EmployeeSettingsRow = {
   employee_s_number: string | null;
   off_periods: number[] | null;
@@ -165,6 +171,22 @@ export function RequestsTab() {
     }
   });
 
+  const approvedRequestsForSelectionQuery = useQuery({
+    queryKey: ['hr-requests-approved-chain', selectedShiftDate, selectedShiftPeriod],
+    enabled: Boolean(selectedShiftDate) && Number.isInteger(selectedShiftPeriod),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('shift_change_requests')
+        .select('shift_slot_key, from_employee_s_number, to_employee_s_number, requested_at')
+        .eq('status', 'approved')
+        .eq('shift_date', selectedShiftDate)
+        .eq('shift_period', selectedShiftPeriod)
+        .order('requested_at', { ascending: true });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as ApprovedShiftRequestRow[];
+    }
+  });
+
   const studentNameBySNumber = useMemo(() => {
     const map = new Map<string, string>();
     for (const student of studentsQuery.data ?? []) {
@@ -229,22 +251,51 @@ export function RequestsTab() {
     [attendanceSlotsQuery.data]
   );
 
-  const currentWorkers = useMemo(() => {
-    if (attendanceRows.length > 0) {
-      const workers = new Set<string>();
-      for (const row of attendanceRows) {
-        if (!row.employee_s_number) continue;
-        workers.add(row.employee_s_number);
+  const expectedWorkerBySlotKey = useMemo(() => {
+    const map = new Map<string, string>();
+
+    // Base expected worker is from the generated schedule for this date/period.
+    for (const row of scheduleAssignmentsForSelection) {
+      if (!row.shiftSlotKey || !row.studentSNumber) continue;
+      if (!map.has(row.shiftSlotKey)) {
+        map.set(row.shiftSlotKey, row.studentSNumber);
       }
-      return Array.from(workers);
     }
 
+    // Fallback for manual/open slots not present in generated schedule.
+    for (const row of attendanceRows) {
+      if (!row.shift_slot_key || !row.employee_s_number) continue;
+      if (!map.has(row.shift_slot_key)) {
+        map.set(row.shift_slot_key, row.employee_s_number);
+      }
+    }
+
+    // Apply approved swaps in chronological order to get current expected worker.
+    for (const row of approvedRequestsForSelectionQuery.data ?? []) {
+      const slotKey = row.shift_slot_key ?? '';
+      const fromSNumber = row.from_employee_s_number ?? '';
+      const toSNumber = row.to_employee_s_number ?? '';
+      if (!slotKey || !fromSNumber || !toSNumber) continue;
+      const currentWorker = map.get(slotKey);
+      if (!currentWorker) {
+        map.set(slotKey, toSNumber);
+        continue;
+      }
+      if (currentWorker === fromSNumber) {
+        map.set(slotKey, toSNumber);
+      }
+    }
+
+    return map;
+  }, [approvedRequestsForSelectionQuery.data, attendanceRows, scheduleAssignmentsForSelection]);
+
+  const currentWorkers = useMemo(() => {
     const workers = new Set<string>();
-    for (const row of scheduleAssignmentsForSelection) {
-      workers.add(row.studentSNumber);
+    for (const worker of expectedWorkerBySlotKey.values()) {
+      workers.add(worker);
     }
     return Array.from(workers);
-  }, [attendanceRows, scheduleAssignmentsForSelection]);
+  }, [expectedWorkerBySlotKey]);
 
   const fromOptions = useMemo(() => {
     const options = currentWorkers.map((sNumber) => ({
@@ -334,17 +385,22 @@ export function RequestsTab() {
 
   const resolvedShiftSlotKey = useMemo(() => {
     if (!selectedFromSNumber) return null;
+    const candidateSlots = [...expectedWorkerBySlotKey.entries()]
+      .filter(([, workerSNumber]) => workerSNumber === selectedFromSNumber)
+      .map(([slotKey]) => slotKey);
+    if (candidateSlots.length === 0) return null;
+    if (candidateSlots.length === 1) return candidateSlots[0];
 
-    const fromAttendance = attendanceRows.find(
-      (row) => row.employee_s_number === selectedFromSNumber && row.shift_slot_key
+    const slotFromAttendance = attendanceRows.find(
+      (row) =>
+        row.employee_s_number === selectedFromSNumber &&
+        Boolean(row.shift_slot_key) &&
+        candidateSlots.includes(row.shift_slot_key as string)
     );
-    if (fromAttendance?.shift_slot_key) return fromAttendance.shift_slot_key;
+    if (slotFromAttendance?.shift_slot_key) return slotFromAttendance.shift_slot_key;
 
-    const fromSchedule = scheduleAssignmentsForSelection.find(
-      (row) => row.studentSNumber === selectedFromSNumber
-    );
-    return fromSchedule?.shiftSlotKey ?? null;
-  }, [attendanceRows, scheduleAssignmentsForSelection, selectedFromSNumber]);
+    return candidateSlots[0];
+  }, [attendanceRows, expectedWorkerBySlotKey, selectedFromSNumber]);
 
   const submitMutation = useMutation({
     mutationFn: async (input: { values: ShiftRequestFormValues; shiftSlotKey: string }) => {
