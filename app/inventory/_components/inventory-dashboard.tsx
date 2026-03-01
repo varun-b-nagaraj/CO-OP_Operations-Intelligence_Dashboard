@@ -569,6 +569,16 @@ export function InventoryDashboard() {
     if (!confirmed) return;
 
     try {
+      const uploadItems =
+        finalizedTotals.length > 0
+          ? finalizedTotals
+          : countRows.map((row) => ({ system_id: row.system_id, qty: row.qty }));
+
+      if (!uploadItems.length) {
+        setUploadStatus('No counted items found. Add counts in Count View before uploading.');
+        return;
+      }
+
       const payload = await fetchJson<{ ok: boolean; warning: string; upstream: unknown }>(
         '/api/inventory/upload/submit',
         {
@@ -582,7 +592,8 @@ export function InventoryDashboard() {
             shop_id: uploadForm.shop_id,
             employee_id: uploadForm.employee_id,
             reconcile: uploadForm.reconcile,
-            rps: Number(uploadForm.rps)
+            rps: Number(uploadForm.rps),
+            items: uploadItems
           })
         }
       );
@@ -1044,7 +1055,7 @@ export function InventoryDashboard() {
               <div className="border border-neutral-300 p-3">
                 <h3 className="text-sm font-semibold text-neutral-900">Finalize Session</h3>
                 <p className="mt-1 text-xs text-neutral-700">
-                  Finalize computes totals from events + host overrides. Lock prevents further changes.
+                  Finalize and lock are optional controls. Upload always uses your counted totals from Count View (or finalized totals if present).
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -1081,30 +1092,36 @@ export function InventoryDashboard() {
               </div>
 
               <div className="border border-neutral-300 p-3">
-                <h3 className="text-sm font-semibold text-neutral-900">Mismatch Report</h3>
-                <p className="mt-1 text-xs text-neutral-700">Compared to previous locked session totals.</p>
+                <h3 className="text-sm font-semibold text-neutral-900">Count Payload Preview</h3>
+                <p className="mt-1 text-xs text-neutral-700">
+                  This is what will be uploaded to your backend from current counted totals.
+                </p>
                 <div className="mt-2 max-h-64 overflow-auto border border-neutral-200">
                   <table className="min-w-full text-left text-xs">
                     <thead className="bg-neutral-100">
                       <tr>
                         <th className="border-b border-neutral-300 px-2 py-1">System ID</th>
-                        <th className="border-b border-neutral-300 px-2 py-1">Current Qty</th>
-                        <th className="border-b border-neutral-300 px-2 py-1">Previous Qty</th>
-                        <th className="border-b border-neutral-300 px-2 py-1">Delta</th>
+                        <th className="border-b border-neutral-300 px-2 py-1">Qty To Upload</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {mismatches.map((row) => (
+                      {(finalizedTotals.length > 0
+                        ? finalizedTotals
+                        : countRows.map((row) => ({ system_id: row.system_id, qty: row.qty }))
+                      ).map((row) => (
                         <tr key={row.system_id}>
                           <td className="border-b border-neutral-200 px-2 py-1">{row.system_id}</td>
                           <td className="border-b border-neutral-200 px-2 py-1">{row.qty}</td>
-                          <td className="border-b border-neutral-200 px-2 py-1">{row.previous_qty}</td>
-                          <td className="border-b border-neutral-200 px-2 py-1">{row.delta}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                {mismatches.length > 0 ? (
+                  <p className="mt-2 text-xs text-neutral-600">
+                    Comparison note: {mismatches.length} items differ from previous locked session.
+                  </p>
+                ) : null}
               </div>
 
               <div className="border border-red-300 bg-red-50 p-3">
