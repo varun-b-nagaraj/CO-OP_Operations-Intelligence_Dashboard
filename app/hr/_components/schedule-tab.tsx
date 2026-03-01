@@ -1417,6 +1417,60 @@ export function ScheduleTab() {
     setDragTargetUid(null);
   };
 
+  const handleDropRosterEmployeeOnAssignment = (
+    targetAssignment: EditableAssignment,
+    employeeSNumber: string
+  ) => {
+    if (!employeeSNumber) return;
+    if (targetAssignment.effectiveWorkerSNumber === employeeSNumber) {
+      setMessage('No change: this employee is already assigned.');
+      return;
+    }
+    if (!canEmployeeTakeAssignment(employeeSNumber, targetAssignment)) {
+      setMessage(
+        'Drop blocked: employee is not eligible for this shift (must be morning, class period, or configured off-period).'
+      );
+      return;
+    }
+    const periodAssignments = getShiftAssignments(targetAssignment.date, targetAssignment.period);
+    const alreadyAssignedInShift = periodAssignments.some(
+      (assignment) =>
+        assignment.uid !== targetAssignment.uid &&
+        assignment.effectiveWorkerSNumber === employeeSNumber
+    );
+    if (alreadyAssignedInShift) {
+      setMessage('Drop blocked: employee is already assigned in this shift.');
+      return;
+    }
+
+    if (isManualShiftSlotKey(targetAssignment.shiftSlotKey)) {
+      const asAlternate = isAlternateAssignment(targetAssignment);
+      stageManualRemove({
+        date: targetAssignment.date,
+        period: targetAssignment.period,
+        shiftSlotKey: targetAssignment.shiftSlotKey,
+        employeeSNumber: targetAssignment.effectiveWorkerSNumber
+      });
+      stageManualAssign({
+        date: targetAssignment.date,
+        period: targetAssignment.period,
+        employeeSNumber,
+        asAlternate
+      });
+      setMessage('Manual assignment updated. Save changes to persist.');
+      return;
+    }
+
+    setEditableAssignments((previous) =>
+      previous.map((assignment) =>
+        assignment.uid === targetAssignment.uid
+          ? { ...assignment, effectiveWorkerSNumber: employeeSNumber }
+          : assignment
+      )
+    );
+    setMessage('Assignment updated. Save changes to persist.');
+  };
+
   const closeShiftActionModal = () => {
     setShiftActionModalUid(null);
     setEmptySlotTarget(null);
@@ -1917,7 +1971,16 @@ export function ScheduleTab() {
                                         setDragTargetUid(null);
                                       }}
                                       onDragOver={(event: DragEvent<HTMLDivElement>) => {
-                                        if (!isSwapModeEnabled || isManualAssignment) return;
+                                        if (!isSwapModeEnabled) return;
+                                        const rawPayload = event.dataTransfer.getData('text/plain');
+                                        const draggedEmployeeSNumber = getDraggedEmployeeSNumber(rawPayload);
+                                        if (draggedEmployeeSNumber) {
+                                          if (!canEmployeeTakeAssignment(draggedEmployeeSNumber, assignment)) return;
+                                          event.preventDefault();
+                                          setDragTargetUid(assignment.uid);
+                                          return;
+                                        }
+                                        if (isManualAssignment) return;
                                         event.preventDefault();
                                         if (dragSourceUid && dragSourceUid !== assignment.uid) {
                                           setDragTargetUid(
@@ -1932,11 +1995,19 @@ export function ScheduleTab() {
                                         event.dataTransfer.setData('text/plain', `assignment:${assignment.uid}`);
                                       }}
                                       onDrop={(event: DragEvent<HTMLDivElement>) => {
-                                        if (!isSwapModeEnabled || isManualAssignment) return;
+                                        if (!isSwapModeEnabled) return;
                                         event.preventDefault();
-                                        const sourceUid =
-                                          parseDraggedAssignmentUid(event.dataTransfer.getData('text/plain')) ||
-                                          dragSourceUid;
+                                        const rawPayload = event.dataTransfer.getData('text/plain');
+                                        const draggedEmployeeSNumber = getDraggedEmployeeSNumber(rawPayload);
+                                        if (draggedEmployeeSNumber) {
+                                          handleDropRosterEmployeeOnAssignment(assignment, draggedEmployeeSNumber);
+                                          setDragSourceUid(null);
+                                          setDragTargetUid(null);
+                                          return;
+                                        }
+
+                                        if (isManualAssignment) return;
+                                        const sourceUid = parseDraggedAssignmentUid(rawPayload) || dragSourceUid;
                                         if (sourceUid) {
                                           if (!canSwapAssignments(sourceUid, assignment.uid)) {
                                             const sourceAssignment = assignmentByUid.get(sourceUid);
