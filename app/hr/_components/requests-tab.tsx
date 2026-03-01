@@ -44,8 +44,6 @@ type CachedScheduleData = {
   schedule?: CachedScheduleAssignment[];
 };
 
-const PAGE_SIZE = 50;
-
 function toNumber(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -64,13 +62,12 @@ function readBooleanField(row: StudentRow, keys: string[], fallback: boolean): b
   return fallback;
 }
 
-export function RequestsTab(props: { dateRange: { from: string; to: string } }) {
+export function RequestsTab() {
   const canView = usePermission('hr.requests.view');
   const canApprove = usePermission('hr.schedule.edit');
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [page, setPage] = useState(0);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const form = useForm<ShiftRequestFormValues>({
@@ -152,18 +149,14 @@ export function RequestsTab(props: { dateRange: { from: string; to: string } }) 
   });
 
   const requestsQuery = useQuery({
-    queryKey: ['hr-shift-requests', statusFilter, page],
+    queryKey: ['hr-shift-requests', statusFilter],
     queryFn: async () => {
-      const requestedFromTs = `${props.dateRange.from}T00:00:00.000Z`;
-      const requestedToTs = `${props.dateRange.to}T23:59:59.999Z`;
       let query = supabase
         .from('shift_change_requests')
         .select('*')
         .eq('request_source', 'employee_form')
-        .gte('requested_at', requestedFromTs)
-        .lte('requested_at', requestedToTs)
         .order('requested_at', { ascending: false })
-        .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+        .limit(500);
 
       if (statusFilter !== 'all') query = query.eq('status', statusFilter);
       const { data, error } = await query;
@@ -515,10 +508,7 @@ export function RequestsTab(props: { dateRange: { from: string; to: string } }) 
           Status filter
           <select
             className="ml-2 min-h-[44px] border border-neutral-300 px-2"
-            onChange={(event) => {
-              setStatusFilter(event.target.value as StatusFilter);
-              setPage(0);
-            }}
+            onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
             value={statusFilter}
           >
             <option value="all">All</option>
@@ -589,23 +579,6 @@ export function RequestsTab(props: { dateRange: { from: string; to: string } }) 
         </table>
       </div>
 
-      <div className="flex gap-2">
-        <button
-          className="min-h-[44px] border border-neutral-300 px-3 disabled:opacity-40"
-          disabled={page === 0}
-          onClick={() => setPage((previous) => Math.max(0, previous - 1))}
-          type="button"
-        >
-          Previous
-        </button>
-        <button
-          className="min-h-[44px] border border-neutral-300 px-3"
-          onClick={() => setPage((previous) => previous + 1)}
-          type="button"
-        >
-          Next
-        </button>
-      </div>
     </section>
   );
 }

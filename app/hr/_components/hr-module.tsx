@@ -135,7 +135,7 @@ export function HRModule() {
               {resolvedHRTab === 'employees' && <EmployeesTab dateRange={globalDateRange} />}
               {resolvedHRTab === 'meeting-attendance' && <MeetingAttendanceTab dateRange={globalDateRange} />}
               {resolvedHRTab === 'shift-attendance' && <ShiftAttendanceTab dateRange={globalDateRange} />}
-              {resolvedHRTab === 'requests' && <RequestsTab dateRange={globalDateRange} />}
+              {resolvedHRTab === 'requests' && <RequestsTab />}
               {resolvedHRTab === 'audit' && <AuditTab dateRange={globalDateRange} />}
             </section>
           </section>
