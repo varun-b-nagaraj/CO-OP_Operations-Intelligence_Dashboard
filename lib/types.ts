@@ -150,6 +150,7 @@ export interface ShiftAttendance {
   shift_slot_key: string;
   employee_s_number: string;
   status: ShiftAttendanceStatus;
+  raw_status?: ShiftAttendanceStatus | null;
   source: ShiftAttendanceSource;
   reason: string | null;
   marked_by: string | null;

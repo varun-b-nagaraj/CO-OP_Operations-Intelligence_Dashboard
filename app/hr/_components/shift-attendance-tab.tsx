@@ -62,6 +62,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
       const rates = calculateShiftAttendanceRate({
         shiftAttendanceRecords: rows.map((row) => ({
           status: row.status as 'expected' | 'present' | 'absent' | 'excused',
+          rawStatus: (row.raw_status as 'expected' | 'present' | 'absent' | 'excused' | null) ?? null,
           date: String(row.shift_date ?? '')
         }))
       });

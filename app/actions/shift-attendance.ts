@@ -113,6 +113,23 @@ async function upsertShiftAttendanceStatus(input: {
       .eq('employee_s_number', input.sNumber)
       .maybeSingle();
 
+    const existingStatus = (existing?.status as ShiftAttendance['status'] | undefined) ?? 'expected';
+    const existingRawStatus = (existing?.raw_status as ShiftAttendance['status'] | null | undefined) ?? null;
+
+    // Keep raw status untouched by pardons/manual present overrides; adjusted status remains in `status`.
+    let nextRawStatus: ShiftAttendance['status'] | null = existingRawStatus;
+    if (input.status === 'absent') {
+      nextRawStatus = 'absent';
+    } else if (input.status === 'present') {
+      if (!existingRawStatus) {
+        nextRawStatus = existingStatus === 'expected' ? 'absent' : existingStatus;
+      }
+    } else if (input.status === 'excused') {
+      if (!existingRawStatus) {
+        nextRawStatus = existingStatus === 'expected' ? 'absent' : existingStatus;
+      }
+    }
+
     const { data, error } = await supabase
       .from('shift_attendance')
       .upsert(
@@ -122,6 +139,7 @@ async function upsertShiftAttendanceStatus(input: {
           shift_slot_key: input.shiftSlotKey,
           employee_s_number: input.sNumber,
           status: input.status,
+          raw_status: nextRawStatus,
           source: existing?.source ?? 'manual',
           reason: input.reason ?? null,
           marked_by: 'open_access',
@@ -299,7 +317,11 @@ export async function getShiftAttendance(
 
     const rows = (data ?? []) as ShiftAttendance[];
     calculateShiftAttendanceRate({
-      shiftAttendanceRecords: rows.map((row) => ({ status: row.status, date: row.shift_date }))
+      shiftAttendanceRecords: rows.map((row) => ({
+        status: row.status,
+        rawStatus: row.raw_status ?? null,
+        date: row.shift_date
+      }))
     });
 
     logInfo('shift_attendance_read', {
