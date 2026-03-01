@@ -11,6 +11,7 @@ import {
   denyShiftExchange,
   submitShiftExchange
 } from '@/app/actions/shift-requests';
+import { fetchSchedule } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
 
 import { getStudentDisplayName, getStudentSNumber, StudentRow, useBrowserSupabase } from './utils';
@@ -25,29 +26,12 @@ const ShiftRequestFormSchema = z.object({
 
 type ShiftRequestFormValues = z.infer<typeof ShiftRequestFormSchema>;
 type StatusFilter = 'all' | 'pending' | 'approved' | 'denied';
-type ShiftAttendanceSlotRow = {
-  employee_s_number: string | null;
-  shift_slot_key: string | null;
-};
-type ApprovedShiftRequestRow = {
-  shift_slot_key: string | null;
-  from_employee_s_number: string | null;
-  to_employee_s_number: string | null;
-  requested_at: string | null;
-};
-type EmployeeSettingsRow = {
-  employee_s_number: string | null;
-  off_periods: number[] | null;
-};
-type CachedScheduleAssignment = {
-  date?: string;
-  period?: number;
-  shiftSlotKey?: string;
-  studentSNumber?: string;
-};
-type CachedScheduleData = {
-  calendar?: Record<string, 'A' | 'B'>;
-  schedule?: CachedScheduleAssignment[];
+type StoredScheduleConfigRow = {
+  year: number | null;
+  month: number | null;
+  anchor_date: string | null;
+  anchor_day: 'A' | 'B' | null;
+  seed: number | null;
 };
 
 function toNumber(value: unknown): number | null {
@@ -101,17 +85,6 @@ export function RequestsTab() {
     }
   });
 
-  const employeeSettingsQuery = useQuery({
-    queryKey: ['hr-requests-employee-settings'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('employee_settings')
-        .select('employee_s_number, off_periods');
-      if (error) throw new Error(error.message);
-      return (data ?? []) as EmployeeSettingsRow[];
-    }
-  });
-
   const selectedYearMonth = useMemo(() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedShiftDate ?? '')) return null;
     return {
@@ -120,37 +93,50 @@ export function RequestsTab() {
     };
   }, [selectedShiftDate]);
 
-  const scheduleMonthQuery = useQuery({
-    queryKey: ['hr-requests-schedule-month', selectedYearMonth?.year, selectedYearMonth?.month],
+  const scheduleConfigQuery = useQuery({
+    queryKey: ['hr-requests-schedule-config', selectedYearMonth?.year, selectedYearMonth?.month],
     enabled: Boolean(selectedYearMonth),
     queryFn: async () => {
       if (!selectedYearMonth) return null;
       const { data, error } = await supabase
         .from('schedules')
-        .select('schedule_data')
+        .select('year, month, anchor_date, anchor_day, seed')
         .eq('year', selectedYearMonth.year)
         .eq('month', selectedYearMonth.month)
         .order('generated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
       if (error) throw new Error(error.message);
-      return (data?.schedule_data as CachedScheduleData | null) ?? null;
+      return (data as StoredScheduleConfigRow | null) ?? null;
     }
   });
 
-  const attendanceSlotsQuery = useQuery({
-    queryKey: ['hr-requests-shift-attendance-slot', selectedShiftDate, selectedShiftPeriod],
-    enabled: Boolean(selectedShiftDate) && Number.isInteger(selectedShiftPeriod),
+  const scheduleMonthQuery = useQuery({
+    queryKey: [
+      'hr-requests-effective-schedule-month',
+      selectedYearMonth?.year,
+      selectedYearMonth?.month,
+      scheduleConfigQuery.data?.anchor_date,
+      scheduleConfigQuery.data?.anchor_day,
+      scheduleConfigQuery.data?.seed
+    ],
+    enabled:
+      Boolean(selectedYearMonth) &&
+      Boolean(scheduleConfigQuery.data?.anchor_date) &&
+      Boolean(scheduleConfigQuery.data?.anchor_day) &&
+      Number.isFinite(Number(scheduleConfigQuery.data?.seed)),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('shift_attendance')
-        .select('employee_s_number, shift_slot_key')
-        .eq('shift_date', selectedShiftDate)
-        .eq('shift_period', selectedShiftPeriod)
-        .in('status', ['expected', 'present', 'absent', 'excused'])
-        .order('shift_slot_key', { ascending: true });
-      if (error) throw new Error(error.message);
-      return (data ?? []) as ShiftAttendanceSlotRow[];
+      if (!selectedYearMonth || !scheduleConfigQuery.data) return null;
+      const scheduleConfig = scheduleConfigQuery.data;
+      const result = await fetchSchedule({
+        year: selectedYearMonth.year,
+        month: selectedYearMonth.month,
+        anchorDate: String(scheduleConfig.anchor_date),
+        anchorDay: scheduleConfig.anchor_day === 'B' ? 'B' : 'A',
+        seed: Number(scheduleConfig.seed)
+      });
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
     }
   });
 
@@ -171,22 +157,6 @@ export function RequestsTab() {
     }
   });
 
-  const approvedRequestsForSelectionQuery = useQuery({
-    queryKey: ['hr-requests-approved-chain', selectedShiftDate, selectedShiftPeriod],
-    enabled: Boolean(selectedShiftDate) && Number.isInteger(selectedShiftPeriod),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('shift_change_requests')
-        .select('shift_slot_key, from_employee_s_number, to_employee_s_number, requested_at')
-        .eq('status', 'approved')
-        .eq('shift_date', selectedShiftDate)
-        .eq('shift_period', selectedShiftPeriod)
-        .order('requested_at', { ascending: true });
-      if (error) throw new Error(error.message);
-      return (data ?? []) as ApprovedShiftRequestRow[];
-    }
-  });
-
   const studentNameBySNumber = useMemo(() => {
     const map = new Map<string, string>();
     for (const student of studentsQuery.data ?? []) {
@@ -196,18 +166,6 @@ export function RequestsTab() {
     }
     return map;
   }, [studentsQuery.data]);
-
-  const settingsBySNumber = useMemo(() => {
-    const map = new Map<string, number[]>();
-    for (const row of employeeSettingsQuery.data ?? []) {
-      if (!row.employee_s_number) continue;
-      const offPeriods = Array.isArray(row.off_periods)
-        ? row.off_periods.filter((value) => Number.isInteger(value) && value >= 1 && value <= 8)
-        : [];
-      map.set(row.employee_s_number, offPeriods);
-    }
-    return map;
-  }, [employeeSettingsQuery.data]);
 
   const studentEligibilityBySNumber = useMemo(() => {
     const map = new Map<string, { scheduleable: boolean; classPeriod: number | null }>();
@@ -228,11 +186,11 @@ export function RequestsTab() {
       (row) =>
         row.date === selectedShiftDate &&
         row.period === selectedShiftPeriod &&
-        typeof row.studentSNumber === 'string' &&
-        row.studentSNumber.trim() &&
+        typeof row.effectiveWorkerSNumber === 'string' &&
+        row.effectiveWorkerSNumber.trim() &&
         typeof row.shiftSlotKey === 'string' &&
         row.shiftSlotKey.trim()
-    ) as Array<Required<Pick<CachedScheduleAssignment, 'date' | 'period' | 'studentSNumber' | 'shiftSlotKey'>>>;
+    );
   }, [scheduleMonthQuery.data, selectedShiftDate, selectedShiftPeriod]);
 
   const selectedDayType = useMemo(
@@ -246,55 +204,13 @@ export function RequestsTab() {
     return [1, 2, 3, 4, 5, 6, 7, 8];
   }, [selectedDayType]);
 
-  const attendanceRows = useMemo(
-    () => attendanceSlotsQuery.data ?? [],
-    [attendanceSlotsQuery.data]
-  );
-
-  const expectedWorkerBySlotKey = useMemo(() => {
-    const map = new Map<string, string>();
-
-    // Base expected worker is from the generated schedule for this date/period.
-    for (const row of scheduleAssignmentsForSelection) {
-      if (!row.shiftSlotKey || !row.studentSNumber) continue;
-      if (!map.has(row.shiftSlotKey)) {
-        map.set(row.shiftSlotKey, row.studentSNumber);
-      }
-    }
-
-    // Apply approved swaps in chronological order to get the chain-applied worker.
-    for (const row of approvedRequestsForSelectionQuery.data ?? []) {
-      const slotKey = row.shift_slot_key ?? '';
-      const fromSNumber = row.from_employee_s_number ?? '';
-      const toSNumber = row.to_employee_s_number ?? '';
-      if (!slotKey || !fromSNumber || !toSNumber) continue;
-      const currentWorker = map.get(slotKey);
-      if (!currentWorker) {
-        map.set(slotKey, toSNumber);
-        continue;
-      }
-      if (currentWorker === fromSNumber) {
-        map.set(slotKey, toSNumber);
-      }
-    }
-
-    // Source-of-truth override: shift_attendance rows represent the current expected owner for this slot.
-    // This keeps Requests aligned with what Schedule/Attendance currently tracks.
-    for (const row of attendanceRows) {
-      if (!row.shift_slot_key || !row.employee_s_number) continue;
-      map.set(row.shift_slot_key, row.employee_s_number);
-    }
-
-    return map;
-  }, [approvedRequestsForSelectionQuery.data, attendanceRows, scheduleAssignmentsForSelection]);
-
   const currentWorkers = useMemo(() => {
     const workers = new Set<string>();
-    for (const worker of expectedWorkerBySlotKey.values()) {
-      workers.add(worker);
+    for (const row of scheduleAssignmentsForSelection) {
+      workers.add(String(row.effectiveWorkerSNumber));
     }
     return Array.from(workers);
-  }, [expectedWorkerBySlotKey]);
+  }, [scheduleAssignmentsForSelection]);
 
   const fromOptions = useMemo(() => {
     const options = currentWorkers.map((sNumber) => ({
@@ -307,16 +223,19 @@ export function RequestsTab() {
 
   const eligibleToOptions = useMemo(() => {
     const options: Array<{ value: string; label: string }> = [];
-    const selectedFromOffPeriods = settingsBySNumber.get(selectedFromSNumber) ?? [4, 8];
-    const selectedShiftIsMorning = selectedShiftPeriod === 0;
-    const selectedShiftIsOffPeriodForCurrentWorker = selectedFromOffPeriods.includes(selectedShiftPeriod);
+    const acceptableClassPeriods = new Set<number>([selectedShiftPeriod]);
+    if (selectedShiftPeriod >= 1 && selectedShiftPeriod <= 4) {
+      acceptableClassPeriods.add(selectedShiftPeriod + 4);
+    }
+    if (selectedShiftPeriod >= 5 && selectedShiftPeriod <= 8) {
+      acceptableClassPeriods.add(selectedShiftPeriod - 4);
+    }
 
     const canWorkSelectedPeriod = (sNumber: string): boolean => {
       const eligibility = studentEligibilityBySNumber.get(sNumber);
       if (!eligibility || !eligibility.scheduleable) return false;
-      if (selectedShiftIsMorning || selectedShiftIsOffPeriodForCurrentWorker) return true;
-      const offPeriods = settingsBySNumber.get(sNumber) ?? [4, 8];
-      return eligibility.classPeriod === selectedShiftPeriod || offPeriods.includes(selectedShiftPeriod);
+      if (eligibility.classPeriod === null) return false;
+      return acceptableClassPeriods.has(eligibility.classPeriod);
     };
 
     for (const student of studentsQuery.data ?? []) {
@@ -335,7 +254,6 @@ export function RequestsTab() {
   }, [
     selectedFromSNumber,
     selectedShiftPeriod,
-    settingsBySNumber,
     studentEligibilityBySNumber,
     studentNameBySNumber,
     studentsQuery.data
@@ -384,22 +302,11 @@ export function RequestsTab() {
 
   const resolvedShiftSlotKey = useMemo(() => {
     if (!selectedFromSNumber) return null;
-    const candidateSlots = [...expectedWorkerBySlotKey.entries()]
-      .filter(([, workerSNumber]) => workerSNumber === selectedFromSNumber)
-      .map(([slotKey]) => slotKey);
-    if (candidateSlots.length === 0) return null;
-    if (candidateSlots.length === 1) return candidateSlots[0];
-
-    const slotFromAttendance = attendanceRows.find(
-      (row) =>
-        row.employee_s_number === selectedFromSNumber &&
-        Boolean(row.shift_slot_key) &&
-        candidateSlots.includes(row.shift_slot_key as string)
+    const slot = scheduleAssignmentsForSelection.find(
+      (row) => String(row.effectiveWorkerSNumber) === selectedFromSNumber
     );
-    if (slotFromAttendance?.shift_slot_key) return slotFromAttendance.shift_slot_key;
-
-    return candidateSlots[0];
-  }, [attendanceRows, expectedWorkerBySlotKey, selectedFromSNumber]);
+    return slot ? String(slot.shiftSlotKey) : null;
+  }, [scheduleAssignmentsForSelection, selectedFromSNumber]);
 
   const submitMutation = useMutation({
     mutationFn: async (input: { values: ShiftRequestFormValues; shiftSlotKey: string }) => {
