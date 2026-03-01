@@ -239,20 +239,56 @@ export async function submitShiftExchange(
       );
     }
 
-    const { data, error } = await supabase
+    const { data: existingPending } = await supabase
       .from('shift_change_requests')
-      .insert({
-        shift_date: parsed.data.shift_date,
-        shift_period: parsed.data.shift_period,
-        shift_slot_key: parsed.data.shift_slot_key,
-        from_employee_s_number: parsed.data.from_employee_s_number,
-        to_employee_s_number: parsed.data.to_employee_s_number,
-        reason: parsed.data.reason,
-        status: 'pending',
-        request_source: parsed.data.request_source ?? 'employee_form'
-      })
       .select('*')
-      .single();
+      .eq('shift_date', parsed.data.shift_date)
+      .eq('shift_period', parsed.data.shift_period)
+      .eq('shift_slot_key', parsed.data.shift_slot_key)
+      .eq('from_employee_s_number', parsed.data.from_employee_s_number)
+      .eq('status', 'pending')
+      .order('requested_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let data: ShiftChangeRequest | null = null;
+    let error: { message?: string } | null = null;
+    const resolvedRequestSource = parsed.data.request_source ?? 'employee_form';
+
+    if (existingPending) {
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('shift_change_requests')
+        .update({
+          to_employee_s_number: parsed.data.to_employee_s_number,
+          reason: parsed.data.reason,
+          request_source: resolvedRequestSource,
+          requested_at: new Date().toISOString(),
+          reviewed_by: null,
+          reviewed_at: null
+        })
+        .eq('id', existingPending.id)
+        .select('*')
+        .single();
+      data = (updatedRows as ShiftChangeRequest | null) ?? null;
+      error = updateError ? { message: updateError.message } : null;
+    } else {
+      const { data: insertedRow, error: insertError } = await supabase
+        .from('shift_change_requests')
+        .insert({
+          shift_date: parsed.data.shift_date,
+          shift_period: parsed.data.shift_period,
+          shift_slot_key: parsed.data.shift_slot_key,
+          from_employee_s_number: parsed.data.from_employee_s_number,
+          to_employee_s_number: parsed.data.to_employee_s_number,
+          reason: parsed.data.reason,
+          status: 'pending',
+          request_source: resolvedRequestSource
+        })
+        .select('*')
+        .single();
+      data = (insertedRow as ShiftChangeRequest | null) ?? null;
+      error = insertError ? { message: insertError.message } : null;
+    }
 
     if (error || !data) {
       return errorResult(correlationId, 'DB_ERROR', error?.message ?? 'Unable to create request');
@@ -261,10 +297,10 @@ export async function submitShiftExchange(
     await insertAuditEntry(
       supabase,
       {
-        action: 'shift_exchange_submitted',
+        action: existingPending ? 'shift_exchange_pending_updated' : 'shift_exchange_submitted',
         tableName: 'shift_change_requests',
-        recordId: data.id,
-        oldValue: null,
+        recordId: String(data.id ?? ''),
+        oldValue: existingPending ?? null,
         newValue: data,
         userId: 'open_access'
       },
@@ -273,7 +309,7 @@ export async function submitShiftExchange(
 
     logInfo('shift_exchange_submitted', {
       correlationId,
-      requestId: data.id
+      requestId: String(data.id ?? '')
     });
 
     return successResult(data as ShiftChangeRequest, correlationId);
