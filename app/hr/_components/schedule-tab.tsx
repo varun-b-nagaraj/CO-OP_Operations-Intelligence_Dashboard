@@ -2476,18 +2476,39 @@ export function ScheduleTab() {
                       className="min-h-[44px] border border-neutral-500 px-3 text-sm"
                       onClick={() => {
                         if (!selectedShiftActionAssignment) return;
-                        if (!isManualShiftSlotKey(selectedShiftActionAssignment.shiftSlotKey)) {
-                          setMessage('Only manual/open-slot assignments can be removed.');
+                        if (isManualShiftSlotKey(selectedShiftActionAssignment.shiftSlotKey)) {
+                          stageManualRemove({
+                            date: selectedShiftActionAssignment.date,
+                            period: selectedShiftActionAssignment.period,
+                            shiftSlotKey: selectedShiftActionAssignment.shiftSlotKey,
+                            employeeSNumber: selectedShiftActionAssignment.effectiveWorkerSNumber
+                          });
+                          closeShiftActionModal();
+                          setMessage('Manual assignment removed. Save changes to persist.');
                           return;
                         }
-                        stageManualRemove({
-                          date: selectedShiftActionAssignment.date,
-                          period: selectedShiftActionAssignment.period,
-                          shiftSlotKey: selectedShiftActionAssignment.shiftSlotKey,
-                          employeeSNumber: selectedShiftActionAssignment.effectiveWorkerSNumber
-                        });
+
+                        if (
+                          selectedShiftActionAssignment.effectiveWorkerSNumber !==
+                          selectedShiftActionAssignment.studentSNumber
+                        ) {
+                          setEditableAssignments((previous) =>
+                            previous.map((assignment) =>
+                              assignment.uid === selectedShiftActionAssignment.uid
+                                ? {
+                                    ...assignment,
+                                    effectiveWorkerSNumber: selectedShiftActionAssignment.studentSNumber
+                                  }
+                                : assignment
+                            )
+                          );
+                          closeShiftActionModal();
+                          setMessage('Shift reset to original expected worker. Save changes to persist.');
+                          return;
+                        }
+
+                        setMessage('This shift already matches the original expected worker.');
                         closeShiftActionModal();
-                        setMessage('Manual assignment removed. Save changes to persist.');
                       }}
                       type="button"
                     >
