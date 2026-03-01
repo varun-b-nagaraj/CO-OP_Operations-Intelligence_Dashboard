@@ -23,6 +23,10 @@ type GenerationSelection = {
 };
 type AccessMode = 'employee' | 'manager';
 type ShiftActionChoice = 'volunteer' | 'remove';
+type EmptySlotTarget = {
+  date: string;
+  period: number;
+};
 
 type StoredScheduleTableRow = {
   year: number;
@@ -154,6 +158,20 @@ function generateScheduleSeed(): number {
   return Math.floor(Math.random() * 2_147_483_647);
 }
 
+function resolvePeriodForDay(periods: number[], dayType: string | undefined): number {
+  if (periods.length <= 1) return periods[0] ?? 0;
+  if (dayType === 'B') return periods[1] ?? periods[0] ?? 0;
+  return periods[0] ?? 0;
+}
+
+function buildManualShiftSlotKey(date: string, period: number, employeeSNumber: string): string {
+  return `manual|${date}|${period}|${employeeSNumber}`;
+}
+
+function isManualShiftSlotKey(shiftSlotKey: string): boolean {
+  return shiftSlotKey.startsWith('manual|');
+}
+
 function getDefaultGenerationSelection(): GenerationSelection {
   const now = new Date();
   return buildGenerationSelection(now.getUTCFullYear(), now.getUTCMonth() + 1);
@@ -258,6 +276,7 @@ export function ScheduleTab() {
   const [message, setMessage] = useState<string | null>(null);
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [editableAssignments, setEditableAssignments] = useState<EditableAssignment[]>([]);
+  const [manualAssignments, setManualAssignments] = useState<EditableAssignment[]>([]);
   const [editableRoster, setEditableRoster] = useState<EditableRosterRow[]>([]);
   const [isSwapModeEnabled, setIsSwapModeEnabled] = useState(false);
   const [isGenerateConfirmOpen, setIsGenerateConfirmOpen] = useState(false);
@@ -267,6 +286,7 @@ export function ScheduleTab() {
   const [assignmentTargetSNumber, setAssignmentTargetSNumber] = useState('');
   const [dragSourceUid, setDragSourceUid] = useState<string | null>(null);
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
+  const [emptySlotTarget, setEmptySlotTarget] = useState<EmptySlotTarget | null>(null);
   const [attendanceReason, setAttendanceReason] = useState('');
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
@@ -454,6 +474,7 @@ export function ScheduleTab() {
       queryClient.invalidateQueries({ queryKey: ['hr-shift-requests'] });
       queryClient.invalidateQueries({ queryKey: ['hr-schedule-table-index'] });
       setShiftActionModalUid(null);
+      setEmptySlotTarget(null);
       setAssignmentTargetSNumber('');
       if (!variables.autoApprove) {
         setMessage('Volunteer request submitted for approval.');
@@ -474,6 +495,83 @@ export function ScheduleTab() {
     },
     onError: (error) => {
       setMessage(error instanceof Error ? error.message : 'Unable to volunteer for this shift.');
+    }
+  });
+
+  const manualSlotMutation = useMutation({
+    mutationFn: async (payload: {
+      mode: 'assign' | 'remove' | 'reassign';
+      date: string;
+      period: number;
+      employeeSNumber: string;
+      shiftSlotKey?: string;
+      previousEmployeeSNumber?: string;
+    }) => {
+      if (payload.mode === 'assign' || payload.mode === 'reassign') {
+        if (payload.mode === 'reassign') {
+          if (!payload.shiftSlotKey || !payload.previousEmployeeSNumber) {
+            throw new Error('shiftSlotKey and previousEmployeeSNumber are required when reassigning a manual slot');
+          }
+          const { error: deleteError } = await supabase
+            .from('shift_attendance')
+            .delete()
+            .eq('shift_date', payload.date)
+            .eq('shift_period', payload.period)
+            .eq('shift_slot_key', payload.shiftSlotKey)
+            .eq('employee_s_number', payload.previousEmployeeSNumber);
+          if (deleteError) throw new Error(deleteError.message);
+        }
+
+        const shiftSlotKey = buildManualShiftSlotKey(payload.date, payload.period, payload.employeeSNumber);
+        const { error } = await supabase.from('shift_attendance').upsert(
+          {
+            shift_date: payload.date,
+            shift_period: payload.period,
+            shift_slot_key: shiftSlotKey,
+            employee_s_number: payload.employeeSNumber,
+            status: 'expected',
+            source: 'manual',
+            reason: null,
+            marked_by: 'open_access',
+            marked_at: new Date().toISOString()
+          },
+          {
+            onConflict: 'shift_date,shift_period,shift_slot_key,employee_s_number'
+          }
+        );
+        if (error) throw new Error(error.message);
+        return { ...payload, shiftSlotKey };
+      }
+
+      if (!payload.shiftSlotKey) throw new Error('shiftSlotKey is required when removing a manual slot');
+
+      const { error } = await supabase
+        .from('shift_attendance')
+        .delete()
+        .eq('shift_date', payload.date)
+        .eq('shift_period', payload.period)
+        .eq('shift_slot_key', payload.shiftSlotKey)
+        .eq('employee_s_number', payload.employeeSNumber);
+      if (error) throw new Error(error.message);
+      return payload;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ['hr-schedule-shift-attendance', selectedMonthRange.from, selectedMonthRange.to]
+      });
+      setShiftActionModalUid(null);
+      setEmptySlotTarget(null);
+      setAssignmentTargetSNumber('');
+      if (variables.mode === 'remove') {
+        setMessage('Removed you from this shift.');
+      } else if (isManagerMode) {
+        setMessage('Shift assignment confirmed.');
+      } else {
+        setMessage('You are now signed up for this shift.');
+      }
+    },
+    onError: (error) => {
+      setMessage(error instanceof Error ? error.message : 'Unable to update this shift slot.');
     }
   });
 
@@ -533,6 +631,7 @@ export function ScheduleTab() {
     setDragSourceUid(null);
     setDragTargetUid(null);
     setShiftActionModalUid(null);
+    setEmptySlotTarget(null);
   }, [schedule]);
 
   useEffect(() => {
@@ -579,23 +678,72 @@ export function ScheduleTab() {
     return map;
   }, [editableRoster, schedule]);
 
+  useEffect(() => {
+    if (!schedule) {
+      setManualAssignments([]);
+      return;
+    }
+
+    const scheduledKeys = new Set(
+      editableAssignments.map((assignment) =>
+        [assignment.date, assignment.period, assignment.shiftSlotKey, assignment.effectiveWorkerSNumber].join('|')
+      )
+    );
+
+    const nextManualAssignments: EditableAssignment[] = [];
+    for (const row of shiftAttendanceQuery.data ?? []) {
+      const source = String(row.source ?? '');
+      const employeeSNumber = String(row.employee_s_number ?? '');
+      const shiftDate = String(row.shift_date ?? '');
+      const shiftSlotKey = String(row.shift_slot_key ?? '');
+      const period = Number(row.shift_period);
+      if (source !== 'manual' || !employeeSNumber || !shiftDate || !shiftSlotKey || !Number.isFinite(period)) {
+        continue;
+      }
+
+      const dedupeKey = [shiftDate, period, shiftSlotKey, employeeSNumber].join('|');
+      if (scheduledKeys.has(dedupeKey)) continue;
+
+      nextManualAssignments.push({
+        uid: `manual|${dedupeKey}`,
+        date: shiftDate,
+        day: schedule.calendar[shiftDate] ?? '',
+        period,
+        shiftSlotKey,
+        studentName: rosterNameBySNumber.get(employeeSNumber) ?? employeeSNumber,
+        studentSNumber: employeeSNumber,
+        type: 'Manual',
+        group: 'Manual',
+        role: 'employee',
+        effectiveWorkerSNumber: employeeSNumber
+      });
+    }
+
+    setManualAssignments(nextManualAssignments);
+  }, [editableAssignments, rosterNameBySNumber, schedule, shiftAttendanceQuery.data]);
+
+  const visibleAssignments = useMemo(
+    () => [...editableAssignments, ...manualAssignments],
+    [editableAssignments, manualAssignments]
+  );
+
   const assignmentMap = useMemo(() => {
     const map = new Map<string, EditableAssignment[]>();
-    for (const assignment of editableAssignments) {
+    for (const assignment of visibleAssignments) {
       const key = `${assignment.date}|${assignment.period}`;
       const bucket = map.get(key) ?? [];
       bucket.push(assignment);
       map.set(key, bucket);
     }
     return map;
-  }, [editableAssignments]);
+  }, [visibleAssignments]);
   const assignmentByUid = useMemo(() => {
     const map = new Map<string, EditableAssignment>();
-    for (const assignment of editableAssignments) {
+    for (const assignment of visibleAssignments) {
       map.set(assignment.uid, assignment);
     }
     return map;
-  }, [editableAssignments]);
+  }, [visibleAssignments]);
 
   const rosterMetaBySNumber = useMemo(() => {
     const map = new Map<string, { scheduleable: boolean; classPeriod: number | null }>();
@@ -659,13 +807,16 @@ export function ScheduleTab() {
     }
   }, [actingEmployeeOptions, actingEmployeeSNumber, requestedEmployeeSNumber]);
 
-  const canEmployeeWorkPeriod = (employeeSNumber: string, period: number): boolean => {
-    const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
-    if (!rosterMeta || !rosterMeta.scheduleable) return false;
-    if (period === 0) return true;
-    const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
-    return rosterMeta.classPeriod === period || offPeriods.includes(period);
-  };
+  const canEmployeeWorkPeriod = useCallback(
+    (employeeSNumber: string, period: number): boolean => {
+      const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
+      if (!rosterMeta || !rosterMeta.scheduleable) return false;
+      if (period === 0) return true;
+      const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
+      return rosterMeta.classPeriod === period || offPeriods.includes(period);
+    },
+    [rosterMetaBySNumber, settingsMap]
+  );
 
   const isEmployeeOffPeriod = useCallback(
     (employeeSNumber: string, period: number): boolean => {
@@ -699,6 +850,7 @@ export function ScheduleTab() {
     const source = assignmentByUid.get(sourceUid);
     const target = assignmentByUid.get(targetUid);
     if (!source || !target) return false;
+    if (isManualShiftSlotKey(source.shiftSlotKey) || isManualShiftSlotKey(target.shiftSlotKey)) return false;
 
     const sourceWorkerCanTakeTarget = canEmployeeWorkPeriod(source.effectiveWorkerSNumber, target.period);
     const targetWorkerCanTakeSource = canEmployeeWorkPeriod(target.effectiveWorkerSNumber, source.period);
@@ -706,8 +858,8 @@ export function ScheduleTab() {
   };
 
   const summaryRows = useMemo(
-    () => buildSummaryFromAssignments(editableAssignments, rosterNameBySNumber),
-    [editableAssignments, rosterNameBySNumber]
+    () => buildSummaryFromAssignments(visibleAssignments, rosterNameBySNumber),
+    [rosterNameBySNumber, visibleAssignments]
   );
 
   const attendanceByAssignmentKey = useMemo(() => {
@@ -725,9 +877,10 @@ export function ScheduleTab() {
   }, [shiftAttendanceQuery.data]);
 
   const selectedShiftActionAssignment = useMemo(
-    () => editableAssignments.find((assignment) => assignment.uid === shiftActionModalUid) ?? null,
-    [shiftActionModalUid, editableAssignments]
+    () => visibleAssignments.find((assignment) => assignment.uid === shiftActionModalUid) ?? null,
+    [shiftActionModalUid, visibleAssignments]
   );
+  const isShiftActionModalOpen = Boolean(selectedShiftActionAssignment || emptySlotTarget);
   const selectedShiftActionAttendanceStatus = useMemo(() => {
     if (!selectedShiftActionAssignment) return 'expected' as ShiftAttendanceStatus;
     const key = [
@@ -738,20 +891,39 @@ export function ScheduleTab() {
     ].join('|');
     return normalizeAttendanceStatus(attendanceByAssignmentKey.get(key)?.status);
   }, [attendanceByAssignmentKey, selectedShiftActionAssignment]);
+  const selectedShiftIsManualAssignment = Boolean(
+    selectedShiftActionAssignment && isManualShiftSlotKey(selectedShiftActionAssignment.shiftSlotKey)
+  );
+  const selectedActionDate = selectedShiftActionAssignment?.date ?? emptySlotTarget?.date ?? '';
+  const selectedActionPeriod = selectedShiftActionAssignment?.period ?? emptySlotTarget?.period ?? null;
   const managerAssignableOptions = useMemo(() => {
-    if (!selectedShiftActionAssignment) return [];
-    return actingEmployeeOptions.filter((option) => canEmployeeTakeAssignment(option.value, selectedShiftActionAssignment));
-  }, [actingEmployeeOptions, canEmployeeTakeAssignment, selectedShiftActionAssignment]);
+    if (selectedShiftActionAssignment) {
+      return actingEmployeeOptions.filter((option) =>
+        canEmployeeTakeAssignment(option.value, selectedShiftActionAssignment)
+      );
+    }
+    if (emptySlotTarget) {
+      return actingEmployeeOptions.filter((option) => canEmployeeWorkPeriod(option.value, emptySlotTarget.period));
+    }
+    return [];
+  }, [
+    actingEmployeeOptions,
+    canEmployeeTakeAssignment,
+    canEmployeeWorkPeriod,
+    emptySlotTarget,
+    selectedShiftActionAssignment
+  ]);
   const selectedShiftSupportsOpenVolunteer = Boolean(
     selectedShiftActionAssignment && isOpenVolunteerAssignment(selectedShiftActionAssignment)
   );
   const currentEmployeeCanVolunteerSelectedShift = Boolean(
-    selectedShiftActionAssignment &&
-      actingEmployeeSNumber &&
-      selectedShiftSupportsOpenVolunteer &&
-      selectedShiftActionAttendanceStatus === 'expected' &&
-      actingEmployeeSNumber !== selectedShiftActionAssignment.effectiveWorkerSNumber &&
-      canEmployeeTakeAssignment(actingEmployeeSNumber, selectedShiftActionAssignment)
+    actingEmployeeSNumber &&
+      ((selectedShiftActionAssignment &&
+        selectedShiftSupportsOpenVolunteer &&
+        selectedShiftActionAttendanceStatus === 'expected' &&
+        actingEmployeeSNumber !== selectedShiftActionAssignment.effectiveWorkerSNumber &&
+        canEmployeeTakeAssignment(actingEmployeeSNumber, selectedShiftActionAssignment)) ||
+        (emptySlotTarget && canEmployeeWorkPeriod(actingEmployeeSNumber, emptySlotTarget.period)))
   );
   const currentEmployeeOwnsSelectedShift = Boolean(
     selectedShiftActionAssignment &&
@@ -762,14 +934,15 @@ export function ScheduleTab() {
     selectedShiftActionAssignment &&
       currentEmployeeOwnsSelectedShift &&
       selectedShiftActionAttendanceStatus === 'expected' &&
-      selectedShiftActionAssignment.effectiveWorkerSNumber !== selectedShiftActionAssignment.studentSNumber
+      (selectedShiftIsManualAssignment ||
+        selectedShiftActionAssignment.effectiveWorkerSNumber !== selectedShiftActionAssignment.studentSNumber)
   );
   const canEditSelectedShiftAttendance = Boolean(
     selectedShiftActionAssignment && (isManagerMode || currentEmployeeOwnsSelectedShift)
   );
 
   useEffect(() => {
-    if (!selectedShiftActionAssignment) {
+    if (!selectedShiftActionAssignment && !emptySlotTarget) {
       if (assignmentTargetSNumber) setAssignmentTargetSNumber('');
       return;
     }
@@ -786,7 +959,7 @@ export function ScheduleTab() {
     }
 
     if (available.has(assignmentTargetSNumber)) return;
-    if (available.has(selectedShiftActionAssignment.effectiveWorkerSNumber)) {
+    if (selectedShiftActionAssignment && available.has(selectedShiftActionAssignment.effectiveWorkerSNumber)) {
       setAssignmentTargetSNumber(selectedShiftActionAssignment.effectiveWorkerSNumber);
       return;
     }
@@ -794,13 +967,18 @@ export function ScheduleTab() {
   }, [
     actingEmployeeSNumber,
     assignmentTargetSNumber,
+    emptySlotTarget,
     isManagerMode,
     managerAssignableOptions,
     selectedShiftActionAssignment
   ]);
 
   useEffect(() => {
-    if (!selectedShiftActionAssignment || isManagerMode) return;
+    if (!isShiftActionModalOpen || isManagerMode) return;
+    if (!selectedShiftActionAssignment) {
+      if (shiftActionChoice !== 'volunteer') setShiftActionChoice('volunteer');
+      return;
+    }
     if (currentEmployeeCanVolunteerSelectedShift) {
       if (shiftActionChoice !== 'volunteer') setShiftActionChoice('volunteer');
       return;
@@ -811,6 +989,7 @@ export function ScheduleTab() {
   }, [
     currentEmployeeCanRemoveSelfSelectedShift,
     currentEmployeeCanVolunteerSelectedShift,
+    isShiftActionModalOpen,
     isManagerMode,
     selectedShiftActionAssignment,
     shiftActionChoice
@@ -818,12 +997,10 @@ export function ScheduleTab() {
 
   useEffect(() => {
     setAttendanceReason('');
-  }, [shiftActionModalUid]);
+  }, [emptySlotTarget, shiftActionModalUid]);
 
   const todayKey = getTodayDateKey();
-  const selectedShiftIsFuture = selectedShiftActionAssignment
-    ? !isDateTodayOrPast(selectedShiftActionAssignment.date, todayKey)
-    : false;
+  const selectedShiftIsFuture = selectedActionDate ? !isDateTodayOrPast(selectedActionDate, todayKey) : false;
 
   const targetYearMonthLabel = `${generationSelection.year}-${String(generationSelection.month).padStart(2, '0')}`;
   const openMonthLabel = `${monthSelection.year}-${String(monthSelection.month).padStart(2, '0')}`;
@@ -866,9 +1043,12 @@ export function ScheduleTab() {
     setDragTargetUid(null);
   };
 
-  const handleSubmitShiftAction = () => {
-    if (!selectedShiftActionAssignment) return;
+  const closeShiftActionModal = () => {
+    setShiftActionModalUid(null);
+    setEmptySlotTarget(null);
+  };
 
+  const handleSubmitShiftAction = () => {
     if (!isManagerMode) {
       if (!actingEmployeeSNumber) {
         setMessage('No active employee context was found for sign-up.');
@@ -876,16 +1056,30 @@ export function ScheduleTab() {
       }
 
       if (shiftActionChoice === 'volunteer') {
-        if (!currentEmployeeCanVolunteerSelectedShift) {
-          setMessage('You can only sign up for open morning/off-period shifts that you are allowed to take.');
+        if (selectedShiftActionAssignment) {
+          if (!currentEmployeeCanVolunteerSelectedShift) {
+            setMessage('You can only sign up for open morning/off-period shifts that you are allowed to take.');
+            return;
+          }
+          volunteerForShiftMutation.mutate({
+            assignment: selectedShiftActionAssignment,
+            targetSNumber: actingEmployeeSNumber,
+            reason: 'Self-volunteered for shift',
+            autoApprove: hasScheduleEditPermission,
+            mode: 'volunteer'
+          });
           return;
         }
-        volunteerForShiftMutation.mutate({
-          assignment: selectedShiftActionAssignment,
-          targetSNumber: actingEmployeeSNumber,
-          reason: 'Self-volunteered for shift',
-          autoApprove: hasScheduleEditPermission,
-          mode: 'volunteer'
+
+        if (!emptySlotTarget || !canEmployeeWorkPeriod(actingEmployeeSNumber, emptySlotTarget.period)) {
+          setMessage('You can only sign up for slots where you are eligible to work.');
+          return;
+        }
+        manualSlotMutation.mutate({
+          mode: 'assign',
+          date: emptySlotTarget.date,
+          period: emptySlotTarget.period,
+          employeeSNumber: actingEmployeeSNumber
         });
         return;
       }
@@ -894,18 +1088,25 @@ export function ScheduleTab() {
         setMessage('You can only remove yourself from a shift you currently volunteered for.');
         return;
       }
-      volunteerForShiftMutation.mutate({
-        assignment: selectedShiftActionAssignment,
-        targetSNumber: selectedShiftActionAssignment.studentSNumber,
-        reason: 'Self-removed from volunteered shift',
-        autoApprove: hasScheduleEditPermission,
-        mode: 'remove'
-      });
-      return;
-    }
+      if (!selectedShiftActionAssignment) return;
 
-    if (selectedShiftActionAttendanceStatus !== 'expected') {
-      setMessage('Only expected shifts can be reassigned.');
+      if (selectedShiftIsManualAssignment) {
+        manualSlotMutation.mutate({
+          mode: 'remove',
+          date: selectedShiftActionAssignment.date,
+          period: selectedShiftActionAssignment.period,
+          shiftSlotKey: selectedShiftActionAssignment.shiftSlotKey,
+          employeeSNumber: selectedShiftActionAssignment.effectiveWorkerSNumber
+        });
+      } else {
+        volunteerForShiftMutation.mutate({
+          assignment: selectedShiftActionAssignment,
+          targetSNumber: selectedShiftActionAssignment.studentSNumber,
+          reason: 'Self-removed from volunteered shift',
+          autoApprove: hasScheduleEditPermission,
+          mode: 'remove'
+        });
+      }
       return;
     }
 
@@ -913,16 +1114,50 @@ export function ScheduleTab() {
       setMessage('Select an employee to assign.');
       return;
     }
-    if (assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber) {
-      setMessage('No change: this employee is already assigned.');
+
+    if (selectedShiftActionAssignment) {
+      if (selectedShiftActionAttendanceStatus !== 'expected') {
+        setMessage('Only expected shifts can be reassigned.');
+        return;
+      }
+
+      if (assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber) {
+        setMessage('No change: this employee is already assigned.');
+        return;
+      }
+
+      if (selectedShiftIsManualAssignment) {
+        manualSlotMutation.mutate({
+          mode: 'reassign',
+          date: selectedShiftActionAssignment.date,
+          period: selectedShiftActionAssignment.period,
+          shiftSlotKey: selectedShiftActionAssignment.shiftSlotKey,
+          previousEmployeeSNumber: selectedShiftActionAssignment.effectiveWorkerSNumber,
+          employeeSNumber: assignmentTargetSNumber
+        });
+        return;
+      }
+
+      volunteerForShiftMutation.mutate({
+        assignment: selectedShiftActionAssignment,
+        targetSNumber: assignmentTargetSNumber,
+        reason: 'Assigned from schedule tab',
+        autoApprove: true,
+        mode: 'assign'
+      });
       return;
     }
-    volunteerForShiftMutation.mutate({
-      assignment: selectedShiftActionAssignment,
-      targetSNumber: assignmentTargetSNumber,
-      reason: 'Assigned from schedule tab',
-      autoApprove: true,
-      mode: 'assign'
+
+    if (!emptySlotTarget) return;
+    if (!canEmployeeWorkPeriod(assignmentTargetSNumber, emptySlotTarget.period)) {
+      setMessage('Selected employee is not eligible for this period.');
+      return;
+    }
+    manualSlotMutation.mutate({
+      mode: 'assign',
+      date: emptySlotTarget.date,
+      period: emptySlotTarget.period,
+      employeeSNumber: assignmentTargetSNumber
     });
   };
 
@@ -1109,12 +1344,22 @@ export function ScheduleTab() {
                             if (left.period !== right.period) return left.period - right.period;
                             return left.shiftSlotKey.localeCompare(right.shiftSlotKey);
                           });
+                        const targetPeriod = resolvePeriodForDay(periodBand.periods, dayType);
 
                         return (
                           <td className={`border-b border-neutral-300 p-2 align-top ${baseCellTone}`} key={`${day.dateKey}-${periodBand.id}`}>
                             {!day.inCurrentMonth && <span className="text-[11px] text-neutral-400">—</span>}
                             {day.inCurrentMonth && assignments.length === 0 && (
-                              <span className="text-[11px] text-neutral-500">No assignment</span>
+                              <button
+                                className="min-h-[44px] w-full border border-dashed border-neutral-400 px-2 py-2 text-left text-[11px] text-neutral-600 hover:border-brand-maroon hover:text-brand-maroon"
+                                onClick={() => {
+                                  setEmptySlotTarget({ date: day.dateKey, period: targetPeriod });
+                                  setShiftActionModalUid(null);
+                                }}
+                                type="button"
+                              >
+                                No assignment
+                              </button>
                             )}
                             {day.inCurrentMonth && assignments.length > 0 && (
                               <div className="space-y-1">
@@ -1139,25 +1384,27 @@ export function ScheduleTab() {
                                   const isValidDropTarget = dragSourceUid
                                     ? canSwapAssignments(dragSourceUid, assignment.uid)
                                     : true;
+                                  const isManualAssignment = isManualShiftSlotKey(assignment.shiftSlotKey);
 
                                   return (
                                     <div
-                                      className={`${isSwapModeEnabled ? 'cursor-grab' : 'cursor-pointer'} border p-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
+                                      className={`${isSwapModeEnabled && !isManualAssignment ? 'cursor-grab' : 'cursor-pointer'} border p-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
                                         isDragTarget ? 'ring-2 ring-brand-maroon' : ''
                                       } ${dragSourceUid && !isValidDropTarget ? 'opacity-60' : ''}`}
-                                      draggable={isSwapModeEnabled}
+                                      draggable={isSwapModeEnabled && !isManualAssignment}
                                       key={assignment.uid}
                                       onClick={() => {
                                         if (isSwapModeEnabled) return;
                                         setShiftActionModalUid(assignment.uid);
+                                        setEmptySlotTarget(null);
                                       }}
                                       onDragEnd={() => {
-                                        if (!isSwapModeEnabled) return;
+                                        if (!isSwapModeEnabled || isManualAssignment) return;
                                         setDragSourceUid(null);
                                         setDragTargetUid(null);
                                       }}
                                       onDragOver={(event: DragEvent<HTMLDivElement>) => {
-                                        if (!isSwapModeEnabled) return;
+                                        if (!isSwapModeEnabled || isManualAssignment) return;
                                         event.preventDefault();
                                         if (dragSourceUid && dragSourceUid !== assignment.uid) {
                                           setDragTargetUid(
@@ -1166,13 +1413,13 @@ export function ScheduleTab() {
                                         }
                                       }}
                                       onDragStart={(event: DragEvent<HTMLDivElement>) => {
-                                        if (!isSwapModeEnabled) return;
+                                        if (!isSwapModeEnabled || isManualAssignment) return;
                                         setDragSourceUid(assignment.uid);
                                         event.dataTransfer.effectAllowed = 'move';
                                         event.dataTransfer.setData('text/plain', assignment.uid);
                                       }}
                                       onDrop={(event: DragEvent<HTMLDivElement>) => {
-                                        if (!isSwapModeEnabled) return;
+                                        if (!isSwapModeEnabled || isManualAssignment) return;
                                         event.preventDefault();
                                         const sourceUid = event.dataTransfer.getData('text/plain') || dragSourceUid;
                                         if (sourceUid) {
@@ -1210,6 +1457,11 @@ export function ScheduleTab() {
                                         {isOffPeriod && (
                                           <span className="border border-neutral-500 px-1 text-[10px] text-neutral-700">
                                             Off-period
+                                          </span>
+                                        )}
+                                        {isManualAssignment && (
+                                          <span className="border border-emerald-500 bg-emerald-100 px-1 text-[10px] text-emerald-800">
+                                            Manual
                                           </span>
                                         )}
                                         <span
@@ -1352,7 +1604,7 @@ export function ScheduleTab() {
                 </div>
                 <div className="border border-neutral-300 p-3">
                   <p className="text-xs text-neutral-500">Assignments</p>
-                  <p className="text-sm font-medium">{schedule.schedule.length}</p>
+                  <p className="text-sm font-medium">{visibleAssignments.length}</p>
                 </div>
                 <div className="border border-neutral-300 p-3">
                   <p className="text-xs text-neutral-500">Roster</p>
@@ -1453,38 +1705,47 @@ export function ScheduleTab() {
         </div>
       )}
 
-      {selectedShiftActionAssignment && (
+      {isShiftActionModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
           <div className="w-full max-w-lg border border-neutral-400 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-base font-semibold text-neutral-900">{isManagerMode ? 'Assign Shift' : 'Shift Sign-Up'}</h3>
                 <p className="mt-1 text-sm text-neutral-700">
-                  {rosterNameBySNumber.get(selectedShiftActionAssignment.effectiveWorkerSNumber) ??
-                    selectedShiftActionAssignment.effectiveWorkerSNumber}{' '}
-                  • {selectedShiftActionAssignment.date} • P{selectedShiftActionAssignment.period}
+                  {selectedShiftActionAssignment
+                    ? (rosterNameBySNumber.get(selectedShiftActionAssignment.effectiveWorkerSNumber) ??
+                      selectedShiftActionAssignment.effectiveWorkerSNumber)
+                    : 'Open slot'}{' '}
+                  • {selectedActionDate} {selectedActionPeriod !== null ? `• P${selectedActionPeriod}` : ''}
                 </p>
               </div>
               <button
                 className="min-h-[36px] border border-neutral-500 px-2 text-sm"
-                onClick={() => setShiftActionModalUid(null)}
+                onClick={closeShiftActionModal}
                 type="button"
               >
                 Close
               </button>
             </div>
 
-            <p className="mt-3 text-sm text-neutral-700">
-              Current status:{' '}
-              <span className="font-medium">
-                {selectedShiftActionAttendanceStatus === 'excused'
-                  ? 'pardoned'
-                  : selectedShiftActionAttendanceStatus}
-              </span>
-            </p>
+            {selectedShiftActionAssignment && (
+              <p className="mt-3 text-sm text-neutral-700">
+                Current status:{' '}
+                <span className="font-medium">
+                  {selectedShiftActionAttendanceStatus === 'excused'
+                    ? 'pardoned'
+                    : selectedShiftActionAttendanceStatus}
+                </span>
+              </p>
+            )}
             {selectedShiftSupportsOpenVolunteer && (
               <p className="mt-2 text-xs text-neutral-600">
                 Open slot: this shift is morning or off-period for the current worker, so eligible employees can volunteer.
+              </p>
+            )}
+            {!selectedShiftActionAssignment && (
+              <p className="mt-2 text-xs text-neutral-600">
+                Open slot: assign an employee directly for this date/period.
               </p>
             )}
 
@@ -1494,7 +1755,11 @@ export function ScheduleTab() {
                   Assign to employee
                   <select
                     className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
-                    disabled={managerAssignableOptions.length === 0 || volunteerForShiftMutation.isPending}
+                    disabled={
+                      managerAssignableOptions.length === 0 ||
+                      volunteerForShiftMutation.isPending ||
+                      manualSlotMutation.isPending
+                    }
                     onChange={(event) => setAssignmentTargetSNumber(event.target.value)}
                     value={assignmentTargetSNumber}
                   >
@@ -1511,7 +1776,7 @@ export function ScheduleTab() {
                 <div className="flex justify-end gap-2">
                   <button
                     className="min-h-[44px] border border-neutral-500 px-3 text-sm"
-                    onClick={() => setShiftActionModalUid(null)}
+                    onClick={closeShiftActionModal}
                     type="button"
                   >
                     Cancel
@@ -1520,9 +1785,11 @@ export function ScheduleTab() {
                     className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                     disabled={
                       volunteerForShiftMutation.isPending ||
-                      selectedShiftActionAttendanceStatus !== 'expected' ||
+                      manualSlotMutation.isPending ||
+                      (selectedShiftActionAssignment && selectedShiftActionAttendanceStatus !== 'expected') ||
                       !assignmentTargetSNumber ||
-                      assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber
+                      (selectedShiftActionAssignment &&
+                        assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber)
                     }
                     onClick={handleSubmitShiftAction}
                     type="button"
@@ -1566,7 +1833,7 @@ export function ScheduleTab() {
                     <div className="flex justify-end gap-2">
                       <button
                         className="min-h-[44px] border border-neutral-500 px-3 text-sm"
-                        onClick={() => setShiftActionModalUid(null)}
+                        onClick={closeShiftActionModal}
                         type="button"
                       >
                         Cancel
@@ -1575,6 +1842,7 @@ export function ScheduleTab() {
                         className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                         disabled={
                           volunteerForShiftMutation.isPending ||
+                          manualSlotMutation.isPending ||
                           (shiftActionChoice === 'volunteer' && !currentEmployeeCanVolunteerSelectedShift) ||
                           (shiftActionChoice === 'remove' && !currentEmployeeCanRemoveSelfSelectedShift)
                         }
@@ -1590,7 +1858,7 @@ export function ScheduleTab() {
                     <div className="flex justify-end">
                       <button
                         className="min-h-[44px] border border-neutral-500 px-3 text-sm"
-                        onClick={() => setShiftActionModalUid(null)}
+                        onClick={closeShiftActionModal}
                         type="button"
                       >
                         Close
@@ -1600,73 +1868,75 @@ export function ScheduleTab() {
               </div>
             )}
 
-            <div className="mt-4 border-t border-neutral-200 pt-3">
-              <p className="text-sm font-medium text-neutral-900">Attendance</p>
-              {!canEditSelectedShiftAttendance && (
-                <p className="mt-2 text-sm text-neutral-700">
-                  You can only edit attendance for your own shift entries.
-                </p>
-              )}
-              {canEditSelectedShiftAttendance && (
-                <>
-                  <label className="mt-2 block text-sm">
-                    Reason (required for Excused)
-                    <textarea
-                      className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
-                      onChange={(event) => setAttendanceReason(event.target.value)}
-                      value={attendanceReason}
-                    />
-                  </label>
-                  <div className="mt-3 grid grid-cols-3 gap-2">
-                    <button
-                      className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={updateAttendanceMutation.isPending || selectedShiftIsFuture}
-                      onClick={() =>
-                        updateAttendanceMutation.mutate({
-                          assignment: selectedShiftActionAssignment,
-                          status: 'present'
-                        })
-                      }
-                      type="button"
-                    >
-                      Mark Present
-                    </button>
-                    <button
-                      className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={updateAttendanceMutation.isPending}
-                      onClick={() =>
-                        updateAttendanceMutation.mutate({
-                          assignment: selectedShiftActionAssignment,
-                          status: 'absent'
-                        })
-                      }
-                      type="button"
-                    >
-                      Mark Absent
-                    </button>
-                    <button
-                      className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={updateAttendanceMutation.isPending || !attendanceReason.trim() || selectedShiftIsFuture}
-                      onClick={() =>
-                        updateAttendanceMutation.mutate({
-                          assignment: selectedShiftActionAssignment,
-                          status: 'excused',
-                          reason: attendanceReason.trim()
-                        })
-                      }
-                      type="button"
-                    >
-                      Mark Excused
-                    </button>
-                  </div>
-                  {selectedShiftIsFuture && (
-                    <p className="mt-2 text-xs text-neutral-600">
-                      Present and excused overrides are only allowed on the shift date or after.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
+            {selectedShiftActionAssignment && (
+              <div className="mt-4 border-t border-neutral-200 pt-3">
+                <p className="text-sm font-medium text-neutral-900">Attendance</p>
+                {!canEditSelectedShiftAttendance && (
+                  <p className="mt-2 text-sm text-neutral-700">
+                    You can only edit attendance for your own shift entries.
+                  </p>
+                )}
+                {canEditSelectedShiftAttendance && (
+                  <>
+                    <label className="mt-2 block text-sm">
+                      Reason (required for Excused)
+                      <textarea
+                        className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                        onChange={(event) => setAttendanceReason(event.target.value)}
+                        value={attendanceReason}
+                      />
+                    </label>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <button
+                        className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={updateAttendanceMutation.isPending || selectedShiftIsFuture}
+                        onClick={() =>
+                          updateAttendanceMutation.mutate({
+                            assignment: selectedShiftActionAssignment,
+                            status: 'present'
+                          })
+                        }
+                        type="button"
+                      >
+                        Mark Present
+                      </button>
+                      <button
+                        className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={updateAttendanceMutation.isPending}
+                        onClick={() =>
+                          updateAttendanceMutation.mutate({
+                            assignment: selectedShiftActionAssignment,
+                            status: 'absent'
+                          })
+                        }
+                        type="button"
+                      >
+                        Mark Absent
+                      </button>
+                      <button
+                        className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={updateAttendanceMutation.isPending || !attendanceReason.trim() || selectedShiftIsFuture}
+                        onClick={() =>
+                          updateAttendanceMutation.mutate({
+                            assignment: selectedShiftActionAssignment,
+                            status: 'excused',
+                            reason: attendanceReason.trim()
+                          })
+                        }
+                        type="button"
+                      >
+                        Mark Excused
+                      </button>
+                    </div>
+                    {selectedShiftIsFuture && (
+                      <p className="mt-2 text-xs text-neutral-600">
+                        Present and excused overrides are only allowed on the shift date or after.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

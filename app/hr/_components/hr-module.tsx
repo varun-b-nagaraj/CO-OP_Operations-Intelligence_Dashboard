@@ -62,17 +62,6 @@ export function HRModule() {
     router.replace(href, { scroll: false });
   };
 
-  const onModuleChange = (module: PrimaryModule) => {
-    const nextParams = new URLSearchParams(searchParams.toString());
-    nextParams.set('module', module);
-    if (module === 'hr') {
-      nextParams.set('tab', resolvedHRTab ?? 'schedule');
-    } else {
-      nextParams.set('tab', activeCFATab);
-    }
-    replaceWithParams(nextParams);
-  };
-
   const onHRTabChange = (tab: HRTabItem['id']) => {
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.set('module', 'hr');
@@ -91,43 +80,16 @@ export function HRModule() {
     <main className="min-h-screen w-full p-3 md:p-6">
       <section className="border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-4">
-          <h1 className="text-xl font-semibold text-neutral-900">Inventory Operations Dashboard</h1>
+          <h1 className="text-xl font-semibold text-neutral-900">
+            {resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
+          </h1>
           <p className="mt-1 text-sm text-neutral-700">
-            Switch between HR operations and Chick-fil-A operations in one place.
+            Module view is selected at launch and stays locked on this page.
           </p>
         </header>
 
-        <nav aria-label="Primary modules" className="border-b border-neutral-300 bg-white" role="tablist">
-          <div className="grid grid-cols-2 gap-2 p-2 md:flex md:flex-wrap">
-            {([
-              { id: 'hr', label: 'HR' },
-              { id: 'cfa', label: 'Chick-fil-A' }
-            ] as const).map((module) => {
-              const isActive = resolvedModule === module.id;
-              return (
-                <button
-                  aria-controls={`module-panel-${module.id}`}
-                  aria-selected={isActive}
-                  className={`min-h-[44px] min-w-[44px] border px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                    isActive
-                      ? 'border-brand-maroon bg-brand-maroon text-white'
-                      : 'border-neutral-300 bg-white text-neutral-800 hover:border-brand-maroon'
-                  }`}
-                  id={`module-tab-${module.id}`}
-                  key={module.id}
-                  onClick={() => onModuleChange(module.id)}
-                  role="tab"
-                  type="button"
-                >
-                  {module.label}
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-
         {resolvedModule === 'hr' ? (
-          <section aria-labelledby="module-tab-hr" id="module-panel-hr" role="tabpanel">
+          <section id="module-panel-hr">
             <header className="border-b border-neutral-300 p-4">
               <h2 className="text-lg font-semibold text-neutral-900">HR Module</h2>
               <p className="mt-1 text-sm text-neutral-700">
@@ -152,7 +114,7 @@ export function HRModule() {
             </section>
           </section>
         ) : (
-          <section aria-labelledby="module-tab-cfa" id="module-panel-cfa" role="tabpanel">
+          <section id="module-panel-cfa">
             <CFAModule activeTab={activeCFATab} onTabChange={onCFATabChange} />
           </section>
         )}
