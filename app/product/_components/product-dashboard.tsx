@@ -495,21 +495,23 @@ export function ProductDashboard() {
   };
 
   return (
-    <main className="min-h-screen w-full bg-neutral-100 text-neutral-900">
-      <div className="flex min-h-screen w-full flex-col md:flex-row">
-        <aside className="w-full border-b border-neutral-300 bg-neutral-50 md:min-h-screen md:w-64 md:border-b-0 md:border-r">
+    <main className="min-h-screen w-full text-neutral-900">
+      <div className="grid min-h-screen w-full grid-cols-1 border border-neutral-300 bg-white md:grid-cols-[240px_1fr]">
+        <aside className="w-full border-b border-neutral-300 bg-white md:min-h-screen md:border-b-0 md:border-r">
           <div className="border-b border-neutral-300 px-4 py-4">
             <h1 className="text-lg font-semibold">Product Dashboard</h1>
             <p className="mt-1 text-xs text-neutral-600">School Store Operations Portal</p>
           </div>
-          <nav aria-label="Product navigation" className="p-2" role="tablist">
+          <nav aria-label="Product navigation" className="p-0" role="tablist">
             {NAV_ITEMS.map((item) => {
               const isActive = activeView === item.id || (item.id === 'orders' && activeView === 'order-detail');
               return (
                 <button
                   aria-selected={isActive}
-                  className={`flex w-full items-center justify-between border-b border-neutral-200 px-3 py-3 text-left text-sm font-medium ${
-                    isActive ? 'bg-neutral-900 text-white' : 'bg-transparent text-neutral-800 hover:bg-neutral-200'
+                  className={`flex min-h-[44px] w-full items-center justify-between border-b border-neutral-300 px-4 py-3 text-left text-sm font-medium ${
+                    isActive
+                      ? 'bg-brand-maroon text-white'
+                      : 'bg-white text-neutral-800 hover:bg-neutral-50'
                   }`}
                   key={item.id}
                   onClick={() => setActiveView(item.id)}
@@ -540,7 +542,7 @@ export function ProductDashboard() {
                     </div>
                   </div>
                   <button
-                    className="min-h-[40px] border border-neutral-900 bg-neutral-900 px-4 text-sm font-medium text-white hover:bg-black"
+                    className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white hover:bg-[#6a0000]"
                     onClick={onNewOrder}
                     type="button"
                   >
@@ -551,7 +553,7 @@ export function ProductDashboard() {
 
               {activeView === 'orders' ? (
                 <>
-                  <section className="border-b border-neutral-300 bg-neutral-50 px-4 py-3 md:px-6" aria-label="Order filters">
+                  <section className="border-b border-neutral-300 bg-white px-4 py-3 md:px-6" aria-label="Order filters">
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
                       <select
                         className="min-h-[38px] border border-neutral-300 bg-white px-2 text-sm"
@@ -744,7 +746,7 @@ export function ProductDashboard() {
                     <div className="mb-3 flex items-center justify-between">
                       <h3 className="text-base font-semibold">Line Items</h3>
                       <button
-                        className="min-h-[36px] border border-neutral-900 bg-neutral-900 px-3 text-sm text-white hover:bg-black"
+                        className="min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
                         onClick={addOrderItem}
                         type="button"
                       >
@@ -935,7 +937,7 @@ export function ProductDashboard() {
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-2">
                             <button
-                              className="min-h-[32px] border border-neutral-900 bg-neutral-900 px-3 text-xs text-white hover:bg-black"
+                              className="min-h-[32px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]"
                               onClick={() => createOrderFromPrompt(prompt)}
                               type="button"
                             >
@@ -964,7 +966,7 @@ export function ProductDashboard() {
                 <h2 className="text-lg font-semibold">Inventory</h2>
               </header>
 
-              <section className="border-b border-neutral-300 bg-neutral-50 px-4 py-3 text-sm md:px-6">
+              <section className="border-b border-neutral-300 bg-white px-4 py-3 text-sm md:px-6">
                 <p>
                   <span className="font-medium">Last upload time:</span> {inventoryMeta.lastUploadTime}
                 </p>
@@ -1170,11 +1172,11 @@ export function ProductDashboard() {
                       <div className="border-b border-neutral-300 bg-neutral-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-600 md:border-b-0 md:border-r">
                         Front
                       </div>
-                      <div className="min-h-[110px] border-b border-neutral-300 bg-gradient-to-r from-neutral-200 to-neutral-50 md:border-b-0 md:border-r" />
+                      <div className="min-h-[110px] border-b border-neutral-300 bg-neutral-100 md:border-b-0 md:border-r" />
                       <div className="border-b border-neutral-300 bg-neutral-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-600 md:border-b-0 md:border-r">
                         Back
                       </div>
-                      <div className="min-h-[110px] border-b border-neutral-300 bg-gradient-to-r from-neutral-200 to-neutral-50 md:border-b-0 md:border-r" />
+                      <div className="min-h-[110px] border-b border-neutral-300 bg-neutral-100 md:border-b-0 md:border-r" />
                       <div className="px-3 py-3 md:border-r md:border-neutral-300">
                         <p className="text-xs text-neutral-500">Name</p>
                         <p className="text-sm font-medium">{design.name}</p>
@@ -1218,7 +1220,7 @@ export function ProductDashboard() {
                         <td className="px-4 py-3">{item.priority}</td>
                         <td className="px-4 py-3">{item.status}</td>
                         <td className="px-4 py-3">
-                          <button className="min-h-[32px] border border-neutral-900 bg-neutral-900 px-3 text-xs text-white hover:bg-black" type="button">
+                          <button className="min-h-[32px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]" type="button">
                             Convert
                           </button>
                         </td>
