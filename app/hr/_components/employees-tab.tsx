@@ -144,6 +144,31 @@ function getMeetingSessionVisual(status: 'present' | 'absent' | null, overrideTy
   };
 }
 
+function getShiftStatusVisual(status: string | null): { label: string; badgeClass: string } {
+  if (status === 'present') {
+    return {
+      label: 'present',
+      badgeClass: 'border-green-400 bg-green-100 text-green-700'
+    };
+  }
+  if (status === 'absent') {
+    return {
+      label: 'absent',
+      badgeClass: 'border-red-400 bg-red-100 text-red-700'
+    };
+  }
+  if (status === 'excused') {
+    return {
+      label: 'pardoned',
+      badgeClass: 'border-blue-400 bg-blue-100 text-blue-700'
+    };
+  }
+  return {
+    label: 'expected',
+    badgeClass: 'border-neutral-500 bg-white text-neutral-700'
+  };
+}
+
 type FancyOption = {
   value: string;
   label: string;
@@ -1242,16 +1267,27 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                                   onChange={(value) =>
                                     setSelectedShiftDrafts((previous) => ({ ...previous, [employee.id]: value }))
                                   }
-                                  options={recentShiftRows.map((row) => ({
-                                    value: shiftRowKey(row),
-                                    label: `${String(row.shift_date)} P${String(row.shift_period)}`,
-                                    meta: String(row.status ?? 'expected')
-                                  }))}
+                                  options={recentShiftRows.map((row) => {
+                                    const visual = getShiftStatusVisual(String(row.status ?? 'expected'));
+                                    return {
+                                      value: shiftRowKey(row),
+                                      label: `${String(row.shift_date)} P${String(row.shift_period)}`,
+                                      meta: visual.label,
+                                      metaClassName: visual.badgeClass
+                                    };
+                                  })}
                                   placeholder="No recent shifts"
                                   value={selectedShiftKey}
                                 />
                                 <p className="text-xs text-neutral-600">
-                                  Selected status: {selectedShift ? String(selectedShift.status) : 'N/A'}
+                                  Selected status:{' '}
+                                  <span
+                                    className={`inline-block rounded border px-1 py-0.5 ${
+                                      getShiftStatusVisual(selectedShift ? String(selectedShift.status) : null).badgeClass
+                                    }`}
+                                  >
+                                    {getShiftStatusVisual(selectedShift ? String(selectedShift.status) : null).label}
+                                  </span>
                                 </p>
                                 <label className="block text-sm">
                                   Reason

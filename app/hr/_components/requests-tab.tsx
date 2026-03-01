@@ -262,15 +262,7 @@ export function RequestsTab() {
       }
     }
 
-    // Fallback for manual/open slots not present in generated schedule.
-    for (const row of attendanceRows) {
-      if (!row.shift_slot_key || !row.employee_s_number) continue;
-      if (!map.has(row.shift_slot_key)) {
-        map.set(row.shift_slot_key, row.employee_s_number);
-      }
-    }
-
-    // Apply approved swaps in chronological order to get current expected worker.
+    // Apply approved swaps in chronological order to get the chain-applied worker.
     for (const row of approvedRequestsForSelectionQuery.data ?? []) {
       const slotKey = row.shift_slot_key ?? '';
       const fromSNumber = row.from_employee_s_number ?? '';
@@ -284,6 +276,13 @@ export function RequestsTab() {
       if (currentWorker === fromSNumber) {
         map.set(slotKey, toSNumber);
       }
+    }
+
+    // Source-of-truth override: shift_attendance rows represent the current expected owner for this slot.
+    // This keeps Requests aligned with what Schedule/Attendance currently tracks.
+    for (const row of attendanceRows) {
+      if (!row.shift_slot_key || !row.employee_s_number) continue;
+      map.set(row.shift_slot_key, row.employee_s_number);
     }
 
     return map;

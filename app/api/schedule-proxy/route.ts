@@ -97,7 +97,8 @@ export async function GET(request: NextRequest) {
       (approvedExchanges ?? []) as ShiftChangeRequest[]
     );
 
-    const shouldForceRebuild = parsed.data.forceRebuildExpectedShifts === true;
+    const shouldForceRebuild =
+      parsed.data.forceRebuildExpectedShifts === true || parsed.data.forceRefresh === true;
     let shouldBuildExpectedShifts = shouldForceRebuild;
     if (!shouldBuildExpectedShifts) {
       shouldBuildExpectedShifts = !(await monthHasShiftAttendance(

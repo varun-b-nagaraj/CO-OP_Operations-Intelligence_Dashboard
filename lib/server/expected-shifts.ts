@@ -87,7 +87,7 @@ export async function buildExpectedShiftsInternal(
     const existingByKey = new Map<
       string,
       {
-        id: string;
+        id: string | number;
         status: 'expected' | 'present' | 'absent' | 'excused';
       }
     >();
@@ -115,6 +115,7 @@ export async function buildExpectedShiftsInternal(
 
     let created = 0;
     let updated = 0;
+    const desiredKeys = new Set<string>();
 
     for (const assignment of effectiveSchedule.schedule) {
       const row = {
@@ -134,6 +135,7 @@ export async function buildExpectedShiftsInternal(
       const key = [row.shift_date, row.shift_period, row.shift_slot_key, row.employee_s_number].join(
         '|'
       );
+      desiredKeys.add(key);
       const existing = existingByKey.get(key);
       if (!existing) {
         created += 1;
@@ -147,12 +149,33 @@ export async function buildExpectedShiftsInternal(
       }
     }
 
+    const staleExpectedIds: Array<string | number> = [];
+    for (const row of existingRows ?? []) {
+      const key = [row.shift_date, row.shift_period, row.shift_slot_key, row.employee_s_number].join(
+        '|'
+      );
+      if (row.status === 'expected' && !desiredKeys.has(key)) {
+        staleExpectedIds.push(row.id);
+      }
+    }
+
     if (rowsToUpsert.length > 0) {
       const { error: upsertError } = await supabase.from('shift_attendance').upsert(rowsToUpsert, {
         onConflict: 'shift_date,shift_period,shift_slot_key,employee_s_number'
       });
       if (upsertError) {
         return errorResult(correlationId, 'DB_ERROR', upsertError.message);
+      }
+    }
+
+    if (staleExpectedIds.length > 0) {
+      const { error: deleteError } = await supabase
+        .from('shift_attendance')
+        .delete()
+        .in('id', staleExpectedIds)
+        .eq('status', 'expected');
+      if (deleteError) {
+        return errorResult(correlationId, 'DB_ERROR', deleteError.message);
       }
     }
 
