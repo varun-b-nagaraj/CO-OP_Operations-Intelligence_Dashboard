@@ -83,7 +83,7 @@ type SummaryRow = {
   periodsWorked: string;
 };
 
-const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const PERIOD_BANDS: Array<{ id: string; label: string; periods: number[] }> = [
   { id: 'morning', label: '8:20 - 9 AM', periods: [0] },
@@ -346,6 +346,8 @@ export function ScheduleTab() {
   const [savedAssignmentWorkersByUid, setSavedAssignmentWorkersByUid] = useState<Record<string, string>>({});
   const [savedRosterScheduleableById, setSavedRosterScheduleableById] = useState<Record<string, boolean>>({});
   const [pendingManualEdits, setPendingManualEdits] = useState<PendingManualEdit[]>([]);
+  const [expandedAssignmentNameByUid, setExpandedAssignmentNameByUid] = useState<Record<string, boolean>>({});
+  const [pendingJumpToToday, setPendingJumpToToday] = useState(false);
   const [isPersistingEdits, setIsPersistingEdits] = useState(false);
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
@@ -683,6 +685,7 @@ export function ScheduleTab() {
     setShiftActionModalUid(null);
     setEmptySlotTarget(null);
     setPendingManualEdits([]);
+    setExpandedAssignmentNameByUid({});
   }, [schedule]);
 
   useEffect(() => {
@@ -1254,6 +1257,46 @@ export function ScheduleTab() {
     setParams(buildScheduleParams(nextConfig));
     setMessage(`Opened schedule table for ${openMonthLabel}.`);
   };
+
+  const handleJumpToToday = () => {
+    const now = new Date();
+    const todaySelection: YearMonthSelection = {
+      year: now.getFullYear(),
+      month: now.getMonth() + 1
+    };
+    const todayDateKey = getTodayDateKey();
+    const currentMonthMatchesToday =
+      schedule?.meta.year === todaySelection.year && schedule?.meta.month === todaySelection.month;
+
+    if (currentMonthMatchesToday) {
+      const targetWeekIndex = calendarWeeks.findIndex((week) => week.some((day) => day.dateKey === todayDateKey));
+      setActiveWeekIndex(targetWeekIndex >= 0 ? targetWeekIndex : 0);
+      setMessage(`Jumped to today (${todayDateKey}).`);
+      return;
+    }
+
+    if (!confirmDiscardUnsavedChanges()) return;
+    const nextConfig = resolveMonthConfig(todaySelection);
+    setMonthSelection(todaySelection);
+    setGenerationSelection(nextConfig);
+    setParams(buildScheduleParams(nextConfig));
+    setPendingJumpToToday(true);
+    setMessage(`Opened ${todaySelection.year}-${String(todaySelection.month).padStart(2, '0')} and jumped to today.`);
+  };
+
+  useEffect(() => {
+    if (!pendingJumpToToday || !schedule) return;
+    const now = new Date();
+    const todaySelection: YearMonthSelection = {
+      year: now.getFullYear(),
+      month: now.getMonth() + 1
+    };
+    if (schedule.meta.year !== todaySelection.year || schedule.meta.month !== todaySelection.month) return;
+    const todayDateKey = getTodayDateKey();
+    const targetWeekIndex = calendarWeeks.findIndex((week) => week.some((day) => day.dateKey === todayDateKey));
+    setActiveWeekIndex(targetWeekIndex >= 0 ? targetWeekIndex : 0);
+    setPendingJumpToToday(false);
+  }, [pendingJumpToToday, schedule, calendarWeeks]);
 
   const handleGenerationMonthOrYearChange = (nextSelection: YearMonthSelection) => {
     const resolved = resolveMonthConfig(nextSelection);
@@ -1838,6 +1881,13 @@ export function ScheduleTab() {
                 >
                   Previous Week
                 </button>
+                <button
+                  className="min-h-[44px] border border-neutral-500 px-3"
+                  onClick={handleJumpToToday}
+                  type="button"
+                >
+                  Today
+                </button>
                 <p className="text-sm text-neutral-700">
                   Week {activeWeekIndex + 1} / {Math.max(calendarWeeks.length, 1)}
                 </p>
@@ -2034,18 +2084,38 @@ export function ScheduleTab() {
                                       role="button"
                                       tabIndex={0}
                                     >
-                                      <p className="font-medium leading-tight">
+                                      <div className="flex items-start gap-1">
                                         {periodBand.periods.length > 1 && (
-                                          <span className="mr-1 text-[10px] text-neutral-500">P{assignment.period}</span>
+                                          <span className="shrink-0 text-[10px] text-neutral-500">P{assignment.period}</span>
                                         )}
-                                        {effectiveName}
-                                      </p>
-                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        <button
+                                          className={`min-w-0 flex-1 text-left font-medium leading-tight ${
+                                            expandedAssignmentNameByUid[assignment.uid] ? 'whitespace-normal break-words' : 'truncate'
+                                          }`}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setExpandedAssignmentNameByUid((previous) => ({
+                                              ...previous,
+                                              [assignment.uid]: !previous[assignment.uid]
+                                            }));
+                                          }}
+                                          title={effectiveName}
+                                          type="button"
+                                        >
+                                          {effectiveName}
+                                        </button>
                                         {isAlternate && (
-                                          <span className="border border-sky-500 bg-sky-200 px-1 text-[10px] text-sky-900">
-                                            Alternate employee
+                                          <span className="shrink-0 border border-sky-500 bg-sky-200 px-1 text-[10px] text-sky-900">
+                                            Alt
                                           </span>
                                         )}
+                                        <span
+                                          className={`shrink-0 border px-1 text-[10px] uppercase ${attendanceStatusClasses(attendanceStatus)}`}
+                                        >
+                                          {attendanceStatus === 'excused' ? 'pardoned' : attendanceStatus}
+                                        </span>
+                                      </div>
+                                      <div className="mt-1 flex flex-wrap gap-1">
                                         {hasUnsavedWorkerChange && (
                                           <span className="border border-brand-maroon px-1 text-[10px] text-brand-maroon">
                                             Unsaved
@@ -2061,11 +2131,6 @@ export function ScheduleTab() {
                                             Manual
                                           </span>
                                         )}
-                                        <span
-                                          className={`border px-1 text-[10px] uppercase ${attendanceStatusClasses(attendanceStatus)}`}
-                                        >
-                                          {attendanceStatus === 'excused' ? 'pardoned' : attendanceStatus}
-                                        </span>
                                       </div>
                                     </div>
                                   );

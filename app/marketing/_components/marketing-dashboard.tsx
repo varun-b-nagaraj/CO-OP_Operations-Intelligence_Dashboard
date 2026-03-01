@@ -1003,6 +1003,13 @@ export function MarketingDashboard() {
                   >
                     Prev
                   </button>
+                  <button
+                    className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
+                    onClick={() => setMonthAnchor(new Date())}
+                    type="button"
+                  >
+                    Today
+                  </button>
                   <p className="text-sm font-semibold">{monthHeading}</p>
                   <button
                     className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
