@@ -342,8 +342,14 @@ export function RequestsTab() {
       return result.data;
     },
     onSuccess: () => {
-      setStatusMessage('Request approved.');
+      setStatusMessage('Request approved. Schedule updated.');
       queryClient.invalidateQueries({ queryKey: ['hr-shift-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-schedule-table-index'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-schedule-shift-attendance'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-shift-attendance'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-shift-attendance-request-log'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-requests-effective-schedule-month'] });
     },
     onError: (error) =>
       setStatusMessage(error instanceof Error ? error.message : 'Unable to approve request.')
@@ -372,6 +378,11 @@ export function RequestsTab() {
       <form
         className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-3"
         onSubmit={form.handleSubmit((values) => {
+          const eligibleTargets = new Set(eligibleToOptions.map((option) => option.value));
+          if (!eligibleTargets.has(values.to_employee_s_number)) {
+            setStatusMessage('Selected replacement employee is not eligible for this period.');
+            return;
+          }
           if (!resolvedShiftSlotKey) {
             setStatusMessage(
               'Unable to find a shift slot for the selected date, period, and from employee.'

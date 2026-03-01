@@ -754,13 +754,6 @@ export function CFAModule({ activeTab, onTabChange }: CFAModuleProps) {
 
   return (
     <section>
-      <header className="border-b border-neutral-300 p-4">
-        <h2 className="text-lg font-semibold text-neutral-900">Chick-fil-A Dashboard</h2>
-        <p className="mt-1 text-sm text-neutral-700">
-          Daily logging, history, A/B analytics, forecast recommendations, and menu management.
-        </p>
-      </header>
-
       <nav aria-label="Chick-fil-A module tabs" className="border-b border-neutral-300 bg-white" role="tablist">
         <div className="grid grid-cols-2 gap-2 p-2 md:flex md:flex-wrap">
           {cfaTabs.map((tab) => {

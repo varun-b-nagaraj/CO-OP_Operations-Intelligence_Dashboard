@@ -1,0 +1,47 @@
+Inventory Dashboard
+
+I worked with Akshainie on different Inventory operations I would need to include. Some basic features would include inventory count tracking, checking to see if inventory counts match previous volumes, automatic uploads to Lightspeed Backend, inventory check attendance, and others.
+
+Current inventory will be made available first through a database upload and then can be manually edited via the application or a new spreadsheet can also be uploaded.
+
+Automatic Inventory Counter:
+After taking the information from the database to create an iOS-only offline inventory sync system using Multipeer Connectivity (Bluetooth + peer-to-peer Wi-Fi transport) where a privileged host advertises a session with a short join code, accepts authenticated peers, and maintains authoritative state while clients submit scan events (SKU/UPC deltas) that are deduplicated and broadcast for real-time consistency. When the session ends, peers disconnect and the host exports the finalized dataset (CSV/JSON) for upload.
+
+Automatic Inventory Uploads:
+
+The website will allow us to automatically upload inventory counts to lightspeed backend and it also zeros out any items that weren’t counted. This is a 2 step process.
+
+1) Inventory Upload API URL: https://inventory-upload.vercel.app
+Endpoint: /api/oauth/start
+Params: No Params
+
+Example API Request: 
+curl "https://inventory-upload.vercel.app/api/oauth/start"
+
+Example API Response:
+{"ok": true, "mode": "oauth_start", "authorize_url": "https://us.merchantos.com/oauth/authorize.php?response_type=code&client_id=b042210281ea8ea63ab361cbb0e7af0b0d163a0843c1f0b1fd56dbe2349d4fa4&redirect_uri=https%3A%2F%2Finventory-upload.vercel.app%2Fapi%2Foauth%2Fcallback&state=eyJ0cyI6MTc3MjM0MTEzNywibm9uY2UiOiJ3NEhZaDgzdGFDSnNZTTVyUzJBVHJnIiwicmVkaXJlY3RfdXJpIjoiaHR0cHM6Ly9pbnZlbnRvcnktdXBsb2FkLnZlcmNlbC5hcHAvYXBpL29hdXRoL2NhbGxiYWNrIn0.RiYrqBYAoTsEwm3ddBp7MKCjvl0dQQqQJ5Sn0RjQe7s&scope=employee%3Aall+systemuserid%3A1598238", "state": "eyJ0cyI6MTc3MjM0MTEzNywibm9uY2UiOiJ3NEhZaDgzdGFDSnNZTTVyUzJBVHJnIiwicmVkaXJlY3RfdXJpIjoiaHR0cHM6Ly9pbnZlbnRvcnktdXBsb2FkLnZlcmNlbC5hcHAvYXBpL29hdXRoL2NhbGxiYWNrIn0.RiYrqBYAoTsEwm3ddBp7MKCjvl0dQQqQJ5Sn0RjQe7s", "redirect_uri": "https://inventory-upload.vercel.app/api/oauth/callback", "scope": "employee:all systemuserid:1598238", "instructions": "Open authorize_url in browser. Complete Lightspeed login + 2FA. Lightspeed will redirect to oauth_callback with code."}
+
+2) Inventory Upload API URL: https://inventory-upload.vercel.app
+Endpoint: POST api/
+Params: 
+count_name — string | default: API Inventory Upload <timestamp> | label for this upload batch
+shop_id — string | default: "1" | Lightspeed shop ID
+employee_id — string | default: "1" | Lightspeed employee ID
+reconcile — boolean | default: true | whether to reconcile after count items are created
+rps — number | range: 0.05–1.0 (capped at 1.0) | request pacing to avoid rate limit
+items — array (required) | list of items to set count
+items[].system_id — string (or systemSku/system_sku/sku) | Lightspeed System ID
+items[].qty — integer (or quantity/count) | absolute target quantity (QOH)
+Example API Request: 
+curl -X POST "https://inventory-upload.vercel.app/api" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      { "system_id": "210000000624", "qty": 1 }
+    ],
+    "reconcile": true
+  }'
+
+Example API Response:
+{"ok": true, "inventory_count_id": "36", "inventory_count_name": "API Inventory Upload 2026-03-01 04:59:19", "shop_id": "1", "employee_id": "1", "request_rate_limit": {"configured_rps": 1.0, "min_interval_seconds": 1.0, "estimated_processing_seconds": 4}, "summary": {"total_rows": 1, "created": 1, "not_found": 0, "failed": 0, "invalid": 0}, "reconcile": {"attempted": true, "ok": true, "message": "OK", "response": {"@attributes": {"next": "", "previous": ""}, "InventoryCountReconcile": {"inventoryCountReconcileID": "142", "costChange": "0", "costChangeAvgCost": "0", "qohChange": "0", "createTime": "2026-03-01T04:59:22+00:00", "inventoryCountID": "36", "itemID": "0"}}}, "results": [{"row": 1, "system_id": "210000000624", "item_id": "617", "description": "test", "qty": 1, "status": "created", "inventory_count_item_id": "525"}]}
+
