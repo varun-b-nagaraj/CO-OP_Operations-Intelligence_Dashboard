@@ -6,7 +6,6 @@ import QRCode from 'qrcode';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { BarcodeScanner } from '@/app/inventory/_components/barcode-scanner';
-import { QRSyncPanel } from '@/app/inventory/_components/qr-sync-panel';
 import { resolveCatalogItemByCode } from '@/lib/inventory/identifiers';
 import {
   clearSessionLocalData,
@@ -20,13 +19,7 @@ import {
   saveSnapshot
 } from '@/lib/inventory/indexeddb';
 import { InventoryCatalogItem, InventoryCountEvent } from '@/lib/inventory/types';
-import {
-  createQrPacket,
-  createSessionJoinPacket,
-  encodeQrPacket,
-  parseQrPacket,
-  parseSessionJoinPacket
-} from '@/lib/inventory/sync';
+import { createSessionJoinPacket, parseSessionJoinPacket } from '@/lib/inventory/sync';
 
 const TABS = ['Catalog', 'Sessions', 'Count View', 'Finalize & Upload'] as const;
 type TabId = (typeof TABS)[number];
@@ -68,16 +61,9 @@ function aggregateTotals(events: InventoryCountEvent[]): Map<string, number> {
   return map;
 }
 
-function toUploadRows(input: {
-  finalizedTotals: Array<{ system_id: string; qty: number }>;
-  countRows: Array<{ system_id: string; qty: number }>;
-}) {
-  if (input.finalizedTotals.length) return input.finalizedTotals;
-  return input.countRows.map((row) => ({ system_id: row.system_id, qty: row.qty }));
-}
-
 export function InventoryDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('Catalog');
+
   const [catalog, setCatalog] = useState<InventoryCatalogItem[]>([]);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogStatus, setCatalogStatus] = useState('');
@@ -95,9 +81,9 @@ export function InventoryDashboard() {
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingTotals, setPendingTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
   const [snapshotTotals, setSnapshotTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
+  const [serverTotals, setServerTotals] = useState<Array<{ system_id: string; qty: number }>>([]);
 
   const [syncStatus, setSyncStatus] = useState('');
-  const [outgoingQrPacket, setOutgoingQrPacket] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
 
   const [hostJoinQr, setHostJoinQr] = useState('');
@@ -153,6 +139,7 @@ export function InventoryDashboard() {
   const refreshPendingState = async (sid: string) => {
     const pendingEvents = await getPendingEvents(sid);
     setPendingCount(pendingEvents.length);
+
     const pendingMap = aggregateTotals(pendingEvents);
     setPendingTotals(Array.from(pendingMap.entries()).map(([system_id, qty]) => ({ system_id, qty })));
 
@@ -168,7 +155,7 @@ export function InventoryDashboard() {
         return payload.items;
       }
     } catch {
-      // no-op, fallback to cached snapshot below
+      // fallback to cached snapshot below
     }
 
     return readCatalogSnapshot() as Promise<InventoryCatalogItem[]>;
@@ -188,7 +175,7 @@ export function InventoryDashboard() {
       : allItems;
 
     setCatalog(filtered);
-    setCatalogStatus(`Catalog ready on this phone (${allItems.length} total items cached).`);
+    setCatalogStatus(`Catalog cached locally (${allItems.length} total items).`);
   };
 
   const loadSessionState = async (sid: string) => {
@@ -196,11 +183,17 @@ export function InventoryDashboard() {
     try {
       const payload = await fetchJson<{
         ok: true;
-        state: { session: { session_name: string; status: string }; participants: unknown[] };
+        state: {
+          session: { session_name: string; status: string };
+          participants: unknown[];
+          totals?: Array<{ system_id: string; qty: number }>;
+        };
       }>(`/api/inventory/session/${sid}/state`);
+
       setSessionStatus(
         `Session ${payload.state.session.session_name} (${payload.state.session.status}) | Attendance: ${payload.state.participants.length}`
       );
+      setServerTotals(payload.state.totals ?? []);
     } catch (error) {
       setSessionStatus(error instanceof Error ? error.message : 'Unable to load session state');
     }
@@ -238,7 +231,7 @@ export function InventoryDashboard() {
         host_id: deviceId
       });
       const url = await QRCode.toDataURL(packet, {
-        width: 260,
+        width: 240,
         margin: 1,
         errorCorrectionLevel: 'L'
       });
@@ -274,7 +267,6 @@ export function InventoryDashboard() {
 
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
-
           const context = canvas.getContext('2d');
           if (!context) return;
 
@@ -300,7 +292,7 @@ export function InventoryDashboard() {
             await cacheCatalogLocally();
             await loadSessionState(packet.session_id);
             await refreshPendingState(packet.session_id);
-            setScanJoinStatus(`Joined session ${packet.session_id}. Local catalog cache is ready.`);
+            setScanJoinStatus(`Joined session ${packet.session_id}.`);
             setScanJoinActive(false);
           } catch (error) {
             setScanJoinStatus(error instanceof Error ? error.message : 'Invalid host QR');
@@ -326,6 +318,9 @@ export function InventoryDashboard() {
 
   const displayedTotals = useMemo(() => {
     const merged = new Map<string, number>();
+    for (const row of serverTotals) {
+      merged.set(row.system_id, row.qty);
+    }
     for (const row of snapshotTotals) {
       merged.set(row.system_id, row.qty);
     }
@@ -333,7 +328,7 @@ export function InventoryDashboard() {
       merged.set(row.system_id, (merged.get(row.system_id) ?? 0) + row.qty);
     }
     return merged;
-  }, [pendingTotals, snapshotTotals]);
+  }, [pendingTotals, serverTotals, snapshotTotals]);
 
   const countRows = useMemo(() => {
     return Array.from(displayedTotals.entries())
@@ -348,10 +343,10 @@ export function InventoryDashboard() {
       .sort((a, b) => b.qty - a.qty);
   }, [catalog, displayedTotals]);
 
-  const uploadRows = useMemo(
-    () => toUploadRows({ finalizedTotals, countRows: countRows.map((row) => ({ system_id: row.system_id, qty: row.qty })) }),
-    [countRows, finalizedTotals]
-  );
+  const uploadRows = useMemo(() => {
+    if (finalizedTotals.length) return finalizedTotals;
+    return countRows.map((row) => ({ system_id: row.system_id, qty: row.qty }));
+  }, [countRows, finalizedTotals]);
 
   const appendEvent = async (systemId: string, deltaQty: number) => {
     if (!sessionId) {
@@ -404,7 +399,7 @@ export function InventoryDashboard() {
       await cacheCatalogLocally();
       await loadSessionState(payload.session.id);
       await refreshPendingState(payload.session.id);
-      setSessionStatus(`Session created: ${payload.session.id}. Catalog is cached locally.`);
+      setSessionStatus(`Session created: ${payload.session.id}.`);
     } catch (error) {
       setSessionStatus(error instanceof Error ? error.message : 'Failed to create session');
     }
@@ -433,10 +428,39 @@ export function InventoryDashboard() {
       await cacheCatalogLocally();
       await loadSessionState(target);
       await refreshPendingState(target);
-      setSessionStatus(`Joined session ${target}. Catalog is cached locally.`);
+      setSessionStatus(`Joined session ${target}.`);
     } catch (error) {
       setSessionStatus(error instanceof Error ? error.message : 'Unable to join session');
     }
+  };
+
+  const pushPendingEventsToBackend = async () => {
+    if (!sessionId) throw new Error('No active session');
+
+    const pendingEvents = await getPendingEvents(sessionId);
+    if (!pendingEvents.length) {
+      return { totals: serverTotals, sent: 0 };
+    }
+
+    const payload = await fetchJson<{ ok: true; totals: Array<{ system_id: string; qty: number }> }>(
+      '/api/inventory/session/commit-events',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          actor_id: deviceId,
+          actor_name: actorName,
+          events: pendingEvents
+        })
+      }
+    );
+
+    await markEventsSynced(pendingEvents.map((event) => event.event_id));
+    await saveSnapshot(sessionId, payload.totals);
+    setServerTotals(payload.totals);
+    await refreshPendingState(sessionId);
+    return { totals: payload.totals, sent: pendingEvents.length };
   };
 
   const syncNow = async () => {
@@ -448,98 +472,14 @@ export function InventoryDashboard() {
 
     setIsSyncing(true);
     try {
-      const pendingEvents = await getPendingEvents(sessionId);
-      if (!pendingEvents.length) {
-        setSyncStatus('No pending local events');
-        return;
-      }
-
-      if (role === 'host') {
-        setSyncStatus('Host ready: import participant QR packets below.');
-        return;
-      }
-
-      const packet = createQrPacket({
-        context: {
-          session_id: sessionId,
-          actor_id: deviceId,
-          actor_name: actorName,
-          role
-        },
-        events: pendingEvents
-      });
-      setOutgoingQrPacket(packet);
-      setSyncStatus('Participant packet generated. Have host import it.');
+      const result = await pushPendingEventsToBackend();
+      await loadSessionState(sessionId);
+      setSyncStatus(result.sent > 0 ? `Synced ${result.sent} events to backend.` : 'No pending local events to sync.');
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : 'Sync failed');
     } finally {
       setIsSyncing(false);
     }
-  };
-
-  const importQrPacket = async (packetText: string) => {
-    if (!sessionId) throw new Error('No active session');
-
-    const packet = parseQrPacket(packetText);
-    if (packet.session_id !== sessionId) {
-      throw new Error('Packet is for a different session');
-    }
-
-    if (role === 'host' && packet.events.length) {
-      for (const event of packet.events) {
-        await saveLocalEvent({
-          session_id: sessionId,
-          event_id: event.event_id,
-          actor_id: event.actor_id,
-          system_id: event.system_id,
-          delta_qty: event.delta_qty,
-          timestamp: event.timestamp
-        });
-      }
-
-      const allLocal = await getSessionEvents(sessionId);
-      const mergedTotals = aggregateTotals(
-        allLocal.map((row) => ({
-          session_id: row.session_id,
-          event_id: row.event_id,
-          actor_id: row.actor_id,
-          system_id: row.system_id,
-          delta_qty: row.delta_qty,
-          timestamp: row.timestamp
-        }))
-      );
-
-      const totals = Array.from(mergedTotals.entries()).map(([system_id, qty]) => ({ system_id, qty }));
-      await saveSnapshot(sessionId, totals);
-      await refreshPendingState(sessionId);
-
-      const ackPacket = encodeQrPacket({
-        session_id: sessionId,
-        actor_id: deviceId,
-        generated_at: new Date().toISOString(),
-        events: [],
-        totals,
-        ack_event_ids: packet.events.map((event) => event.event_id)
-      });
-
-      setOutgoingQrPacket(ackPacket);
-      setSyncStatus(`Imported ${packet.events.length} events from participant.`);
-      return;
-    }
-
-    if (packet.totals?.length) {
-      await saveSnapshot(sessionId, packet.totals);
-      setSnapshotTotals(packet.totals);
-    }
-
-    if (packet.ack_event_ids?.length) {
-      await markEventsSynced(packet.ack_event_ids);
-      await refreshPendingState(sessionId);
-      setSyncStatus('Host ack imported. Local events marked synced.');
-      return;
-    }
-
-    setSyncStatus('Packet imported');
   };
 
   const commitLocalEventsToServer = async () => {
@@ -573,10 +513,9 @@ export function InventoryDashboard() {
 
     await markEventsSynced(localEvents.map((row) => row.event_id));
     await saveSnapshot(sessionId, payload.totals);
-    setSnapshotTotals(payload.totals);
+    setServerTotals(payload.totals);
     await refreshPendingState(sessionId);
     await loadSessionState(sessionId);
-
     return payload;
   };
 
@@ -638,13 +577,11 @@ export function InventoryDashboard() {
   };
 
   const exportFinal = (format: 'csv' | 'json') => {
-    const rows = uploadRows;
     const now = new Date().toISOString().replace(/[:.]/g, '-');
-
     const content =
       format === 'json'
-        ? JSON.stringify(rows, null, 2)
-        : ['system_id,qty', ...rows.map((row) => `${row.system_id},${row.qty}`)].join('\n');
+        ? JSON.stringify(uploadRows, null, 2)
+        : ['system_id,qty', ...uploadRows.map((row) => `${row.system_id},${row.qty}`)].join('\n');
 
     const blob = new Blob([content], {
       type: format === 'json' ? 'application/json' : 'text/csv'
@@ -723,42 +660,43 @@ export function InventoryDashboard() {
   };
 
   return (
-    <main className="min-h-screen w-full p-4 md:p-6">
+    <main className="min-h-screen w-full p-2 sm:p-4 md:p-6">
       <section className="border border-neutral-300 bg-white">
-        <header className="border-b border-neutral-300 p-4">
-          <h1 className="text-xl font-semibold text-neutral-900">Inventory Dashboard</h1>
-          <p className="mt-1 text-sm text-neutral-700">
-            Stable offline-first flow: local phone counting, QR sync to host, host commit/finalize/upload.
+        <header className="border-b border-neutral-300 p-3 sm:p-4">
+          <h1 className="text-lg font-semibold text-neutral-900 sm:text-xl">Inventory Dashboard</h1>
+          <p className="mt-1 text-xs text-neutral-700 sm:text-sm">
+            Sync pushes local phone counts to backend for this active session. Host sees only this session totals.
           </p>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
             <span className={`border px-2 py-1 ${online ? 'border-emerald-700 text-emerald-700' : 'border-red-700 text-red-700'}`}>
               {online ? 'Online' : 'Offline'}
             </span>
             <span className="border border-neutral-400 px-2 py-1">Role: {role}</span>
-            <span className="border border-neutral-400 px-2 py-1">Device: {deviceId || '...'}</span>
             <span className="border border-neutral-400 px-2 py-1">Pending events: {pendingCount}</span>
           </div>
         </header>
 
-        <nav className="flex flex-wrap border-b border-neutral-300 bg-neutral-50">
-          {TABS.map((tab) => (
-            <button
-              className={`border-r border-neutral-300 px-4 py-2 text-sm ${activeTab === tab ? 'bg-white font-semibold' : 'bg-neutral-50'}`}
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              type="button"
-            >
-              {tab}
-            </button>
-          ))}
+        <nav className="overflow-x-auto border-b border-neutral-300 bg-neutral-50">
+          <div className="flex min-w-max">
+            {TABS.map((tab) => (
+              <button
+                className={`border-r border-neutral-300 px-4 py-2 text-sm ${activeTab === tab ? 'bg-white font-semibold' : 'bg-neutral-50'}`}
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                type="button"
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
         </nav>
 
-        <section className="space-y-4 p-4">
+        <section className="space-y-3 p-3 sm:space-y-4 sm:p-4">
           {activeTab === 'Catalog' ? (
-            <section className="space-y-4">
-              <div className="flex flex-wrap gap-2">
+            <section className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <input
-                  className="min-w-64 border border-neutral-300 px-2 py-2 text-sm"
+                  className="w-full border border-neutral-300 px-2 py-2 text-sm"
                   onChange={(event) => setCatalogQuery(event.target.value)}
                   placeholder="Search by item, UPC, EAN, System ID"
                   value={catalogQuery}
@@ -801,18 +739,18 @@ export function InventoryDashboard() {
                 />
               </div>
 
-              <div className="grid gap-2 border border-neutral-300 p-3 md:grid-cols-2">
-                <h3 className="md:col-span-2 text-sm font-semibold text-neutral-900">Manual Add / Edit Item</h3>
+              <div className="grid gap-2 border border-neutral-300 p-3 sm:grid-cols-2">
+                <h3 className="sm:col-span-2 text-sm font-semibold text-neutral-900">Manual Add / Edit Item</h3>
                 <input
                   className="border border-neutral-300 px-2 py-2 text-sm"
                   onChange={(event) => setCatalogForm((prev) => ({ ...prev, system_id: event.target.value }))}
-                  placeholder="System ID (required)"
+                  placeholder="System ID"
                   value={catalogForm.system_id}
                 />
                 <input
                   className="border border-neutral-300 px-2 py-2 text-sm"
                   onChange={(event) => setCatalogForm((prev) => ({ ...prev, item_name: event.target.value }))}
-                  placeholder="Item Name (required)"
+                  placeholder="Item Name"
                   value={catalogForm.item_name}
                 />
                 <input
@@ -840,47 +778,45 @@ export function InventoryDashboard() {
                   value={catalogForm.manufact_sku}
                 />
 
-                <div className="md:col-span-2 flex gap-2">
-                  <button
-                    className="border border-brand-maroon bg-brand-maroon px-3 py-2 text-sm text-white"
-                    onClick={async () => {
-                      try {
-                        await fetchJson('/api/inventory/catalog/add', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            action: 'upsert',
-                            item: {
-                              row_id: catalogForm.row_id || undefined,
-                              system_id: catalogForm.system_id,
-                              item_name: catalogForm.item_name,
-                              upc: catalogForm.upc,
-                              ean: catalogForm.ean,
-                              custom_sku: catalogForm.custom_sku,
-                              manufact_sku: catalogForm.manufact_sku
-                            }
-                          })
-                        });
-                        setCatalogForm({
-                          row_id: 0,
-                          system_id: '',
-                          item_name: '',
-                          upc: '',
-                          ean: '',
-                          custom_sku: '',
-                          manufact_sku: ''
-                        });
-                        await loadCatalog();
-                        setCatalogStatus('Catalog item saved.');
-                      } catch (error) {
-                        setCatalogStatus(error instanceof Error ? error.message : 'Catalog save failed');
-                      }
-                    }}
-                    type="button"
-                  >
-                    Save Item
-                  </button>
-                </div>
+                <button
+                  className="sm:col-span-2 border border-brand-maroon bg-brand-maroon px-3 py-2 text-sm text-white"
+                  onClick={async () => {
+                    try {
+                      await fetchJson('/api/inventory/catalog/add', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          action: 'upsert',
+                          item: {
+                            row_id: catalogForm.row_id || undefined,
+                            system_id: catalogForm.system_id,
+                            item_name: catalogForm.item_name,
+                            upc: catalogForm.upc,
+                            ean: catalogForm.ean,
+                            custom_sku: catalogForm.custom_sku,
+                            manufact_sku: catalogForm.manufact_sku
+                          }
+                        })
+                      });
+                      setCatalogForm({
+                        row_id: 0,
+                        system_id: '',
+                        item_name: '',
+                        upc: '',
+                        ean: '',
+                        custom_sku: '',
+                        manufact_sku: ''
+                      });
+                      await loadCatalog();
+                      setCatalogStatus('Catalog item saved.');
+                    } catch (error) {
+                      setCatalogStatus(error instanceof Error ? error.message : 'Catalog save failed');
+                    }
+                  }}
+                  type="button"
+                >
+                  Save Item
+                </button>
               </div>
 
               <p className="text-xs text-neutral-700">{catalogStatus}</p>
@@ -888,8 +824,8 @@ export function InventoryDashboard() {
           ) : null}
 
           {activeTab === 'Sessions' ? (
-            <section className="space-y-4">
-              <div className="grid gap-2 md:grid-cols-3">
+            <section className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-3">
                 <input
                   className="border border-neutral-300 px-2 py-2 text-sm"
                   onChange={(event) => setActorName(event.target.value)}
@@ -912,7 +848,7 @@ export function InventoryDashboard() {
                 </select>
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <button
                   className="border border-brand-maroon bg-brand-maroon px-3 py-2 text-sm text-white"
                   onClick={createSession}
@@ -921,7 +857,7 @@ export function InventoryDashboard() {
                   Create Session (Host)
                 </button>
                 <input
-                  className="min-w-72 border border-neutral-300 px-2 py-2 text-sm"
+                  className="w-full sm:min-w-72 border border-neutral-300 px-2 py-2 text-sm"
                   onChange={(event) => setSessionId(event.target.value)}
                   placeholder="Session ID"
                   value={sessionId}
@@ -935,22 +871,30 @@ export function InventoryDashboard() {
                 >
                   Join Session
                 </button>
+                <button
+                  className="border border-neutral-400 px-3 py-2 text-sm"
+                  onClick={() => {
+                    if (sessionId) {
+                      void loadSessionState(sessionId);
+                    }
+                  }}
+                  type="button"
+                >
+                  Refresh Host View
+                </button>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="border border-neutral-300 p-3">
                   <h3 className="text-sm font-semibold text-neutral-900">Host Join QR</h3>
-                  <p className="mt-1 text-xs text-neutral-700">
-                    Show this to counters so they can join by scanning instead of typing session ID.
-                  </p>
                   {role === 'host' && hostJoinQr ? (
                     <Image
                       alt="Host Session Join QR"
                       className="mt-2 border border-neutral-300"
-                      height={260}
+                      height={220}
                       src={hostJoinQr}
                       unoptimized
-                      width={260}
+                      width={220}
                     />
                   ) : (
                     <p className="mt-2 text-xs text-neutral-500">Create/select host session to show join QR.</p>
@@ -969,12 +913,7 @@ export function InventoryDashboard() {
 
                   {scanJoinActive ? (
                     <div className="mt-2">
-                      <video
-                        className="max-h-52 w-full border border-neutral-300 bg-black"
-                        muted
-                        playsInline
-                        ref={joinScanVideoRef}
-                      />
+                      <video className="max-h-52 w-full border border-neutral-300 bg-black" muted playsInline ref={joinScanVideoRef} />
                       <canvas className="hidden" ref={joinScanCanvasRef} />
                     </div>
                   ) : null}
@@ -984,29 +923,27 @@ export function InventoryDashboard() {
               </div>
 
               <div className="border border-neutral-300 p-3">
-                <h3 className="text-sm font-semibold text-neutral-900">Session + Sync</h3>
+                <h3 className="text-sm font-semibold text-neutral-900">Sync</h3>
                 <p className="mt-1 text-xs text-neutral-700">{sessionStatus}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white disabled:opacity-60"
-                    disabled={isSyncing}
-                    onClick={syncNow}
-                    type="button"
-                  >
-                    {isSyncing ? 'Syncing...' : 'Sync Now'}
-                  </button>
-                </div>
+                <button
+                  className="mt-2 border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white disabled:opacity-60"
+                  disabled={isSyncing}
+                  onClick={syncNow}
+                  type="button"
+                >
+                  {isSyncing ? 'Syncing...' : 'Sync Now'}
+                </button>
                 <p className="mt-2 text-xs text-neutral-700">{syncStatus}</p>
                 <p className="mt-1 text-xs text-neutral-600">
-                  Catalog is auto-cached locally on session create/join so counting works offline.
+                  Sync sends local pending events to backend and aggregates counts across all devices for this same session.
                 </p>
               </div>
             </section>
           ) : null}
 
           {activeTab === 'Count View' ? (
-            <section className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
+            <section className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <section className="space-y-3">
                   <BarcodeScanner onDetected={onScanValue} />
 
@@ -1019,15 +956,9 @@ export function InventoryDashboard() {
                     <div className="mt-2 border border-neutral-200 p-2 text-xs">
                       {activeItem ? (
                         <div className="space-y-1">
-                          <p>
-                            <span className="font-semibold">Item:</span> {activeItem.item_name}
-                          </p>
-                          <p>
-                            <span className="font-semibold">System ID:</span> {activeItem.system_id}
-                          </p>
-                          <p>
-                            <span className="font-semibold">UPC:</span> {activeItem.upc || 'n/a'}
-                          </p>
+                          <p><span className="font-semibold">Item:</span> {activeItem.item_name}</p>
+                          <p><span className="font-semibold">System ID:</span> {activeItem.system_id}</p>
+                          <p><span className="font-semibold">UPC:</span> {activeItem.upc || 'n/a'}</p>
                         </div>
                       ) : (
                         <p>No matched item selected. Last scanned code: {activeScannedCode || 'none'}.</p>
@@ -1065,7 +996,7 @@ export function InventoryDashboard() {
 
                 <section className="space-y-3">
                   <div className="border border-neutral-300 p-3">
-                    <h3 className="text-sm font-semibold text-neutral-900">Count Totals</h3>
+                    <h3 className="text-sm font-semibold text-neutral-900">Count Totals (Current Session)</h3>
                     <div className="mt-2 max-h-80 overflow-auto border border-neutral-200">
                       <table className="min-w-full text-left text-xs">
                         <thead className="bg-neutral-100">
@@ -1089,19 +1020,14 @@ export function InventoryDashboard() {
                   </div>
                 </section>
               </div>
-
-              <QRSyncPanel onImportPacket={importQrPacket} outgoingPacket={outgoingQrPacket} />
             </section>
           ) : null}
 
           {activeTab === 'Finalize & Upload' ? (
-            <section className="space-y-4">
+            <section className="space-y-3">
               <div className="border border-neutral-300 p-3">
                 <h3 className="text-sm font-semibold text-neutral-900">Session State</h3>
-                <p className="mt-1 text-xs text-neutral-700">
-                  Use End Session to commit host local data. Then mark Finalizing or Locked.
-                </p>
-
+                <p className="mt-1 text-xs text-neutral-700">End session to commit host copy, then finalize or lock.</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white disabled:opacity-60"
@@ -1111,7 +1037,6 @@ export function InventoryDashboard() {
                   >
                     {isEndingSession ? 'Ending Session...' : 'End Session (Commit Host Copy)'}
                   </button>
-
                   <button
                     className={`border px-3 py-2 text-xs ${
                       finalAction === 'finalize' ? 'border-red-700 bg-red-700 text-white' : 'border-neutral-700 bg-white'
@@ -1122,7 +1047,6 @@ export function InventoryDashboard() {
                   >
                     {isFinalizing && finalAction === 'finalize' ? 'Finalizing...' : 'Finalize (No Lock)'}
                   </button>
-
                   <button
                     className={`border px-3 py-2 text-xs ${
                       finalAction === 'lock' ? 'border-red-800 bg-red-800 text-white' : 'border-neutral-700 bg-white'
@@ -1133,7 +1057,6 @@ export function InventoryDashboard() {
                   >
                     {isFinalizing && finalAction === 'lock' ? 'Locking...' : 'Lock Session'}
                   </button>
-
                   <button className="border border-neutral-400 px-3 py-2 text-xs" onClick={() => exportFinal('csv')} type="button">
                     Export CSV
                   </button>
@@ -1145,13 +1068,12 @@ export function InventoryDashboard() {
 
               <div className="border border-neutral-300 p-3">
                 <h3 className="text-sm font-semibold text-neutral-900">Upload Payload Preview</h3>
-                <p className="mt-1 text-xs text-neutral-700">Direct upload rows only: system_id + qty.</p>
                 <div className="mt-2 max-h-64 overflow-auto border border-neutral-200">
                   <table className="min-w-full text-left text-xs">
                     <thead className="bg-neutral-100">
                       <tr>
                         <th className="border-b border-neutral-300 px-2 py-1">System ID</th>
-                        <th className="border-b border-neutral-300 px-2 py-1">Qty To Upload</th>
+                        <th className="border-b border-neutral-300 px-2 py-1">Qty</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1168,22 +1090,18 @@ export function InventoryDashboard() {
 
               <div className="border border-red-300 bg-red-50 p-3">
                 <h3 className="text-sm font-semibold text-red-900">Upload to R-Series (Host Only)</h3>
-                <p className="mt-1 text-xs text-red-800">
-                  OAuth with 2FA is supported. Start OAuth, complete 2FA in the opened window, then run upload.
-                </p>
+                <p className="mt-1 text-xs text-red-800">OAuth + 2FA supported.</p>
 
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white"
-                    onClick={startOauth}
-                    type="button"
-                  >
-                    Start OAuth (2FA)
-                  </button>
-                </div>
+                <button
+                  className="mt-2 border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs text-white"
+                  onClick={startOauth}
+                  type="button"
+                >
+                  Start OAuth (2FA)
+                </button>
                 {oauthStatus ? <p className="mt-2 text-xs text-neutral-700">{oauthStatus}</p> : null}
 
-                <div className="mt-2 grid gap-2 md:grid-cols-4">
+                <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   <input
                     className="border border-red-300 bg-white px-2 py-2 text-xs"
                     onChange={(event) => setUploadForm((prev) => ({ ...prev, count_name: event.target.value }))}
@@ -1216,10 +1134,10 @@ export function InventoryDashboard() {
                     onChange={(event) => setUploadForm((prev) => ({ ...prev, reconcile: event.target.checked }))}
                     type="checkbox"
                   />
-                  Reconcile upload (omitted items will be set to 0 by backend reconcile)
+                  Reconcile upload (omitted items set to 0 by backend reconcile)
                 </label>
 
-                <div className="mt-2 flex gap-2">
+                <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     className="border border-red-800 bg-red-800 px-3 py-2 text-xs text-white disabled:opacity-60"
                     disabled={role !== 'host'}
@@ -1228,7 +1146,6 @@ export function InventoryDashboard() {
                   >
                     Upload to R-Series
                   </button>
-
                   <button
                     className="border border-neutral-400 px-3 py-2 text-xs"
                     onClick={async () => {

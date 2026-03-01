@@ -126,8 +126,20 @@ export function BarcodeScanner({ onDetected }: BarcodeScannerProps) {
       {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}
 
       {active ? (
-        <div className="mt-3">
-          <video className="max-h-64 w-full border border-neutral-300 bg-black" muted playsInline ref={videoRef} />
+        <div className="fixed inset-0 z-50 bg-black/95 p-3 sm:static sm:mt-3 sm:bg-transparent sm:p-0">
+          <div className="mx-auto flex h-full max-w-3xl flex-col sm:h-auto">
+            <div className="mb-2 flex items-center justify-between text-white sm:hidden">
+              <span className="text-sm font-medium">Live Barcode Scan</span>
+              <button
+                className="border border-white/60 px-3 py-1 text-xs"
+                onClick={() => setActive(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+            <video className="h-full w-full border border-neutral-300 bg-black sm:max-h-72" muted playsInline ref={videoRef} />
+          </div>
           <canvas className="hidden" ref={canvasRef} />
         </div>
       ) : null}
