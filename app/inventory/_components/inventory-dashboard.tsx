@@ -672,13 +672,11 @@ export function InventoryDashboard() {
       }
 
       setOauthAuthorizeUrl(payload.authorize_url);
-      const opened = window.open(payload.authorize_url, '_blank', 'noopener,noreferrer');
       setOauthStatus(
-        opened
-          ? payload.instructions ??
-            'OAuth window opened. Complete Lightspeed login + 2FA there, then return and run upload.'
-          : 'Popup blocked. Use the Open OAuth Link button below, then complete login + 2FA.'
+        payload.instructions ??
+          'Redirecting to Lightspeed OAuth now. Complete login + 2FA, then return and run upload.'
       );
+      window.location.assign(payload.authorize_url);
     } catch (error) {
       setOauthStatus(error instanceof Error ? error.message : 'Unable to start OAuth');
     }
@@ -1261,10 +1259,11 @@ export function InventoryDashboard() {
                       onClick={() => window.open(oauthAuthorizeUrl, '_blank', 'noopener,noreferrer')}
                       type="button"
                     >
-                      Open OAuth Link
+                      Open authorize_url
                     </button>
                     <span className="text-xs text-neutral-700">
-                      Use `authorize_url` only. Do not open `redirect_uri` directly.
+                      Use `authorize_url` only. Never open `redirect_uri` directly or you will get
+                      &nbsp;&quot;Missing OAuth code in callback query.&quot;
                     </span>
                   </div>
                 ) : null}
