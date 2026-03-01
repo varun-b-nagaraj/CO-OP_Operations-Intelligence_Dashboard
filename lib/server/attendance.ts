@@ -39,27 +39,34 @@ export function calculateMeetingAttendanceRate(inputs: {
   }
 
   const overrideByDate = resolveOverrideByDate(inputs.overrides);
-  let attended = 0;
+  let rawAttended = 0;
+  let adjustedAttended = 0;
   let excused = 0;
 
   for (const session of inputs.attendanceRecords) {
     const override = overrideByDate.get(session.date);
     if (override === 'present_override') {
-      attended += 1;
+      rawAttended += 1;
+      adjustedAttended += 1;
       continue;
     }
     if (override === 'excused') {
+      rawAttended += session.status === 'present' ? 1 : 0;
       excused += 1;
       continue;
     }
-    if (session.status === 'present') attended += 1;
+    if (session.status === 'present') {
+      rawAttended += 1;
+      adjustedAttended += 1;
+    }
   }
 
-  const raw_rate = (attended / total_sessions) * 100;
+  const raw_rate = (rawAttended / total_sessions) * 100;
   const adjustedDenominator = total_sessions - excused;
-  const adjusted_rate = adjustedDenominator <= 0 ? null : (attended / adjustedDenominator) * 100;
+  const adjusted_rate =
+    adjustedDenominator <= 0 ? null : (adjustedAttended / adjustedDenominator) * 100;
 
-  return { raw_rate, adjusted_rate, total_sessions, attended, excused };
+  return { raw_rate, adjusted_rate, total_sessions, attended: adjustedAttended, excused };
 }
 
 export function calculateShiftAttendanceRate(inputs: {

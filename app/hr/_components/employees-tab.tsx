@@ -19,10 +19,11 @@ import { updateEmployeeOffPeriods } from '@/app/actions/employee-settings';
 import { excuseShiftAbsence, markShiftPresent } from '@/app/actions/shift-attendance';
 import { fetchMeetingAttendance } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
-import { calculateMeetingAttendanceRate } from '@/lib/server/attendance';
+import { calculateMeetingAttendanceRate, calculateShiftAttendanceRate } from '@/lib/server/attendance';
 import { AttendanceOverride } from '@/lib/types';
 
 import {
+  formatRate,
   getStudentDisplayName,
   getStudentId,
   getStudentSNumber,
@@ -50,13 +51,13 @@ interface EmployeeMetric {
   shiftPresent: number;
   shiftAbsent: number;
   shiftExcused: number;
-  shiftRawMissed: number;
-  shiftAdjustedMissed: number;
+  shiftRawRate: number | null;
+  shiftAdjustedRate: number | null;
   meetingSessions: number;
   meetingAttended: number;
   meetingExcused: number;
-  meetingRawMissed: number;
-  meetingAdjustedMissed: number;
+  meetingRawRate: number | null;
+  meetingAdjustedRate: number | null;
   points: number;
 }
 
@@ -746,7 +747,12 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
       const sNumber = getStudentSNumber(student);
       const shifts = shiftBySNumber.get(sNumber) ?? [];
       const offPeriods = settingsByEmployeeId.get(id) ?? settingsBySNumber.get(sNumber) ?? [4, 8];
-      const localTodayKey = getTodayDateKey();
+      const shiftRates = calculateShiftAttendanceRate({
+        shiftAttendanceRecords: shifts.map((item) => ({
+          status: item.status as 'expected' | 'present' | 'absent' | 'excused',
+          date: String(item.shift_date ?? '')
+        }))
+      });
 
       const attendanceRecords =
         meetingAttendanceQuery.data?.records.filter((record) => record.s_number === sNumber) ?? [];
@@ -764,19 +770,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
       const offPeriodShifts = shifts.filter(
         (item) => offPeriods.includes(toNumber(item.shift_period)) && item.status === 'present'
       ).length;
-
-      const meetingRawMissed = attendanceRecords.filter((record) => record.status === 'absent').length;
-      const meetingAdjustedMissed = Math.max(
-        0,
-        meetingRates.total_sessions - meetingRates.attended - meetingRates.excused
-      );
-      const eligibleShiftRows = shifts.filter(
-        (item) => String(item.shift_date ?? '') <= localTodayKey
-      );
-      const shiftRawMissed = eligibleShiftRows.filter(
-        (item) => item.status === 'absent' || item.status === 'excused'
-      ).length;
-      const shiftAdjustedMissed = eligibleShiftRows.filter((item) => item.status === 'absent').length;
 
       const basePoints = meetingRates.attended + morningShifts + offPeriodShifts;
       return {
@@ -796,13 +789,13 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
         shiftPresent,
         shiftAbsent,
         shiftExcused,
-        shiftRawMissed,
-        shiftAdjustedMissed,
+        shiftRawRate: shiftRates.raw_rate,
+        shiftAdjustedRate: shiftRates.adjusted_rate,
         meetingSessions: meetingRates.total_sessions,
         meetingAttended: meetingRates.attended,
         meetingExcused: meetingRates.excused,
-        meetingRawMissed,
-        meetingAdjustedMissed,
+        meetingRawRate: meetingRates.raw_rate,
+        meetingAdjustedRate: meetingRates.adjusted_rate,
         points: basePoints + (pointsByEmployee.get(id) ?? 0)
       };
     });
@@ -986,10 +979,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                     <td className="p-2">{employee.sNumber || 'N/A'}</td>
                     <td className="p-2">{employee.strikesCount}</td>
                     <td className="p-2">
-                      {employee.meetingRawMissed} / {employee.meetingAdjustedMissed}
+                      {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
                     </td>
                     <td className="p-2">
-                      {employee.shiftRawMissed} / {employee.shiftAdjustedMissed}
+                      {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
                     </td>
                     <td className="p-2">{employee.offPeriods.join(', ')}</td>
                     <td className="p-2">{employee.points}</td>
@@ -1012,10 +1005,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
                               </p>
                               <p className="text-sm text-neutral-700">Points: {employee.points}</p>
                               <p className="text-sm text-neutral-700">
-                                Meeting missed (raw/adj): {employee.meetingRawMissed} / {employee.meetingAdjustedMissed}
+                                Meeting rates (raw/adj): {formatRate(employee.meetingRawRate)} / {formatRate(employee.meetingAdjustedRate)}
                               </p>
                               <p className="text-sm text-neutral-700">
-                                Shift missed (raw/adj): {employee.shiftRawMissed} / {employee.shiftAdjustedMissed}
+                                Shift rates (raw/adj): {formatRate(employee.shiftRawRate)} / {formatRate(employee.shiftAdjustedRate)}
                               </p>
                               <p className="text-sm text-neutral-700">
                                 Shift summary: {employee.shiftPresent} present, {employee.shiftAbsent} absent, {employee.shiftExcused} excused
