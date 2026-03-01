@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getSessionFinalItems, writeUploadRun } from '@/lib/server/inventory';
+import {
+  getSessionFinalItems,
+  syncProductInventoryFromUpload,
+  writeUploadRun
+} from '@/lib/server/inventory';
 import { createServerClient } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
@@ -70,6 +74,24 @@ export async function POST(request: NextRequest) {
       response_status: upstream.status
     });
 
+    let productSync:
+      | {
+          upload_id: string;
+          processed_items: number;
+          created_products: number;
+          created_prompts: number;
+        }
+      | null = null;
+
+    if (upstream.ok) {
+      productSync = await syncProductInventoryFromUpload(supabase, {
+        session_id: sessionId,
+        triggered_by: body.triggered_by || 'open_access',
+        items: payload.items,
+        source: 'inventory_upload_submit'
+      });
+    }
+
     const warningMessage = payload.reconcile
       ? 'Omitted items will be set to 0 by backend reconcile.'
       : 'Reconcile is disabled. Only sent items are updated; omitted items are unchanged.';
@@ -77,7 +99,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: upstream.ok,
       warning: warningMessage,
-      upstream: upstreamPayload
+      upstream: upstreamPayload,
+      product_sync: productSync
     });
   } catch (error) {
     return NextResponse.json(

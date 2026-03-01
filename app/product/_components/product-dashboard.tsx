@@ -188,8 +188,6 @@ export function ProductDashboard() {
     search: ''
   });
 
-  const [inventoryNote, setInventoryNote] = useState('');
-  const [inventoryQuantities, setInventoryQuantities] = useState<Record<string, string>>({});
 
   const [newProduct, setNewProduct] = useState({
     name: '',
@@ -633,112 +631,6 @@ export function ProductDashboard() {
     });
   };
 
-  const generatePromptsFromUpload = useCallback(
-    async (inventoryUploadId: string, counts: Array<{ product_id: string; quantity: number }>) => {
-      const cutoffRaw = settingsMap['prompt.low_stock_cutoff'];
-      const lowStockCutoff = Number.isFinite(Number(cutoffRaw)) ? Number(cutoffRaw) : 2;
-
-      const openStatuses: DbOrderStatus[] = ['draft', 'submitted', 'approved', 'ordered', 'partially_received'];
-      const { data: openOrderLines, error: openOrderLinesError } = await supabase
-        .from('product_purchase_order_lines')
-        .select('product_id,quantity,purchase_order:product_purchase_orders(status)')
-        .not('product_id', 'is', null);
-      if (openOrderLinesError) throw openOrderLinesError;
-
-      const onOrderByProduct = new Map<string, number>();
-      type OpenOrderLine = {
-        product_id: string | null;
-        quantity: number;
-        purchase_order: Array<{ status: DbOrderStatus }> | { status: DbOrderStatus } | null;
-      };
-      for (const row of (openOrderLines ?? []) as OpenOrderLine[]) {
-        const productId = row.product_id;
-        const joinedOrder = Array.isArray(row.purchase_order) ? row.purchase_order[0] : row.purchase_order;
-        const status = joinedOrder?.status;
-        if (!productId || !status || !openStatuses.includes(status)) continue;
-        onOrderByProduct.set(productId, (onOrderByProduct.get(productId) ?? 0) + Number(row.quantity));
-      }
-
-      await supabase.from('product_order_prompts').update({ status: 'dismissed' }).eq('status', 'open');
-
-      const promptRows = counts
-        .map((entry) => {
-          const product = productById.get(entry.product_id);
-          if (!product) return null;
-          const onOrderQty = onOrderByProduct.get(entry.product_id) ?? 0;
-          const isLow = entry.quantity <= lowStockCutoff;
-          if (!isLow) return null;
-
-          const suggestedQty = Math.max(lowStockCutoff + 1 - (entry.quantity + onOrderQty), 1);
-          return {
-            inventory_upload_id: inventoryUploadId,
-            product_id: entry.product_id,
-            current_stock: entry.quantity,
-            on_order_qty: onOrderQty,
-            suggested_qty: suggestedQty,
-            vendor_id: product.preferred_vendor_id,
-            last_price: product.default_unit_cost,
-            status: 'open' as DbPromptStatus
-          };
-        })
-        .filter(Boolean);
-
-      if (promptRows.length > 0) {
-        const { error: insertPromptError } = await supabase.from('product_order_prompts').insert(promptRows);
-        if (insertPromptError) throw insertPromptError;
-      }
-    },
-    [settingsMap, supabase, productById]
-  );
-
-  const submitInventoryCounts = async () => {
-    const rows = Object.entries(inventoryQuantities)
-      .map(([productId, rawQty]) => ({ product_id: productId, quantity: Number(rawQty) }))
-      .filter((entry) => Number.isFinite(entry.quantity) && entry.quantity >= 0);
-
-    if (!rows.length) {
-      setError('Enter at least one quantity before submitting inventory count.');
-      return;
-    }
-
-    await withSaveState(async () => {
-      const { data: uploadRow, error: uploadError } = await supabase
-        .from('product_inventory_uploads')
-        .insert({ source: 'manual_count', notes: inventoryNote.trim() || null, uploaded_by: 'dashboard' })
-        .select('id')
-        .single();
-      if (uploadError) throw uploadError;
-
-      const inventoryUploadId = uploadRow?.id;
-      if (!inventoryUploadId) throw new Error('Upload id was not returned.');
-
-      const { error: snapshotError } = await supabase.from('product_inventory_snapshot_lines').insert(
-        rows.map((entry) => ({
-          inventory_upload_id: inventoryUploadId,
-          product_id: entry.product_id,
-          quantity: entry.quantity
-        }))
-      );
-      if (snapshotError) throw snapshotError;
-
-      const { error: levelError } = await supabase.from('product_inventory_levels').upsert(
-        rows.map((entry) => ({
-          product_id: entry.product_id,
-          quantity_on_hand: entry.quantity,
-          last_inventory_upload_id: inventoryUploadId,
-          updated_at: new Date().toISOString()
-        })),
-        { onConflict: 'product_id' }
-      );
-      if (levelError) throw levelError;
-
-      await generatePromptsFromUpload(inventoryUploadId, rows);
-      setInventoryQuantities({});
-      setInventoryNote('');
-      await loadDashboard();
-      setNotice('Inventory count submitted and prompts updated.');
-    });
-  };
 
   const convertPromptToOrder = async (prompt: PromptRow) => {
     await withSaveState(async () => {
@@ -1467,45 +1359,17 @@ export function ProductDashboard() {
             <section className="w-full bg-white">
               <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
                 <h2 className="text-lg font-semibold">Prompts</h2>
-                <p className="mt-1 text-sm text-neutral-600">Submitting a new inventory count regenerates low-stock reorder prompts.</p>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Low-stock prompts are generated automatically from Inventory Dashboard upload checks.
+                </p>
               </header>
 
               <section className="border-b border-neutral-300 px-4 py-4 md:px-6">
-                <h3 className="text-base font-semibold">Submit Inventory Count</h3>
-                <p className="mt-1 text-sm text-neutral-600">Enter only items counted now, then submit. Prompt list refreshes from these counts.</p>
-                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
-                  {products.map((product) => (
-                    <label className="text-xs text-neutral-700" key={product.id}>
-                      {product.name}
-                      <input
-                        className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                        min={0}
-                        onChange={(event) => {
-                          setInventoryQuantities((prev) => ({ ...prev, [product.id]: event.target.value }));
-                        }}
-                        placeholder="Quantity"
-                        type="number"
-                        value={inventoryQuantities[product.id] ?? ''}
-                      />
-                    </label>
-                  ))}
-                </div>
-                <label className="mt-3 block text-sm text-neutral-700">
-                  Upload Note
-                  <textarea
-                    className="mt-1 min-h-[74px] w-full border border-neutral-300 px-2 py-2"
-                    onChange={(event) => setInventoryNote(event.target.value)}
-                    value={inventoryNote}
-                  />
-                </label>
-                <button
-                  className="mt-3 min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000] disabled:opacity-60"
-                  disabled={saving}
-                  onClick={submitInventoryCounts}
-                  type="button"
-                >
-                  Submit Inventory Count
-                </button>
+                <h3 className="text-base font-semibold">Inventory Source</h3>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Product module is read-only for inventory. Run inventory checks in Inventory Dashboard, then upload/sync.
+                  Prompts here update from those synced checks only.
+                </p>
               </section>
 
               <div className="overflow-x-auto">

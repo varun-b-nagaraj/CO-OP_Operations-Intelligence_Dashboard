@@ -582,3 +582,329 @@ export async function getSessionFinalItems(
     qty: Number((row as { final_qty: number }).final_qty) || 0
   }));
 }
+
+export async function syncProductInventoryFromUpload(
+  supabase: SupabaseClient,
+  input: {
+    session_id: string;
+    triggered_by: string;
+    items: Array<{ system_id: string; qty: number }>;
+    source?: string;
+  }
+): Promise<{
+  upload_id: string;
+  processed_items: number;
+  created_products: number;
+  created_prompts: number;
+}> {
+  const normalizedMap = new Map<string, number>();
+  for (const row of input.items) {
+    const systemId = normalizeIdentifier(row.system_id);
+    if (!systemId) continue;
+    const qty = Number(row.qty);
+    normalizedMap.set(systemId, Number.isFinite(qty) ? Math.max(Math.trunc(qty), 0) : 0);
+  }
+
+  const normalizedItems = Array.from(normalizedMap.entries()).map(([system_id, qty]) => ({ system_id, qty }));
+  if (!normalizedItems.length) {
+    throw new Error('No inventory items to sync to product module.');
+  }
+
+  const systemIds = normalizedItems.map((row) => row.system_id);
+  const { data: inventoryRows, error: inventoryError } = await supabase
+    .from('Inventory')
+    .select('system_id_text,upc_text,Item,Category,Vendor,\"Default Cost\",inventory_deleted')
+    .in('system_id_text', systemIds)
+    .eq('inventory_deleted', false);
+
+  if (inventoryError) {
+    throw new Error(inventoryError.message);
+  }
+
+  const inventoryBySystemId = new Map<
+    string,
+    {
+      upc_text: string | null;
+      Item: string | null;
+      Category: string | null;
+      Vendor: string | null;
+      'Default Cost': number | null;
+    }
+  >();
+  for (const row of inventoryRows ?? []) {
+    const key = normalizeIdentifier((row as { system_id_text: string }).system_id_text);
+    inventoryBySystemId.set(key, row as unknown as {
+      upc_text: string | null;
+      Item: string | null;
+      Category: string | null;
+      Vendor: string | null;
+      'Default Cost': number | null;
+    });
+  }
+
+  const { data: existingVendors, error: vendorError } = await supabase
+    .from('product_vendors')
+    .select('id,name')
+    .eq('is_active', true);
+  if (vendorError) {
+    throw new Error(vendorError.message);
+  }
+
+  const vendorIdByName = new Map<string, string>();
+  for (const vendor of existingVendors ?? []) {
+    const name = String((vendor as { name: string }).name ?? '').trim();
+    if (name) {
+      vendorIdByName.set(name.toLowerCase(), String((vendor as { id: string }).id));
+    }
+  }
+
+  const missingVendorNames = new Set<string>();
+  for (const row of normalizedItems) {
+    const inv = inventoryBySystemId.get(row.system_id);
+    const vendorName = String(inv?.Vendor ?? '').trim();
+    if (vendorName && !vendorIdByName.has(vendorName.toLowerCase())) {
+      missingVendorNames.add(vendorName);
+    }
+  }
+
+  if (missingVendorNames.size > 0) {
+    const { error: insertVendorError } = await supabase.from('product_vendors').insert(
+      Array.from(missingVendorNames).map((name) => ({
+        name,
+        ordering_method: 'other',
+        notes: 'Auto-created from inventory upload sync',
+        updated_by: 'inventory_sync'
+      }))
+    );
+    if (insertVendorError) {
+      throw new Error(insertVendorError.message);
+    }
+
+    const { data: refreshedVendors, error: refreshVendorError } = await supabase
+      .from('product_vendors')
+      .select('id,name')
+      .in('name', Array.from(missingVendorNames));
+    if (refreshVendorError) {
+      throw new Error(refreshVendorError.message);
+    }
+    for (const vendor of refreshedVendors ?? []) {
+      const name = String((vendor as { name: string }).name ?? '').trim();
+      if (name) {
+        vendorIdByName.set(name.toLowerCase(), String((vendor as { id: string }).id));
+      }
+    }
+  }
+
+  const { data: productRows, error: productError } = await supabase
+    .from('product_products')
+    .select('id,sku,barcode_upc,name,preferred_vendor_id,category,default_unit_cost')
+    .eq('is_active', true);
+  if (productError) {
+    throw new Error(productError.message);
+  }
+
+  const productBySku = new Map<string, { id: string; default_unit_cost: number | null; preferred_vendor_id: string | null }>();
+  const productByUpc = new Map<string, { id: string; default_unit_cost: number | null; preferred_vendor_id: string | null }>();
+  const productByName = new Map<string, { id: string; default_unit_cost: number | null; preferred_vendor_id: string | null }>();
+
+  for (const row of productRows ?? []) {
+    const product = row as {
+      id: string;
+      sku: string | null;
+      barcode_upc: string | null;
+      name: string;
+      preferred_vendor_id: string | null;
+      default_unit_cost: number | null;
+    };
+    if (product.sku) productBySku.set(normalizeIdentifier(product.sku), product);
+    if (product.barcode_upc) productByUpc.set(normalizeIdentifier(product.barcode_upc), product);
+    if (product.name) productByName.set(product.name.trim().toLowerCase(), product);
+  }
+
+  let createdProducts = 0;
+  const syncedProducts: Array<{
+    product_id: string;
+    system_id: string;
+    qty: number;
+    preferred_vendor_id: string | null;
+    default_unit_cost: number | null;
+  }> = [];
+
+  for (const row of normalizedItems) {
+    const inv = inventoryBySystemId.get(row.system_id);
+    const itemName = String(inv?.Item ?? '').trim() || `Inventory Item ${row.system_id}`;
+    const upc = normalizeIdentifier(String(inv?.upc_text ?? ''));
+    const category = String(inv?.Category ?? '').trim() || null;
+    const vendorName = String(inv?.Vendor ?? '').trim();
+    const vendorId = vendorName ? vendorIdByName.get(vendorName.toLowerCase()) ?? null : null;
+    const defaultCostRaw = inv?.['Default Cost'];
+    const defaultCost = Number.isFinite(Number(defaultCostRaw)) ? Number(defaultCostRaw) : null;
+
+    let matched =
+      productBySku.get(row.system_id)
+      || (upc ? productByUpc.get(upc) : undefined)
+      || productByName.get(itemName.toLowerCase());
+
+    if (!matched) {
+      const { data: insertedProduct, error: insertProductError } = await supabase
+        .from('product_products')
+        .insert({
+          sku: row.system_id,
+          name: itemName,
+          category,
+          preferred_vendor_id: vendorId,
+          barcode_upc: upc || null,
+          default_unit_cost: defaultCost,
+          updated_by: 'inventory_sync'
+        })
+        .select('id,default_unit_cost,preferred_vendor_id')
+        .single();
+      if (insertProductError || !insertedProduct) {
+        throw new Error(insertProductError?.message ?? 'Failed to create product from inventory sync.');
+      }
+
+      matched = {
+        id: String((insertedProduct as { id: string }).id),
+        default_unit_cost: (insertedProduct as { default_unit_cost: number | null }).default_unit_cost,
+        preferred_vendor_id: (insertedProduct as { preferred_vendor_id: string | null }).preferred_vendor_id
+      };
+      productBySku.set(row.system_id, matched);
+      if (upc) productByUpc.set(upc, matched);
+      productByName.set(itemName.toLowerCase(), matched);
+      createdProducts += 1;
+    } else {
+      const { error: updateProductError } = await supabase
+        .from('product_products')
+        .update({
+          name: itemName,
+          category,
+          preferred_vendor_id: vendorId ?? matched.preferred_vendor_id,
+          barcode_upc: upc || null,
+          default_unit_cost: defaultCost ?? matched.default_unit_cost,
+          updated_by: 'inventory_sync'
+        })
+        .eq('id', matched.id);
+      if (updateProductError) {
+        throw new Error(updateProductError.message);
+      }
+    }
+
+    syncedProducts.push({
+      product_id: matched.id,
+      system_id: row.system_id,
+      qty: row.qty,
+      preferred_vendor_id: vendorId ?? matched.preferred_vendor_id ?? null,
+      default_unit_cost: defaultCost ?? matched.default_unit_cost ?? null
+    });
+  }
+
+  const { data: uploadRow, error: uploadError } = await supabase
+    .from('product_inventory_uploads')
+    .insert({
+      uploaded_by: input.triggered_by || 'inventory_sync',
+      source: input.source || 'inventory_upload_submit',
+      notes: `Synced from inventory session ${input.session_id}`
+    })
+    .select('id')
+    .single();
+  if (uploadError || !uploadRow) {
+    throw new Error(uploadError?.message ?? 'Failed to create product inventory upload record.');
+  }
+  const uploadId = String((uploadRow as { id: string }).id);
+
+  const { error: snapshotError } = await supabase.from('product_inventory_snapshot_lines').insert(
+    syncedProducts.map((row) => ({
+      inventory_upload_id: uploadId,
+      product_id: row.product_id,
+      quantity: row.qty
+    }))
+  );
+  if (snapshotError) {
+    throw new Error(snapshotError.message);
+  }
+
+  const { error: levelError } = await supabase.from('product_inventory_levels').upsert(
+    syncedProducts.map((row) => ({
+      product_id: row.product_id,
+      quantity_on_hand: row.qty,
+      last_inventory_upload_id: uploadId,
+      updated_at: new Date().toISOString()
+    })),
+    { onConflict: 'product_id' }
+  );
+  if (levelError) {
+    throw new Error(levelError.message);
+  }
+
+  const { data: cutoffSetting } = await supabase
+    .from('product_settings')
+    .select('value')
+    .eq('key', 'prompt.low_stock_cutoff')
+    .maybeSingle();
+  const cutoff = Number((cutoffSetting as { value?: string } | null)?.value ?? '2');
+  const lowStockCutoff = Number.isFinite(cutoff) ? Math.max(Math.trunc(cutoff), 0) : 2;
+
+  const touchedProductIds = syncedProducts.map((row) => row.product_id);
+  const { data: openOrderLines, error: openOrderLineError } = await supabase
+    .from('product_purchase_order_lines')
+    .select('product_id,quantity,purchase_order:product_purchase_orders(status)')
+    .in('product_id', touchedProductIds);
+  if (openOrderLineError) {
+    throw new Error(openOrderLineError.message);
+  }
+
+  const openStatuses = new Set(['draft', 'submitted', 'approved', 'ordered', 'partially_received']);
+  const onOrderByProduct = new Map<string, number>();
+  for (const row of openOrderLines ?? []) {
+    const line = row as {
+      product_id: string | null;
+      quantity: number;
+      purchase_order: Array<{ status: string }> | { status: string } | null;
+    };
+    const productId = line.product_id;
+    if (!productId) continue;
+    const joinedOrder = Array.isArray(line.purchase_order) ? line.purchase_order[0] : line.purchase_order;
+    const status = String(joinedOrder?.status ?? '');
+    if (!openStatuses.has(status)) continue;
+    onOrderByProduct.set(productId, (onOrderByProduct.get(productId) ?? 0) + (Number(line.quantity) || 0));
+  }
+
+  const { error: dismissError } = await supabase
+    .from('product_order_prompts')
+    .update({ status: 'dismissed' })
+    .in('product_id', touchedProductIds)
+    .eq('status', 'open');
+  if (dismissError) {
+    throw new Error(dismissError.message);
+  }
+
+  const promptRows = syncedProducts
+    .filter((row) => row.qty <= lowStockCutoff)
+    .map((row) => {
+      const onOrderQty = onOrderByProduct.get(row.product_id) ?? 0;
+      return {
+        inventory_upload_id: uploadId,
+        product_id: row.product_id,
+        current_stock: row.qty,
+        on_order_qty: onOrderQty,
+        suggested_qty: Math.max(lowStockCutoff + 1 - (row.qty + onOrderQty), 1),
+        vendor_id: row.preferred_vendor_id,
+        last_price: row.default_unit_cost,
+        status: 'open'
+      };
+    });
+
+  if (promptRows.length > 0) {
+    const { error: promptError } = await supabase.from('product_order_prompts').insert(promptRows);
+    if (promptError) {
+      throw new Error(promptError.message);
+    }
+  }
+
+  return {
+    upload_id: uploadId,
+    processed_items: normalizedItems.length,
+    created_products: createdProducts,
+    created_prompts: promptRows.length
+  };
+}
