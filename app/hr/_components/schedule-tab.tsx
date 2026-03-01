@@ -97,6 +97,8 @@ const COLLAPSED_ROSTER_SUMMARY_ROWS = 12;
 const COLLAPSED_OVERVIEW_MAX_HEIGHT_CLASS = 'max-h-[560px]';
 const MAX_REGULAR_ASSIGNMENTS_PER_SHIFT = 3;
 const MAX_ALTERNATE_ASSIGNMENTS_PER_SHIFT = 1;
+const LEAVE_WITH_UNSAVED_CHANGES_MESSAGE =
+  'You have unsaved schedule changes. Save before leaving, or your changes will be lost.';
 
 function toDateKey(value: Date): string {
   return value.toISOString().slice(0, 10);
@@ -192,6 +194,10 @@ function parseDraggedAssignmentUid(rawPayload: string): string | null {
     return null;
   }
   return rawPayload;
+}
+
+function rosterSnapshotKey(id: number | string): string {
+  return String(id);
 }
 
 function getDefaultGenerationSelection(): GenerationSelection {
@@ -312,6 +318,9 @@ export function ScheduleTab() {
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
   const [emptySlotTarget, setEmptySlotTarget] = useState<EmptySlotTarget | null>(null);
   const [attendanceReason, setAttendanceReason] = useState('');
+  const [savedAssignmentWorkersByUid, setSavedAssignmentWorkersByUid] = useState<Record<string, string>>({});
+  const [savedRosterScheduleableById, setSavedRosterScheduleableById] = useState<Record<string, boolean>>({});
+  const [isPersistingEdits, setIsPersistingEdits] = useState(false);
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
   const isManagerMode = hasScheduleEditPermission && scheduleAccessMode === 'manager';
@@ -442,26 +451,6 @@ export function ScheduleTab() {
     },
     onError: (error) => {
       setMessage(error instanceof Error ? error.message : 'Unable to update attendance.');
-    }
-  });
-
-  const updateRosterScheduleableMutation = useMutation({
-    mutationFn: async (payload: { id: number | string; scheduleable: boolean; name: string }) => {
-      const { error } = await supabase
-        .from('students')
-        .update({ scheduleable: payload.scheduleable })
-        .eq('id', payload.id);
-      if (error) throw new Error(error.message);
-      return payload;
-    },
-    onSuccess: (payload) => {
-      queryClient.invalidateQueries({ queryKey: ['hr-schedule-students-roster'] });
-      setMessage(
-        `${payload.name} is now ${payload.scheduleable ? 'schedulable (on roster)' : 'not schedulable (off roster)'}.`
-      );
-    },
-    onError: (error) => {
-      setMessage(error instanceof Error ? error.message : 'Unable to update schedulable status.');
     }
   });
 
@@ -645,11 +634,15 @@ export function ScheduleTab() {
     };
     setMonthSelection({ year: loadedConfig.year, month: loadedConfig.month });
     setGenerationSelection(loadedConfig);
-    setEditableAssignments(
-      schedule.schedule.map((assignment, index) => ({
-        ...assignment,
-        uid: `${assignment.date}|${assignment.period}|${assignment.shiftSlotKey}|${assignment.studentSNumber}|${index}`
-      }))
+    const loadedAssignments = schedule.schedule.map((assignment, index) => ({
+      ...assignment,
+      uid: `${assignment.date}|${assignment.period}|${assignment.shiftSlotKey}|${assignment.studentSNumber}|${index}`
+    }));
+    setEditableAssignments(loadedAssignments);
+    setSavedAssignmentWorkersByUid(
+      Object.fromEntries(
+        loadedAssignments.map((assignment) => [assignment.uid, assignment.effectiveWorkerSNumber])
+      )
     );
     setActiveWeekIndex(0);
     setDragSourceUid(null);
@@ -660,15 +653,19 @@ export function ScheduleTab() {
 
   useEffect(() => {
     if (!studentsRosterQuery.data) return;
-    setEditableRoster(
-      studentsRosterQuery.data.map((entry, index) => ({
-        localId: `roster-${entry.s_number}-${index}`,
-        id: entry.id,
-        name: entry.name,
-        s_number: entry.s_number,
-        scheduleable: Boolean(entry.scheduleable),
-        Schedule: typeof entry.Schedule === 'number' ? entry.Schedule : 0
-      }))
+    const loadedRoster = studentsRosterQuery.data.map((entry, index) => ({
+      localId: `roster-${entry.s_number}-${index}`,
+      id: entry.id,
+      name: entry.name,
+      s_number: entry.s_number,
+      scheduleable: Boolean(entry.scheduleable),
+      Schedule: typeof entry.Schedule === 'number' ? entry.Schedule : 0
+    }));
+    setEditableRoster(loadedRoster);
+    setSavedRosterScheduleableById(
+      Object.fromEntries(
+        loadedRoster.map((entry) => [rosterSnapshotKey(entry.id), entry.scheduleable])
+      )
     );
   }, [studentsRosterQuery.data]);
 
@@ -950,6 +947,43 @@ export function ScheduleTab() {
         schedule.statistics.length > 4 ||
         schedule.balanceAnalysis.length > 4)
   );
+  const changedAssignmentRows = useMemo(
+    () =>
+      editableAssignments
+        .map((assignment) => {
+          const fromWorker = savedAssignmentWorkersByUid[assignment.uid];
+          if (!fromWorker || fromWorker === assignment.effectiveWorkerSNumber) return null;
+          return {
+            assignment,
+            fromWorker,
+            toWorker: assignment.effectiveWorkerSNumber
+          };
+        })
+        .filter((value): value is { assignment: EditableAssignment; fromWorker: string; toWorker: string } =>
+          Boolean(value)
+        ),
+    [editableAssignments, savedAssignmentWorkersByUid]
+  );
+  const changedRosterRows = useMemo(
+    () =>
+      editableRoster
+        .map((entry) => {
+          const key = rosterSnapshotKey(entry.id);
+          const savedValue = savedRosterScheduleableById[key];
+          if (savedValue === undefined || savedValue === entry.scheduleable) return null;
+          return {
+            id: entry.id,
+            key,
+            name: entry.name,
+            scheduleable: entry.scheduleable
+          };
+        })
+        .filter((value): value is { id: number | string; key: string; name: string; scheduleable: boolean } =>
+          Boolean(value)
+        ),
+    [editableRoster, savedRosterScheduleableById]
+  );
+  const hasUnsavedChanges = changedAssignmentRows.length > 0 || changedRosterRows.length > 0;
 
   const attendanceByAssignmentKey = useMemo(() => {
     const map = new Map<string, GenericRow>();
@@ -1111,13 +1145,29 @@ export function ScheduleTab() {
     setManagerAssigneeSearch('');
   }, [emptySlotTarget, shiftActionModalUid]);
 
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = LEAVE_WITH_UNSAVED_CHANGES_MESSAGE;
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   const todayKey = getTodayDateKey();
   const selectedShiftIsFuture = selectedActionDate ? !isDateTodayOrPast(selectedActionDate, todayKey) : false;
 
   const targetYearMonthLabel = `${generationSelection.year}-${String(generationSelection.month).padStart(2, '0')}`;
   const openMonthLabel = `${monthSelection.year}-${String(monthSelection.month).padStart(2, '0')}`;
 
+  const confirmDiscardUnsavedChanges = (): boolean => {
+    if (!hasUnsavedChanges) return true;
+    return window.confirm(LEAVE_WITH_UNSAVED_CHANGES_MESSAGE);
+  };
+
   const handleApplyMonthSelection = () => {
+    if (!confirmDiscardUnsavedChanges()) return;
     const nextConfig = resolveMonthConfig(monthSelection);
     setGenerationSelection(nextConfig);
     setParams(buildScheduleParams(nextConfig));
@@ -1127,6 +1177,93 @@ export function ScheduleTab() {
   const handleGenerationMonthOrYearChange = (nextSelection: YearMonthSelection) => {
     const resolved = resolveMonthConfig(nextSelection);
     setGenerationSelection(resolved);
+  };
+
+  const handleSaveChanges = async () => {
+    if (!hasUnsavedChanges || isPersistingEdits) return;
+    let savedAssignmentCount = 0;
+    let savedRosterCount = 0;
+    const nextSavedRosterScheduleableById = { ...savedRosterScheduleableById };
+    const nextSavedAssignmentWorkersByUid = { ...savedAssignmentWorkersByUid };
+    setIsPersistingEdits(true);
+    try {
+      for (const change of changedRosterRows) {
+        const { error } = await supabase
+          .from('students')
+          .update({ scheduleable: change.scheduleable })
+          .eq('id', change.id);
+        if (error) {
+          throw new Error(`Failed to update roster for ${change.name}: ${error.message}`);
+        }
+        nextSavedRosterScheduleableById[change.key] = change.scheduleable;
+        savedRosterCount += 1;
+      }
+
+      for (const change of changedAssignmentRows) {
+        const submitResult = await submitShiftExchange(
+          change.assignment.date,
+          change.assignment.period,
+          change.assignment.shiftSlotKey,
+          change.fromWorker,
+          change.toWorker,
+          'Saved schedule edits'
+        );
+        if (!submitResult.ok) {
+          throw new Error(`${submitResult.error.message} (${submitResult.correlationId})`);
+        }
+        const approveResult = await approveShiftExchange(submitResult.data.id);
+        if (!approveResult.ok) {
+          throw new Error(`${approveResult.error.message} (${approveResult.correlationId})`);
+        }
+        nextSavedAssignmentWorkersByUid[change.assignment.uid] = change.toWorker;
+        savedAssignmentCount += 1;
+      }
+
+      setSavedRosterScheduleableById(nextSavedRosterScheduleableById);
+      setSavedAssignmentWorkersByUid(nextSavedAssignmentWorkersByUid);
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['hr-schedule'] }),
+        queryClient.invalidateQueries({
+          queryKey: ['hr-schedule-shift-attendance', selectedMonthRange.from, selectedMonthRange.to]
+        }),
+        queryClient.invalidateQueries({ queryKey: ['hr-shift-requests'] }),
+        queryClient.invalidateQueries({ queryKey: ['hr-schedule-table-index'] }),
+        queryClient.invalidateQueries({ queryKey: ['hr-schedule-students-roster'] })
+      ]);
+
+      const savedParts: string[] = [];
+      if (savedAssignmentCount > 0) savedParts.push(`${savedAssignmentCount} assignment update(s)`);
+      if (savedRosterCount > 0) savedParts.push(`${savedRosterCount} roster update(s)`);
+      setMessage(`Saved changes: ${savedParts.join(', ')}.`);
+      setIsSwapModeEnabled(false);
+      setDragSourceUid(null);
+      setDragTargetUid(null);
+    } catch (error) {
+      if (savedAssignmentCount > 0 || savedRosterCount > 0) {
+        setSavedRosterScheduleableById(nextSavedRosterScheduleableById);
+        setSavedAssignmentWorkersByUid(nextSavedAssignmentWorkersByUid);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['hr-schedule'] }),
+          queryClient.invalidateQueries({
+            queryKey: ['hr-schedule-shift-attendance', selectedMonthRange.from, selectedMonthRange.to]
+          }),
+          queryClient.invalidateQueries({ queryKey: ['hr-shift-requests'] }),
+          queryClient.invalidateQueries({ queryKey: ['hr-schedule-students-roster'] })
+        ]);
+      }
+      const fallbackMessage = 'Unable to save changes.';
+      const errorMessage = error instanceof Error ? error.message : fallbackMessage;
+      if (savedAssignmentCount > 0 || savedRosterCount > 0) {
+        setMessage(
+          `Partially saved (${savedAssignmentCount} assignment, ${savedRosterCount} roster). ${errorMessage}`
+        );
+      } else {
+        setMessage(errorMessage);
+      }
+    } finally {
+      setIsPersistingEdits(false);
+    }
   };
 
   const handleSwapWorkers = (sourceUid: string, targetUid: string) => {
@@ -1327,6 +1464,23 @@ export function ScheduleTab() {
                   </button>
                 )}
                 {canChangeAccessMode && (
+                  <button
+                    className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!hasUnsavedChanges || isPersistingEdits}
+                    onClick={() => {
+                      void handleSaveChanges();
+                    }}
+                    type="button"
+                  >
+                    {isPersistingEdits ? 'Saving...' : 'Save Changes'}
+                  </button>
+                )}
+                {hasUnsavedChanges && (
+                  <p className="text-xs text-brand-maroon">
+                    Unsaved changes: {changedAssignmentRows.length} assignment, {changedRosterRows.length} roster.
+                  </p>
+                )}
+                {canChangeAccessMode && (
                   <label className="text-xs text-neutral-700">
                     Access
                     <select
@@ -1496,7 +1650,9 @@ export function ScheduleTab() {
                                 {assignments.map((assignment) => {
                                   const offPeriods = settingsMap.get(assignment.effectiveWorkerSNumber) ?? [4, 8];
                                   const isOffPeriod = offPeriods.includes(assignment.period);
-                                  const exchanged = assignment.studentSNumber !== assignment.effectiveWorkerSNumber;
+                                  const savedWorker = savedAssignmentWorkersByUid[assignment.uid];
+                                  const hasUnsavedWorkerChange =
+                                    Boolean(savedWorker) && savedWorker !== assignment.effectiveWorkerSNumber;
                                   const isAlternate = isAlternateAssignment(assignment);
                                   const effectiveName =
                                     rosterNameBySNumber.get(assignment.effectiveWorkerSNumber) ??
@@ -1581,9 +1737,9 @@ export function ScheduleTab() {
                                             Alternate employee
                                           </span>
                                         )}
-                                        {exchanged && (
+                                        {hasUnsavedWorkerChange && (
                                           <span className="border border-brand-maroon px-1 text-[10px] text-brand-maroon">
-                                            Swapped
+                                            Unsaved
                                           </span>
                                         )}
                                         {isOffPeriod && (
@@ -1720,7 +1876,7 @@ export function ScheduleTab() {
                         <label className="flex items-center gap-2">
                           <input
                             checked={entry.scheduleable}
-                            disabled={updateRosterScheduleableMutation.isPending}
+                            disabled={isPersistingEdits}
                             onChange={(event) => {
                               const nextValue = event.target.checked;
                               setEditableRoster((previous) =>
@@ -1730,11 +1886,6 @@ export function ScheduleTab() {
                                     : item
                                 )
                               );
-                              updateRosterScheduleableMutation.mutate({
-                                id: entry.id,
-                                scheduleable: nextValue,
-                                name: entry.name
-                              });
                             }}
                             type="checkbox"
                           />
@@ -1907,7 +2058,10 @@ export function ScheduleTab() {
             <button
               className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={manualRefresh.isPending}
-              onClick={() => setIsGenerateConfirmOpen(true)}
+              onClick={() => {
+                if (!confirmDiscardUnsavedChanges()) return;
+                setIsGenerateConfirmOpen(true);
+              }}
               type="button"
             >
               Generate New Table
@@ -2204,6 +2358,7 @@ export function ScheduleTab() {
                 className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                 disabled={manualRefresh.isPending}
                 onClick={() => {
+                  if (!confirmDiscardUnsavedChanges()) return;
                   const nextSeed = generateScheduleSeed();
                   const nextGenerationSelection = { ...generationSelection, seed: nextSeed };
                   const nextParams = buildScheduleParams(nextGenerationSelection);
