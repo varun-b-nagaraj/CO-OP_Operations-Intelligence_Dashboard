@@ -162,14 +162,14 @@ interface CreateOrderLineDraft {
   notes: string;
 }
 
-const NAV_ITEMS: Array<{ id: DashboardView; label: string }> = [
-  { id: 'orders', label: 'Orders' },
-  { id: 'prompts', label: 'Prompts' },
-  { id: 'products', label: 'Products' },
-  { id: 'vendors', label: 'Vendors' },
-  { id: 'designs', label: 'Designs' },
-  { id: 'wishlist', label: 'Wishlist' },
-  { id: 'settings', label: 'Settings' }
+const NAV_ITEMS: Array<{ id: DashboardView; label: string; icon: 'orders' | 'prompts' | 'products' | 'vendors' | 'designs' | 'wishlist' | 'settings' }> = [
+  { id: 'orders', label: 'Orders', icon: 'orders' },
+  { id: 'prompts', label: 'Prompts', icon: 'prompts' },
+  { id: 'products', label: 'Products', icon: 'products' },
+  { id: 'vendors', label: 'Vendors', icon: 'vendors' },
+  { id: 'designs', label: 'Designs', icon: 'designs' },
+  { id: 'wishlist', label: 'Wishlist', icon: 'wishlist' },
+  { id: 'settings', label: 'Settings', icon: 'settings' }
 ];
 
 const ORDER_STATUSES: DbOrderStatus[] = [
@@ -1488,6 +1488,7 @@ export function ProductDashboard() {
         badge: item.id === 'prompts' && promptCount > 0 ? promptCount : undefined
       }))}
       onNavSelect={(id) => setActiveView(id as DashboardView)}
+      sidebarStateKey="product"
       subtitle="School Store Operations Portal"
       title="Product Dashboard"
     >

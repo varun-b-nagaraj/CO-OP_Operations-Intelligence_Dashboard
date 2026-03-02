@@ -26,13 +26,13 @@ type CalendarView = 'month' | 'list';
 type EventDraft = MarketingEventRow;
 type ReportDraft = MarketingReportRow;
 
-const TABS: Array<{ id: DashboardTab; label: string }> = [
-  { id: 'calendar', label: 'Calendar' },
-  { id: 'events', label: 'Events' },
-  { id: 'contacts', label: 'Contacts' },
-  { id: 'coordinators', label: 'Coordinators' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'settings', label: 'Settings' }
+const TABS: Array<{ id: DashboardTab; label: string; icon: 'calendar' | 'events' | 'contacts' | 'coordinators' | 'reports' | 'settings' }> = [
+  { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+  { id: 'events', label: 'Events', icon: 'events' },
+  { id: 'contacts', label: 'Contacts', icon: 'contacts' },
+  { id: 'coordinators', label: 'Coordinators', icon: 'coordinators' },
+  { id: 'reports', label: 'Reports', icon: 'reports' },
+  { id: 'settings', label: 'Settings', icon: 'settings' }
 ];
 
 const STATUS_OPTIONS: Array<{ value: MarketingEventStatus; label: string }> = [
@@ -1336,6 +1336,7 @@ export function MarketingDashboard() {
       navAriaLabel="Marketing navigation"
       navItems={TABS}
       onNavSelect={(id) => setActiveTab(id as DashboardTab)}
+      sidebarStateKey="marketing"
       subtitle="Events, contacts, and campaign coordination"
       title="Marketing Dashboard"
     >

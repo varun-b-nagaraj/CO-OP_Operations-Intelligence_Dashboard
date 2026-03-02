@@ -1,5 +1,7 @@
 'use client';
 
+import { DepartmentShellNavIcon } from '@/app/_components/department-shell';
+
 export interface HRTabItem {
   id:
     | 'schedule'
@@ -9,6 +11,7 @@ export interface HRTabItem {
     | 'requests'
     | 'audit';
   label: string;
+  icon?: DepartmentShellNavIcon;
 }
 
 interface TabNavigationProps {

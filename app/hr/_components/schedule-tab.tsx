@@ -1912,7 +1912,7 @@ export function ScheduleTab() {
             </div>
 
             <div className="overflow-x-auto border border-neutral-300">
-              <table className="w-full min-w-[1150px] text-xs md:text-sm">
+              <table className="w-full table-fixed text-xs md:text-sm">
                 <thead className="bg-neutral-100">
                   <tr>
                     <th className="border-b border-r border-neutral-300 p-2 text-left">Week {activeWeekIndex + 1}</th>

@@ -13,6 +13,7 @@ import {
   upsertCFADailyLog,
   updateCFAItem
 } from '@/app/actions/cfa';
+import { DepartmentShellNavIcon } from '@/app/_components/department-shell';
 import { usePermission } from '@/lib/permissions';
 import { CFADayType, CFAItem } from '@/lib/types';
 
@@ -23,6 +24,7 @@ type HistoryDayTypeFilter = 'all' | CFADayType;
 interface CFATabItem {
   id: CFATabId;
   label: string;
+  icon: DepartmentShellNavIcon;
 }
 
 interface CFALineDraft {
@@ -43,11 +45,11 @@ interface CFAModuleProps {
 }
 
 export const CFA_TABS: CFATabItem[] = [
-  { id: 'daily-log', label: 'Daily Log' },
-  { id: 'history', label: 'History' },
-  { id: 'ab-analysis', label: 'A/B Analysis' },
-  { id: 'forecast', label: 'Forecast' },
-  { id: 'menu', label: 'Menu' }
+  { id: 'daily-log', label: 'Daily Log', icon: 'daily_log' },
+  { id: 'history', label: 'History', icon: 'history' },
+  { id: 'ab-analysis', label: 'A/B Analysis', icon: 'analysis' },
+  { id: 'forecast', label: 'Forecast', icon: 'forecast' },
+  { id: 'menu', label: 'Menu', icon: 'menu' }
 ];
 
 function todayDateKey(): string {

@@ -25,12 +25,12 @@ const RequestsTab = dynamic(() => import('./requests-tab').then((module) => modu
 const AuditTab = dynamic(() => import('./audit-tab').then((module) => module.AuditTab));
 
 const tabs: Array<HRTabItem & { permission: PermissionFlag }> = [
-  { id: 'schedule', label: 'Schedule', permission: 'hr.schedule.view' },
-  { id: 'employees', label: 'Employee Management', permission: 'hr.attendance.view' },
-  { id: 'meeting-attendance', label: 'Meeting Attendance', permission: 'hr.attendance.view' },
-  { id: 'shift-attendance', label: 'Shift Attendance', permission: 'hr.attendance.view' },
-  { id: 'requests', label: 'Requests', permission: 'hr.requests.view' },
-  { id: 'audit', label: 'Audit', permission: 'hr.audit.view' }
+  { id: 'schedule', label: 'Schedule', icon: 'schedule', permission: 'hr.schedule.view' },
+  { id: 'employees', label: 'Employee Management', icon: 'employees', permission: 'hr.attendance.view' },
+  { id: 'meeting-attendance', label: 'Meeting Attendance', icon: 'meeting', permission: 'hr.attendance.view' },
+  { id: 'shift-attendance', label: 'Shift Attendance', icon: 'shift', permission: 'hr.attendance.view' },
+  { id: 'requests', label: 'Requests', icon: 'requests', permission: 'hr.requests.view' },
+  { id: 'audit', label: 'Audit', icon: 'audit', permission: 'hr.audit.view' }
 ];
 
 type PrimaryModule = 'hr' | 'cfa';
@@ -101,8 +101,8 @@ export function HRModule() {
   const activeNavId = resolvedModule === 'hr' ? (resolvedHRTab ?? 'schedule') : activeCFATab;
   const navItems =
     resolvedModule === 'hr'
-      ? visibleTabs.map((tab) => ({ id: tab.id, label: tab.label }))
-      : CFA_TABS.map((tab) => ({ id: tab.id, label: tab.label }));
+      ? visibleTabs.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }))
+      : CFA_TABS.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }));
 
   return (
     <DepartmentShell
@@ -118,8 +118,9 @@ export function HRModule() {
       }}
       subtitle={resolvedModule === 'hr' ? 'People operations and attendance controls' : 'Sales log and forecast operations'}
       title={resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
+      sidebarStateKey={resolvedModule === 'hr' ? 'hr' : 'cfa'}
     >
-      <section className="border border-neutral-300 bg-white">
+      <section className="min-w-0 overflow-x-hidden border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -158,9 +159,9 @@ export function HRModule() {
         </header>
 
         {resolvedModule === 'hr' ? (
-          <section id="module-panel-hr">
+          <section className="min-w-0 overflow-x-hidden" id="module-panel-hr">
             <section
-              className="p-0"
+              className="min-w-0 overflow-x-hidden p-0"
               id={`panel-${resolvedHRTab}`}
               role="tabpanel"
             >

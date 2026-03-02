@@ -22,8 +22,13 @@ import {
 import { InventoryCatalogItem, InventoryCountEvent } from '@/lib/inventory/types';
 import { createSessionJoinPacket, parseSessionJoinPacket } from '@/lib/inventory/sync';
 
-const TABS = ['Catalog', 'Sessions', 'Count View', 'Finalize & Upload'] as const;
-type TabId = (typeof TABS)[number];
+const TABS = [
+  { id: 'catalog', label: 'Catalog', icon: 'catalog' },
+  { id: 'sessions', label: 'Sessions', icon: 'sessions' },
+  { id: 'count-view', label: 'Count View', icon: 'count_view' },
+  { id: 'finalize-upload', label: 'Finalize & Upload', icon: 'finalize' }
+] as const;
+type TabId = (typeof TABS)[number]['id'];
 type FinalAction = 'none' | 'finalize' | 'lock';
 type ScanMode = 'single' | 'multi';
 
@@ -68,7 +73,7 @@ function wait(ms: number): Promise<void> {
 }
 
 export function InventoryDashboard() {
-  const [activeTab, setActiveTab] = useState<TabId>('Catalog');
+  const [activeTab, setActiveTab] = useState<TabId>('catalog');
 
   const [catalog, setCatalog] = useState<InventoryCatalogItem[]>([]);
   const [scanCatalog, setScanCatalog] = useState<InventoryCatalogItem[]>([]);
@@ -976,8 +981,9 @@ export function InventoryDashboard() {
     <DepartmentShell
       activeNavId={activeTab}
       navAriaLabel="Inventory navigation"
-      navItems={TABS.map((tab) => ({ id: tab, label: tab }))}
+      navItems={TABS.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }))}
       onNavSelect={(id) => setActiveTab(id as TabId)}
+      sidebarStateKey="inventory"
       subtitle="Catalog counting, session sync, and upload workflows"
       title="Inventory Dashboard"
     >
@@ -997,7 +1003,7 @@ export function InventoryDashboard() {
         </header>
 
         <section className="space-y-3 p-3 sm:space-y-4 sm:p-4">
-          {activeTab === 'Catalog' ? (
+          {activeTab === 'catalog' ? (
             <section className="space-y-3">
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input
@@ -1320,7 +1326,7 @@ export function InventoryDashboard() {
             </section>
           ) : null}
 
-          {activeTab === 'Sessions' ? (
+          {activeTab === 'sessions' ? (
             <section className="space-y-3">
               <div className="grid gap-2 sm:grid-cols-3">
                 <input
@@ -1438,7 +1444,7 @@ export function InventoryDashboard() {
             </section>
           ) : null}
 
-          {activeTab === 'Count View' ? (
+          {activeTab === 'count-view' ? (
             <section className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
                 <section className="space-y-3">
@@ -1617,7 +1623,7 @@ export function InventoryDashboard() {
             </section>
           ) : null}
 
-          {activeTab === 'Finalize & Upload' ? (
+          {activeTab === 'finalize-upload' ? (
             <section className="space-y-3">
               <div className="border border-neutral-300 p-3">
                 <h3 className="text-sm font-semibold text-neutral-900">Session State</h3>
