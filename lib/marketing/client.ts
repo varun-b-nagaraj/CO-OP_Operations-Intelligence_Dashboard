@@ -10,6 +10,7 @@ import type {
   ExternalContactRow,
   InternalCoordinatorRow,
   MarketingEventBundle,
+  MarketingEventCategoryRow,
   MarketingEventFilters,
   MarketingEventRow,
   MarketingReportRow,
@@ -174,6 +175,15 @@ function mapReport(row: Record<string, unknown>): MarketingReportRow {
   };
 }
 
+function mapEventCategory(row: Record<string, unknown>): MarketingEventCategoryRow {
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ''),
+    active: Boolean(row.active ?? true),
+    updated_at: String(row.updated_at ?? new Date().toISOString())
+  };
+}
+
 interface SaveEventInput {
   id?: string;
   title: string;
@@ -214,6 +224,8 @@ interface SaveReportInput {
 
 export interface MarketingRepository {
   listEvents(filters: MarketingEventFilters): Promise<MarketingEventRow[]>;
+  listEventCategories(): Promise<MarketingEventCategoryRow[]>;
+  createEventCategory(name: string): Promise<MarketingEventCategoryRow>;
   searchEvents(query: string): Promise<MarketingEventRow[]>;
   listContacts(query: string): Promise<ExternalContactRow[]>;
   listInternalCoordinators(query: string): Promise<InternalCoordinatorRow[]>;
@@ -288,6 +300,34 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       const { data, error } = await query;
       if (error) throw error;
       return ((data ?? []) as Record<string, unknown>[]).map(mapEvent);
+    },
+
+    async listEventCategories() {
+      const { data, error } = await supabase
+        .from('marketing_event_categories')
+        .select('*')
+        .eq('active', true)
+        .order('name', { ascending: true });
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(mapEventCategory);
+    },
+
+    async createEventCategory(name) {
+      const normalized = name.trim();
+      const { data, error } = await supabase
+        .from('marketing_event_categories')
+        .upsert(
+          {
+            name: normalized,
+            active: true,
+            updated_by: 'dashboard'
+          },
+          { onConflict: 'name' }
+        )
+        .select('*')
+        .single();
+      if (error) throw error;
+      return mapEventCategory((data ?? {}) as Record<string, unknown>);
     },
 
     async searchEvents(query) {

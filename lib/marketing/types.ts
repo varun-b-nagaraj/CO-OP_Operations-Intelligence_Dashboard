@@ -121,6 +121,13 @@ export interface MarketingEventFilters {
   category: string | 'all';
 }
 
+export interface MarketingEventCategoryRow {
+  id: string;
+  name: string;
+  active: boolean;
+  updated_at: string;
+}
+
 export interface MarketingReportRow {
   id: string;
   title: string;

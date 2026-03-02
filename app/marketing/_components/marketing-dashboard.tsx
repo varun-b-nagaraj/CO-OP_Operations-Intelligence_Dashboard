@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
 import { createMarketingRepository } from '@/lib/marketing/client';
@@ -13,6 +13,7 @@ import type {
   ExternalContactRow,
   InternalCoordinatorRow,
   MarketingEventBundle,
+  MarketingEventCategoryRow,
   MarketingEventRow,
   MarketingReportRow,
   MarketingEventStatus
@@ -212,6 +213,7 @@ export function MarketingDashboard() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
   const [events, setEvents] = useState<MarketingEventRow[]>([]);
+  const [eventCategories, setEventCategories] = useState<MarketingEventCategoryRow[]>([]);
   const [contacts, setContacts] = useState<ExternalContactRow[]>([]);
   const [reports, setReports] = useState<MarketingReportRow[]>([]);
   const [eventIndicators, setEventIndicators] = useState<
@@ -247,9 +249,20 @@ export function MarketingDashboard() {
   const [contactSearch, setContactSearch] = useState('');
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [selectedContactEventIds, setSelectedContactEventIds] = useState<string[]>([]);
-  const [contactPanelOpen, setContactPanelOpen] = useState(false);
+  const [contactCreateModalOpen, setContactCreateModalOpen] = useState(false);
   const [contactEventToLink, setContactEventToLink] = useState('');
   const [contactDraft, setContactDraft] = useState({
+    organization: '',
+    person_name: '',
+    role_title: '',
+    email: '',
+    phone: '',
+    instagram_handle: '',
+    linkedin_url: '',
+    other_social: '',
+    notes: ''
+  });
+  const [contactCreateDraft, setContactCreateDraft] = useState({
     organization: '',
     person_name: '',
     role_title: '',
@@ -265,9 +278,19 @@ export function MarketingDashboard() {
   const [internalCoordinatorSearch, setInternalCoordinatorSearch] = useState('');
   const [selectedInternalCoordinatorId, setSelectedInternalCoordinatorId] = useState<string | null>(null);
   const [selectedInternalCoordinatorEventIds, setSelectedInternalCoordinatorEventIds] = useState<string[]>([]);
-  const [coordinatorPanelOpen, setCoordinatorPanelOpen] = useState(false);
+  const [coordinatorCreateModalOpen, setCoordinatorCreateModalOpen] = useState(false);
   const [coordinatorEventToLink, setCoordinatorEventToLink] = useState('');
   const [internalCoordinatorDraft, setInternalCoordinatorDraft] = useState({
+    full_name: '',
+    role_title: '',
+    email: '',
+    phone: '',
+    instagram_handle: '',
+    linkedin_url: '',
+    other_social: '',
+    notes: ''
+  });
+  const [internalCoordinatorCreateDraft, setInternalCoordinatorCreateDraft] = useState({
     full_name: '',
     role_title: '',
     email: '',
@@ -290,6 +313,8 @@ export function MarketingDashboard() {
   const [eventDateFrom, setEventDateFrom] = useState('');
   const [eventDateTo, setEventDateTo] = useState('');
   const [eventSort, setEventSort] = useState<'upcoming' | 'recently_updated' | 'recently_completed'>('upcoming');
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
 
   const [pendingAssetPreviews, setPendingAssetPreviews] = useState<PendingAssetPreview[]>([]);
   const [failedAssetUploads, setFailedAssetUploads] = useState<File[]>([]);
@@ -299,11 +324,14 @@ export function MarketingDashboard() {
 
   const categoryOptions = useMemo(() => {
     const values = new Set<string>();
+    eventCategories.forEach((category) => {
+      if (category.name.trim()) values.add(category.name.trim());
+    });
     events.forEach((event) => {
       if (event.category?.trim()) values.add(event.category.trim());
     });
     return ['all', ...Array.from(values).sort((a, b) => a.localeCompare(b))];
-  }, [events]);
+  }, [eventCategories, events]);
 
   const calendarGrid = useMemo(() => buildMonthGrid(monthAnchor), [monthAnchor]);
 
@@ -333,12 +361,13 @@ export function MarketingDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [eventRows, contactRows, coordinatorRows, reportRows] = await Promise.all([
+      const [eventRows, categoryRows, contactRows, coordinatorRows, reportRows] = await Promise.all([
         repository.listEvents({
           query: '',
           status: statusFilter,
           category: categoryFilter
         }),
+        repository.listEventCategories(),
         repository.listContacts(contactSearch),
         repository.listInternalCoordinators(internalCoordinatorSearch),
         repository.listReportRows({
@@ -350,6 +379,7 @@ export function MarketingDashboard() {
       ]);
 
       setEvents(eventRows);
+      setEventCategories(categoryRows);
       setContacts(contactRows);
       setInternalCoordinators(coordinatorRows);
       setReports(reportRows);
@@ -570,6 +600,24 @@ export function MarketingDashboard() {
     },
     [loadEventBundle, repository]
   );
+
+  const createCategory = async () => {
+    const normalized = newCategoryName.trim();
+    if (!normalized) return;
+    try {
+      const created = await repository.createEventCategory(normalized);
+      setEventCategories((prev) => {
+        const exists = prev.some((entry) => entry.name.toLowerCase() === created.name.toLowerCase());
+        return exists ? prev : [...prev, created].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setNewCategoryName('');
+      setCategoryModalOpen(false);
+      setNotice(`Category "${created.name}" added.`);
+    } catch (categoryError) {
+      const message = categoryError instanceof Error ? categoryError.message : 'Unable to create category.';
+      setError(message);
+    }
+  };
 
   const createReport = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -907,22 +955,34 @@ export function MarketingDashboard() {
     }
   };
 
-  const createContactFromPanel = async () => {
-    if (!contactDraft.organization.trim() || !contactDraft.person_name.trim()) return;
+  const createContactFromModal = async () => {
+    if (!contactCreateDraft.organization.trim() || !contactCreateDraft.person_name.trim()) return;
     try {
       const created = await repository.saveContact({
-        organization: contactDraft.organization.trim(),
-        person_name: contactDraft.person_name.trim(),
-        role_title: contactDraft.role_title.trim() || null,
-        email: contactDraft.email.trim() || null,
-        phone: contactDraft.phone.trim() || null,
-        instagram_handle: contactDraft.instagram_handle.trim() || null,
-        linkedin_url: contactDraft.linkedin_url.trim() || null,
-        other_social: contactDraft.other_social.trim() || null,
-        notes: contactDraft.notes.trim() || null
+        organization: contactCreateDraft.organization.trim(),
+        person_name: contactCreateDraft.person_name.trim(),
+        role_title: contactCreateDraft.role_title.trim() || null,
+        email: contactCreateDraft.email.trim() || null,
+        phone: contactCreateDraft.phone.trim() || null,
+        instagram_handle: contactCreateDraft.instagram_handle.trim() || null,
+        linkedin_url: contactCreateDraft.linkedin_url.trim() || null,
+        other_social: contactCreateDraft.other_social.trim() || null,
+        notes: contactCreateDraft.notes.trim() || null
       });
       setContacts((prev) => [created, ...prev]);
       setSelectedContactId(created.id);
+      setContactCreateModalOpen(false);
+      setContactCreateDraft({
+        organization: '',
+        person_name: '',
+        role_title: '',
+        email: '',
+        phone: '',
+        instagram_handle: '',
+        linkedin_url: '',
+        other_social: '',
+        notes: ''
+      });
       setNotice('Contact created.');
     } catch (contactError) {
       const message = contactError instanceof Error ? contactError.message : 'Unable to create contact.';
@@ -952,21 +1012,32 @@ export function MarketingDashboard() {
     }
   };
 
-  const createInternalCoordinatorFromPanel = async () => {
-    if (!internalCoordinatorDraft.full_name.trim()) return;
+  const createInternalCoordinatorFromModal = async () => {
+    if (!internalCoordinatorCreateDraft.full_name.trim()) return;
     try {
       const created = await repository.saveInternalCoordinator({
-        full_name: internalCoordinatorDraft.full_name.trim(),
-        role_title: internalCoordinatorDraft.role_title.trim() || null,
-        email: internalCoordinatorDraft.email.trim() || null,
-        phone: internalCoordinatorDraft.phone.trim() || null,
-        instagram_handle: internalCoordinatorDraft.instagram_handle.trim() || null,
-        linkedin_url: internalCoordinatorDraft.linkedin_url.trim() || null,
-        other_social: internalCoordinatorDraft.other_social.trim() || null,
-        notes: internalCoordinatorDraft.notes.trim() || null
+        full_name: internalCoordinatorCreateDraft.full_name.trim(),
+        role_title: internalCoordinatorCreateDraft.role_title.trim() || null,
+        email: internalCoordinatorCreateDraft.email.trim() || null,
+        phone: internalCoordinatorCreateDraft.phone.trim() || null,
+        instagram_handle: internalCoordinatorCreateDraft.instagram_handle.trim() || null,
+        linkedin_url: internalCoordinatorCreateDraft.linkedin_url.trim() || null,
+        other_social: internalCoordinatorCreateDraft.other_social.trim() || null,
+        notes: internalCoordinatorCreateDraft.notes.trim() || null
       });
       setInternalCoordinators((prev) => [created, ...prev]);
       setSelectedInternalCoordinatorId(created.id);
+      setCoordinatorCreateModalOpen(false);
+      setInternalCoordinatorCreateDraft({
+        full_name: '',
+        role_title: '',
+        email: '',
+        phone: '',
+        instagram_handle: '',
+        linkedin_url: '',
+        other_social: '',
+        notes: ''
+      });
       setNotice('Coordinator created.');
     } catch (coordinatorError) {
       const message = coordinatorError instanceof Error ? coordinatorError.message : 'Unable to create coordinator.';
@@ -1395,7 +1466,7 @@ export function MarketingDashboard() {
                         <th className="border-b border-neutral-300 px-3 py-2">Title</th>
                         <th className="border-b border-neutral-300 px-3 py-2">Status</th>
                         <th className="border-b border-neutral-300 px-3 py-2">Category</th>
-                        <th className="border-b border-neutral-300 px-3 py-2">Location</th>
+                        <th className="border-b border-neutral-300 px-3 py-2">Department</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1461,6 +1532,13 @@ export function MarketingDashboard() {
                     </option>
                   ))}
                 </select>
+                <button
+                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                  onClick={() => setCategoryModalOpen(true)}
+                  type="button"
+                >
+                  Manage Categories
+                </button>
                 <input
                   className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                   onChange={(event) => setEventDateFrom(event.target.value)}
@@ -1492,7 +1570,7 @@ export function MarketingDashboard() {
                       <th className="border-b border-neutral-300 px-3 py-2">Title</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Status</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Category</th>
-                      <th className="border-b border-neutral-300 px-3 py-2">Location</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Department</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Coordinators</th>
                       <th className="border-b border-neutral-300 px-3 py-2">External Orgs</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Attachments</th>
@@ -1544,447 +1622,180 @@ export function MarketingDashboard() {
           )}
 
           {activeTab === 'contacts' && (
-            <section className={`grid gap-3 ${contactPanelOpen ? 'lg:grid-cols-[1.1fr_1fr]' : ''}`}>
-              <div className="border border-neutral-300 bg-white">
-                <div className="border-b border-neutral-300 p-3">
-                  <div className="flex gap-2">
-                    <input
-                      className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactSearch(event.target.value)}
-                      placeholder="Search contacts"
-                      value={contactSearch}
-                    />
-                    <button
-                      className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
-                      onClick={() => {
-                        setSelectedContactId(null);
-                        setContactDraft({
-                          organization: '',
-                          person_name: '',
-                          role_title: '',
-                          email: '',
-                          phone: '',
-                          instagram_handle: '',
-                          linkedin_url: '',
-                          other_social: '',
-                          notes: ''
-                        });
-                        setContactPanelOpen(true);
-                      }}
-                      type="button"
-                    >
-                      New
-                    </button>
-                  </div>
-                </div>
+            <section className="space-y-3">
+              <div className="flex gap-2 border border-neutral-300 bg-white p-3">
+                <input
+                  className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                  onChange={(event) => setContactSearch(event.target.value)}
+                  placeholder="Search contacts"
+                  value={contactSearch}
+                />
+                <button
+                  className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
+                  onClick={() => {
+                    setContactCreateDraft({
+                      organization: '',
+                      person_name: '',
+                      role_title: '',
+                      email: '',
+                      phone: '',
+                      instagram_handle: '',
+                      linkedin_url: '',
+                      other_social: '',
+                      notes: ''
+                    });
+                    setContactCreateModalOpen(true);
+                  }}
+                  type="button"
+                >
+                  Add Contact
+                </button>
+              </div>
 
-                <div className="max-h-[62vh] overflow-auto">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-neutral-50">
-                      <tr>
-                        <th className="border-b border-neutral-300 px-3 py-2">Organization</th>
-                        <th className="border-b border-neutral-300 px-3 py-2">Name</th>
-                        <th className="border-b border-neutral-300 px-3 py-2">Role</th>
-                        <th className="border-b border-neutral-300 px-3 py-2">Email</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {contacts.map((contact) => {
-                        const isSelected = selectedContactId === contact.id;
-                        return (
-                          <tr
-                            key={contact.id}
-                            className={isSelected ? 'bg-neutral-100' : ''}
-                            onClick={() => {
-                              setSelectedContactId(contact.id);
-                              setContactPanelOpen(true);
-                            }}
-                          >
+              <div className="max-h-[68vh] overflow-auto border border-neutral-300 bg-white">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-neutral-50">
+                    <tr>
+                      <th className="border-b border-neutral-300 px-3 py-2">Organization</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Name</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Role</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Email</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {contacts.map((contact) => {
+                      const expanded = selectedContactId === contact.id;
+                      return (
+                        <Fragment key={contact.id}>
+                          <tr className={`cursor-pointer ${expanded ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`} onClick={() => setSelectedContactId(expanded ? null : contact.id)}>
                             <td className="border-b border-neutral-200 px-3 py-2">{contact.organization}</td>
                             <td className="border-b border-neutral-200 px-3 py-2">{contact.person_name}</td>
                             <td className="border-b border-neutral-200 px-3 py-2">{contact.role_title ?? '-'}</td>
                             <td className="border-b border-neutral-200 px-3 py-2">{contact.email ?? '-'}</td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                          {expanded ? (
+                            <tr>
+                              <td className="border-b border-neutral-200 px-3 py-3" colSpan={4}>
+                                <div className="grid gap-2 md:grid-cols-2">
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, organization: event.target.value }))} placeholder="Organization" value={contactDraft.organization} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, person_name: event.target.value }))} placeholder="Person name" value={contactDraft.person_name} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, role_title: event.target.value }))} placeholder="Role/title" value={contactDraft.role_title} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, email: event.target.value }))} placeholder="Email" value={contactDraft.email} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone" value={contactDraft.phone} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, instagram_handle: event.target.value }))} placeholder="Instagram handle" value={contactDraft.instagram_handle} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, linkedin_url: event.target.value }))} placeholder="LinkedIn URL" value={contactDraft.linkedin_url} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, other_social: event.target.value }))} placeholder="Other social URL/handle" value={contactDraft.other_social} />
+                                  <textarea className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm md:col-span-2" onChange={(event) => setContactDraft((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Notes" value={contactDraft.notes} />
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <button className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white" onClick={() => { void saveSelectedContact(); }} type="button">Save Contact</button>
+                                  <select className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm" onChange={(event) => setContactEventToLink(event.target.value)} value={contactEventToLink}>
+                                    <option value="">Link to event...</option>
+                                    {events.map((entry) => (
+                                      <option key={entry.id} value={entry.id}>
+                                        {entry.title} ({formatDate(entry.starts_at)})
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => { void linkSelectedContactToEvent(); }} type="button">Link</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-
-              {contactPanelOpen ? (
-              <aside className="border border-neutral-300 bg-white p-3">
-                <div className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-base font-semibold">{selectedContact ? 'Contact Details' : 'Add Contact'}</h3>
-                    <button
-                      className="min-h-[30px] border border-neutral-300 bg-white px-2 text-xs"
-                      onClick={() => setContactPanelOpen(false)}
-                      type="button"
-                    >
-                      Close X
-                    </button>
-                  </div>
-                  <div className="grid gap-2">
-                    <input
-                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, organization: event.target.value }))}
-                      placeholder="Organization"
-                      value={contactDraft.organization}
-                    />
-                    <input
-                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, person_name: event.target.value }))}
-                      placeholder="Person name"
-                      value={contactDraft.person_name}
-                    />
-                    <input
-                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, role_title: event.target.value }))}
-                      placeholder="Role/title"
-                      value={contactDraft.role_title}
-                    />
-                    <input
-                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, email: event.target.value }))}
-                      placeholder="Email"
-                      value={contactDraft.email}
-                    />
-                    <input
-                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, phone: event.target.value }))}
-                      placeholder="Phone"
-                      value={contactDraft.phone}
-                    />
-                    <input
-                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, instagram_handle: event.target.value }))}
-                      placeholder="Instagram handle"
-                      value={contactDraft.instagram_handle}
-                    />
-                    <input
-                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, linkedin_url: event.target.value }))}
-                      placeholder="LinkedIn URL"
-                      value={contactDraft.linkedin_url}
-                    />
-                    <input
-                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, other_social: event.target.value }))}
-                      placeholder="Other social URL/handle"
-                      value={contactDraft.other_social}
-                    />
-                    <textarea
-                      className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm"
-                      onChange={(event) => setContactDraft((prev) => ({ ...prev, notes: event.target.value }))}
-                      placeholder="Notes"
-                      value={contactDraft.notes}
-                    />
-                    <div className="flex gap-2">
-                      {selectedContact ? (
-                        <button
-                          className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
-                          onClick={() => {
-                            void saveSelectedContact();
-                          }}
-                          type="button"
-                        >
-                          Save Contact
-                        </button>
-                      ) : null}
-                      <button
-                        className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
-                        onClick={() => {
-                          void createContactFromPanel();
-                        }}
-                        type="button"
-                      >
-                        Add Contact
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-neutral-300 pt-3">
-                    <p className="mb-2 text-sm font-medium">Linked Events</p>
-                    {!selectedContact ? (
-                      <p className="text-neutral-600">Select a contact to view linked events.</p>
-                    ) : selectedContactLinkedEvents.length ? (
-                      <ul className="space-y-1">
-                        {selectedContactLinkedEvents.map((event) => (
-                          <li key={event.id}>
-                            <button
-                              className="text-left underline-offset-2 hover:underline"
-                              onClick={() => {
-                                void loadEventBundle(event.id);
-                              }}
-                              type="button"
-                            >
-                              {event.title} ({formatDate(event.starts_at)})
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-neutral-600">No linked events.</p>
-                    )}
-                    {selectedContact ? (
-                      <div className="mt-2 flex gap-2">
-                        <select
-                          className="min-h-[34px] flex-1 border border-neutral-300 bg-white px-2 text-sm"
-                          onChange={(event) => setContactEventToLink(event.target.value)}
-                          value={contactEventToLink}
-                        >
-                          <option value="">Link to event...</option>
-                          {events.map((entry) => (
-                            <option key={entry.id} value={entry.id}>
-                              {entry.title} ({formatDate(entry.starts_at)})
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
-                          onClick={() => {
-                            void linkSelectedContactToEvent();
-                          }}
-                          type="button"
-                        >
-                          Link
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </aside>
-              ) : (
-                <button
-                  className="w-fit min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
-                  onClick={() => setContactPanelOpen(true)}
-                  type="button"
-                >
-                  Open Contact Panel
-                </button>
-              )}
             </section>
           )}
 
           {activeTab === 'coordinators' && (
-            <section className={`grid gap-3 ${coordinatorPanelOpen ? 'lg:grid-cols-[1.1fr_1fr]' : ''}`}>
-              <div className="border border-neutral-300 bg-white">
-                <div className="border-b border-neutral-300 p-3">
-                  <div className="flex gap-2">
-                    <input
-                      className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setInternalCoordinatorSearch(event.target.value)}
-                      placeholder="Search coordinators"
-                      value={internalCoordinatorSearch}
-                    />
-                    <button
-                      className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
-                      onClick={() => {
-                        setSelectedInternalCoordinatorId(null);
-                        setInternalCoordinatorDraft({
-                          full_name: '',
-                          role_title: '',
-                          email: '',
-                          phone: '',
-                          instagram_handle: '',
-                          linkedin_url: '',
-                          other_social: '',
-                          notes: ''
-                        });
-                        setCoordinatorPanelOpen(true);
-                      }}
-                      type="button"
-                    >
-                      New
-                    </button>
-                  </div>
-                </div>
+            <section className="space-y-3">
+              <div className="flex gap-2 border border-neutral-300 bg-white p-3">
+                <input
+                  className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                  onChange={(event) => setInternalCoordinatorSearch(event.target.value)}
+                  placeholder="Search coordinators"
+                  value={internalCoordinatorSearch}
+                />
+                <button
+                  className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
+                  onClick={() => {
+                    setInternalCoordinatorCreateDraft({
+                      full_name: '',
+                      role_title: '',
+                      email: '',
+                      phone: '',
+                      instagram_handle: '',
+                      linkedin_url: '',
+                      other_social: '',
+                      notes: ''
+                    });
+                    setCoordinatorCreateModalOpen(true);
+                  }}
+                  type="button"
+                >
+                  Add Coordinator
+                </button>
+              </div>
 
-                <div className="max-h-[62vh] overflow-auto">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-neutral-50">
-                      <tr>
-                        <th className="border-b border-neutral-300 px-3 py-2">Name</th>
-                        <th className="border-b border-neutral-300 px-3 py-2">Role</th>
-                        <th className="border-b border-neutral-300 px-3 py-2">Email</th>
-                        <th className="border-b border-neutral-300 px-3 py-2">Phone</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {internalCoordinators.map((coordinator) => {
-                        const isSelected = selectedInternalCoordinatorId === coordinator.id;
-                        return (
-                          <tr
-                            key={coordinator.id}
-                            className={isSelected ? 'bg-neutral-100' : ''}
-                            onClick={() => {
-                              setSelectedInternalCoordinatorId(coordinator.id);
-                              setCoordinatorPanelOpen(true);
-                            }}
-                          >
+              <div className="max-h-[68vh] overflow-auto border border-neutral-300 bg-white">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-neutral-50">
+                    <tr>
+                      <th className="border-b border-neutral-300 px-3 py-2">Name</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Role</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Email</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Phone</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {internalCoordinators.map((coordinator) => {
+                      const expanded = selectedInternalCoordinatorId === coordinator.id;
+                      return (
+                        <Fragment key={coordinator.id}>
+                          <tr className={`cursor-pointer ${expanded ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`} onClick={() => setSelectedInternalCoordinatorId(expanded ? null : coordinator.id)}>
                             <td className="border-b border-neutral-200 px-3 py-2">{coordinator.full_name}</td>
                             <td className="border-b border-neutral-200 px-3 py-2">{coordinator.role_title ?? '-'}</td>
                             <td className="border-b border-neutral-200 px-3 py-2">{coordinator.email ?? '-'}</td>
                             <td className="border-b border-neutral-200 px-3 py-2">{coordinator.phone ?? '-'}</td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                          {expanded ? (
+                            <tr>
+                              <td className="border-b border-neutral-200 px-3 py-3" colSpan={4}>
+                                <div className="grid gap-2 md:grid-cols-2">
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, full_name: event.target.value }))} placeholder="Full name" value={internalCoordinatorDraft.full_name} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, role_title: event.target.value }))} placeholder="Role/title" value={internalCoordinatorDraft.role_title} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, email: event.target.value }))} placeholder="Email" value={internalCoordinatorDraft.email} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone" value={internalCoordinatorDraft.phone} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, instagram_handle: event.target.value }))} placeholder="Instagram handle" value={internalCoordinatorDraft.instagram_handle} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, linkedin_url: event.target.value }))} placeholder="LinkedIn URL" value={internalCoordinatorDraft.linkedin_url} />
+                                  <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, other_social: event.target.value }))} placeholder="Other social URL/handle" value={internalCoordinatorDraft.other_social} />
+                                  <textarea className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm md:col-span-2" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Notes" value={internalCoordinatorDraft.notes} />
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <button className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white" onClick={() => { void saveSelectedInternalCoordinator(); }} type="button">Save Coordinator</button>
+                                  <select className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm" onChange={(event) => setCoordinatorEventToLink(event.target.value)} value={coordinatorEventToLink}>
+                                    <option value="">Link to event...</option>
+                                    {events.map((entry) => (
+                                      <option key={entry.id} value={entry.id}>
+                                        {entry.title} ({formatDate(entry.starts_at)})
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => { void linkSelectedCoordinatorToEvent(); }} type="button">Link</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-
-              {coordinatorPanelOpen ? (
-                <aside className="border border-neutral-300 bg-white p-3">
-                  <div className="space-y-3 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-base font-semibold">
-                        {selectedInternalCoordinator ? 'Coordinator Details' : 'Add Coordinator'}
-                      </h3>
-                      <button
-                        className="min-h-[30px] border border-neutral-300 bg-white px-2 text-xs"
-                        onClick={() => setCoordinatorPanelOpen(false)}
-                        type="button"
-                      >
-                        Close X
-                      </button>
-                    </div>
-                    <div className="grid gap-2">
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, full_name: event.target.value }))}
-                        placeholder="Full name"
-                        value={internalCoordinatorDraft.full_name}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, role_title: event.target.value }))}
-                        placeholder="Role/title"
-                        value={internalCoordinatorDraft.role_title}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, email: event.target.value }))}
-                        placeholder="Email"
-                        value={internalCoordinatorDraft.email}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, phone: event.target.value }))}
-                        placeholder="Phone"
-                        value={internalCoordinatorDraft.phone}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) =>
-                          setInternalCoordinatorDraft((prev) => ({ ...prev, instagram_handle: event.target.value }))
-                        }
-                        placeholder="Instagram handle"
-                        value={internalCoordinatorDraft.instagram_handle}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, linkedin_url: event.target.value }))}
-                        placeholder="LinkedIn URL"
-                        value={internalCoordinatorDraft.linkedin_url}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, other_social: event.target.value }))}
-                        placeholder="Other social URL/handle"
-                        value={internalCoordinatorDraft.other_social}
-                      />
-                      <textarea
-                        className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm"
-                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, notes: event.target.value }))}
-                        placeholder="Notes"
-                        value={internalCoordinatorDraft.notes}
-                      />
-                      <div className="flex gap-2">
-                        {selectedInternalCoordinator ? (
-                          <button
-                            className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
-                            onClick={() => {
-                              void saveSelectedInternalCoordinator();
-                            }}
-                            type="button"
-                          >
-                            Save Coordinator
-                          </button>
-                        ) : null}
-                        <button
-                          className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
-                          onClick={() => {
-                            void createInternalCoordinatorFromPanel();
-                          }}
-                          type="button"
-                        >
-                          Add Coordinator
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-neutral-300 pt-3">
-                      <p className="mb-2 text-sm font-medium">Linked Events</p>
-                      {!selectedInternalCoordinator ? (
-                        <p className="text-neutral-600">Select a coordinator to view linked events.</p>
-                      ) : selectedInternalCoordinatorLinkedEvents.length ? (
-                        <ul className="space-y-1">
-                          {selectedInternalCoordinatorLinkedEvents.map((event) => (
-                            <li key={event.id}>
-                              <button
-                                className="text-left underline-offset-2 hover:underline"
-                                onClick={() => {
-                                  void loadEventBundle(event.id);
-                                }}
-                                type="button"
-                              >
-                                {event.title} ({formatDate(event.starts_at)})
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-neutral-600">No linked events.</p>
-                      )}
-                      {selectedInternalCoordinator ? (
-                        <div className="mt-2 flex gap-2">
-                          <select
-                            className="min-h-[34px] flex-1 border border-neutral-300 bg-white px-2 text-sm"
-                            onChange={(event) => setCoordinatorEventToLink(event.target.value)}
-                            value={coordinatorEventToLink}
-                          >
-                            <option value="">Link to event...</option>
-                            {events.map((entry) => (
-                              <option key={entry.id} value={entry.id}>
-                                {entry.title} ({formatDate(entry.starts_at)})
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
-                            onClick={() => {
-                              void linkSelectedCoordinatorToEvent();
-                            }}
-                            type="button"
-                          >
-                            Link
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </aside>
-              ) : (
-                <button
-                  className="w-fit min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
-                  onClick={() => setCoordinatorPanelOpen(true)}
-                  type="button"
-                >
-                  Open Coordinator Panel
-                </button>
-              )}
             </section>
           )}
 
@@ -2106,6 +1917,113 @@ export function MarketingDashboard() {
         </section>
       </section>
 
+      {contactCreateModalOpen ? (
+        <>
+          <button className="fixed inset-0 z-[60] bg-black/25" onClick={() => setContactCreateModalOpen(false)} type="button" aria-label="Close contact modal" />
+          <aside className="fixed inset-y-0 right-0 z-[70] w-full max-w-[520px] overflow-y-auto border-l border-neutral-300 bg-white shadow-[0_0_24px_rgba(0,0,0,0.15)]">
+            <div className="p-4 md:p-6">
+              <div className="flex items-center justify-between border-b border-neutral-300 pb-3">
+                <h3 className="text-base font-semibold">Add Contact</h3>
+                <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => setContactCreateModalOpen(false)} type="button">
+                  Close
+                </button>
+              </div>
+              <div className="mt-3 grid gap-2 text-sm">
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, organization: event.target.value }))} placeholder="Organization" value={contactCreateDraft.organization} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, person_name: event.target.value }))} placeholder="Person name" value={contactCreateDraft.person_name} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, role_title: event.target.value }))} placeholder="Role/title" value={contactCreateDraft.role_title} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, email: event.target.value }))} placeholder="Email" value={contactCreateDraft.email} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone" value={contactCreateDraft.phone} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, instagram_handle: event.target.value }))} placeholder="Instagram handle" value={contactCreateDraft.instagram_handle} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, linkedin_url: event.target.value }))} placeholder="LinkedIn URL" value={contactCreateDraft.linkedin_url} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, other_social: event.target.value }))} placeholder="Other social URL/handle" value={contactCreateDraft.other_social} />
+                <textarea className="min-h-[70px] border border-neutral-300 px-2 py-2" onChange={(event) => setContactCreateDraft((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Notes" value={contactCreateDraft.notes} />
+                <button className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white" onClick={() => { void createContactFromModal(); }} type="button">
+                  Create Contact
+                </button>
+              </div>
+            </div>
+          </aside>
+        </>
+      ) : null}
+
+      {coordinatorCreateModalOpen ? (
+        <>
+          <button className="fixed inset-0 z-[60] bg-black/25" onClick={() => setCoordinatorCreateModalOpen(false)} type="button" aria-label="Close coordinator modal" />
+          <aside className="fixed inset-y-0 right-0 z-[70] w-full max-w-[520px] overflow-y-auto border-l border-neutral-300 bg-white shadow-[0_0_24px_rgba(0,0,0,0.15)]">
+            <div className="p-4 md:p-6">
+              <div className="flex items-center justify-between border-b border-neutral-300 pb-3">
+                <h3 className="text-base font-semibold">Add Coordinator</h3>
+                <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => setCoordinatorCreateModalOpen(false)} type="button">
+                  Close
+                </button>
+              </div>
+              <div className="mt-3 grid gap-2 text-sm">
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setInternalCoordinatorCreateDraft((prev) => ({ ...prev, full_name: event.target.value }))} placeholder="Full name" value={internalCoordinatorCreateDraft.full_name} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setInternalCoordinatorCreateDraft((prev) => ({ ...prev, role_title: event.target.value }))} placeholder="Role/title" value={internalCoordinatorCreateDraft.role_title} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setInternalCoordinatorCreateDraft((prev) => ({ ...prev, email: event.target.value }))} placeholder="Email" value={internalCoordinatorCreateDraft.email} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setInternalCoordinatorCreateDraft((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone" value={internalCoordinatorCreateDraft.phone} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setInternalCoordinatorCreateDraft((prev) => ({ ...prev, instagram_handle: event.target.value }))} placeholder="Instagram handle" value={internalCoordinatorCreateDraft.instagram_handle} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setInternalCoordinatorCreateDraft((prev) => ({ ...prev, linkedin_url: event.target.value }))} placeholder="LinkedIn URL" value={internalCoordinatorCreateDraft.linkedin_url} />
+                <input className="min-h-[34px] border border-neutral-300 px-2" onChange={(event) => setInternalCoordinatorCreateDraft((prev) => ({ ...prev, other_social: event.target.value }))} placeholder="Other social URL/handle" value={internalCoordinatorCreateDraft.other_social} />
+                <textarea className="min-h-[70px] border border-neutral-300 px-2 py-2" onChange={(event) => setInternalCoordinatorCreateDraft((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Notes" value={internalCoordinatorCreateDraft.notes} />
+                <button className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white" onClick={() => { void createInternalCoordinatorFromModal(); }} type="button">
+                  Create Coordinator
+                </button>
+              </div>
+            </div>
+          </aside>
+        </>
+      ) : null}
+
+      {categoryModalOpen ? (
+        <>
+          <button
+            className="fixed inset-0 z-[60] bg-black/25"
+            onClick={() => setCategoryModalOpen(false)}
+            type="button"
+            aria-label="Close category modal"
+          />
+          <aside className="fixed inset-y-0 right-0 z-[70] w-full max-w-[460px] overflow-y-auto border-l border-neutral-300 bg-white shadow-[0_0_24px_rgba(0,0,0,0.15)]">
+            <div className="p-4 md:p-6">
+              <div className="flex items-center justify-between border-b border-neutral-300 pb-3">
+                <h3 className="text-base font-semibold">Manage Categories</h3>
+                <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => setCategoryModalOpen(false)} type="button">
+                  Close
+                </button>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <input
+                  className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                  onChange={(event) => setNewCategoryName(event.target.value)}
+                  placeholder="New category name"
+                  value={newCategoryName}
+                />
+                <button className="min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white" onClick={() => { void createCategory(); }} type="button">
+                  Add
+                </button>
+              </div>
+              <div className="mt-3 max-h-[65vh] overflow-auto border border-neutral-300">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-neutral-50">
+                    <tr>
+                      <th className="border-b border-neutral-300 px-2 py-2">Category</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {eventCategories.map((entry) => (
+                      <tr key={entry.id}>
+                        <td className="border-b border-neutral-200 px-2 py-2">{entry.name}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </aside>
+        </>
+      ) : null}
+
       {reportEditorOpen && reportDraft && (
         <div className="fixed inset-0 z-[65] bg-black/40 p-4" role="dialog" aria-modal="true">
           <div className="mx-auto max-w-3xl border border-neutral-300 bg-white p-4 md:p-5">
@@ -2185,7 +2103,7 @@ export function MarketingDashboard() {
               <input
                 className="mt-2 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
                 onChange={(event) => setReportLinkSearch(event.target.value)}
-                placeholder="Type event name, date, category, location..."
+                placeholder="Type event name, date, category, department..."
                 value={reportLinkSearch}
               />
               <div className="mt-2 max-h-[180px] space-y-1 overflow-auto">
@@ -2322,11 +2240,27 @@ export function MarketingDashboard() {
 
                       <label className="text-sm">
                         <span className="mb-1 block text-xs text-neutral-600">Category</span>
-                        <input
-                          className="min-h-[36px] w-full border border-neutral-300 px-2"
-                          onChange={(event) => onDraftFieldChange('category', event.target.value || null)}
-                          value={eventDraft.category ?? ''}
-                        />
+                        <div className="flex gap-2">
+                          <input
+                            className="min-h-[36px] w-full border border-neutral-300 px-2"
+                            list="marketing-category-options"
+                            onChange={(event) => onDraftFieldChange('category', event.target.value || null)}
+                            placeholder="Search or type category"
+                            value={eventDraft.category ?? ''}
+                          />
+                          <button
+                            className="min-h-[36px] border border-neutral-300 bg-white px-2 text-xs"
+                            onClick={() => setCategoryModalOpen(true)}
+                            type="button"
+                          >
+                            + Category
+                          </button>
+                        </div>
+                        <datalist id="marketing-category-options">
+                          {eventCategories.map((entry) => (
+                            <option key={entry.id} value={entry.name} />
+                          ))}
+                        </datalist>
                       </label>
 
                       <label className="text-sm">
@@ -2350,9 +2284,10 @@ export function MarketingDashboard() {
                       </label>
 
                       <label className="text-sm">
-                        <span className="mb-1 block text-xs text-neutral-600">Location</span>
+                        <span className="mb-1 block text-xs text-neutral-600">Department</span>
                         <input
                           className="min-h-[36px] w-full border border-neutral-300 px-2"
+                          placeholder="Department"
                           onChange={(event) => onDraftFieldChange('location', event.target.value || null)}
                           value={eventDraft.location ?? ''}
                         />
