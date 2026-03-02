@@ -405,6 +405,16 @@ export function ProductDashboard() {
       .slice(0, 60);
   }, [products, lineProductQuery]);
 
+  const lineModalOrder = useMemo(() => {
+    if (!lineModalOrderId) return null;
+    return orders.find((order) => order.id === lineModalOrderId) ?? null;
+  }, [lineModalOrderId, orders]);
+
+  const vendorScopedLineProductOptions = useMemo(() => {
+    if (!lineModalOrder?.vendor_id) return [];
+    return filteredLineProductOptions.filter((product) => product.preferred_vendor_id === lineModalOrder.vendor_id);
+  }, [filteredLineProductOptions, lineModalOrder]);
+
   useEffect(() => {
     if (!lineProductDropdownOpen) return;
     const onWindowPointerDown = (event: MouseEvent) => {
@@ -997,13 +1007,6 @@ export function ProductDashboard() {
     const nextErrors: Record<string, string> = {};
     if (!draft.product_id) nextErrors.product_id = 'Product is required.';
     if (!Number.isFinite(draft.quantity) || draft.quantity < 1) nextErrors.quantity = 'Quantity must be at least 1.';
-    if (!Number.isFinite(draft.unit_price) || draft.unit_price < 0) nextErrors.unit_price = 'Unit cost must be 0 or more.';
-    if (!Number.isFinite(draft.units_per_purchase) || draft.units_per_purchase < 1) {
-      nextErrors.units_per_purchase = 'Items per ordered item must be at least 1.';
-    }
-    const normalizedLink = draft.product_link.trim();
-    if (!normalizedLink) nextErrors.product_link = 'Link is required.';
-    if (normalizedLink && !/^https?:\/\//i.test(normalizedLink)) nextErrors.product_link = 'Link must start with http:// or https://.';
     return nextErrors;
   };
 
@@ -1076,20 +1079,35 @@ export function ProductDashboard() {
     if (Object.keys(errors).length > 0) return;
 
     await withSaveState(async () => {
+      const order = orders.find((entry) => entry.id === lineModalOrderId);
+      if (!order) throw new Error('Order not found.');
+      const selectedProduct = productById.get(lineModalDraft.product_id);
+      if (!selectedProduct) throw new Error('Selected product not found in catalog.');
+      if (selectedProduct.preferred_vendor_id !== order.vendor_id) {
+        throw new Error('You can only add products configured for this order vendor.');
+      }
+      const catalogLink = (selectedProduct.vendor_product_link ?? '').trim();
+      if (!catalogLink || !/^https?:\/\//i.test(catalogLink)) {
+        throw new Error('This catalog item is missing a valid vendor link. Update it in Products first.');
+      }
+      if (selectedProduct.default_unit_cost === null || !Number.isFinite(Number(selectedProduct.default_unit_cost))) {
+        throw new Error('This catalog item is missing unit cost. Update it in Products first.');
+      }
+
       const payload = {
         product_id: lineModalDraft.product_id,
         custom_item_name: null,
         quantity: Math.max(Math.trunc(lineModalDraft.quantity), 1),
-        unit_price: Math.max(Number(lineModalDraft.unit_price), 0),
-        units_per_purchase: Math.max(Math.trunc(lineModalDraft.units_per_purchase), 1),
-        product_link: lineModalDraft.product_link.trim(),
-        notes: lineModalDraft.notes.trim() || null
+        unit_price: Math.max(Number(selectedProduct.default_unit_cost), 0),
+        units_per_purchase: Math.max(Math.trunc(selectedProduct.units_per_purchase || 1), 1),
+        product_link: catalogLink
       };
 
       if (lineModalMode === 'add') {
         const { error: insertError } = await supabase.from('product_purchase_order_lines').insert({
           purchase_order_id: lineModalOrderId,
-          ...payload
+          ...payload,
+          notes: null
         });
         if (insertError) throw insertError;
       } else {
@@ -3193,7 +3211,8 @@ export function ProductDashboard() {
                 Product
                 <div className="relative mt-1" ref={lineProductDropdownRef}>
                   <button
-                    className="flex min-h-[36px] w-full items-center justify-between border border-neutral-300 bg-white px-2 text-left"
+                  className="flex min-h-[36px] w-full items-center justify-between border border-neutral-300 bg-white px-2 text-left"
+                    disabled={lineModalMode === 'edit'}
                     onClick={() => setLineProductDropdownOpen((prev) => !prev)}
                     type="button"
                   >
@@ -3221,10 +3240,10 @@ export function ProductDashboard() {
                       </label>
                     </div>
                     <div className="max-h-56 overflow-y-auto">
-                      {filteredLineProductOptions.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-neutral-500">No products match this search.</p>
+                      {vendorScopedLineProductOptions.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-neutral-500">No catalog products available for this vendor.</p>
                       ) : (
-                        filteredLineProductOptions.map((product) => (
+                        vendorScopedLineProductOptions.map((product) => (
                           <button
                             className="block w-full border-b border-neutral-100 px-3 py-2 text-left text-sm hover:bg-neutral-100"
                             key={product.id}
@@ -3242,6 +3261,11 @@ export function ProductDashboard() {
                     </div>
                   </div>
                 </div>
+                <p className="mt-1 text-xs text-neutral-500">
+                  {lineModalMode === 'edit'
+                    ? 'Product is locked after adding. To change it, remove this line and add a new one.'
+                    : 'Only catalog items configured for this order vendor are shown.'}
+                </p>
                 {lineModalErrors.product_id ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.product_id}</p> : null}
               </label>
 
@@ -3262,46 +3286,36 @@ export function ProductDashboard() {
                 Cost Of 1 Ordered Item
                 <input
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
-                  min={0}
-                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, unit_price: Number(event.target.value) } : prev))}
-                  step="0.01"
-                  type="number"
-                  value={lineModalDraft.unit_price}
+                  disabled
+                  readOnly
+                  type="text"
+                  value={currency.format(lineModalDraft.unit_price)}
                 />
-                {lineModalErrors.unit_price ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.unit_price}</p> : null}
+                <p className="mt-1 text-xs text-neutral-500">Managed in Products.</p>
               </label>
 
               <label className="text-sm text-neutral-700">
                 Items Per Ordered Item
                 <input
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
-                  min={1}
-                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, units_per_purchase: Number(event.target.value) } : prev))}
-                  step={1}
-                  type="number"
-                  value={lineModalDraft.units_per_purchase}
+                  disabled
+                  readOnly
+                  type="text"
+                  value={String(lineModalDraft.units_per_purchase)}
                 />
-                {lineModalErrors.units_per_purchase ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.units_per_purchase}</p> : null}
+                <p className="mt-1 text-xs text-neutral-500">Managed in Products.</p>
               </label>
 
               <label className="text-sm text-neutral-700 md:col-span-2">
                 Link
                 <input
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
-                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, product_link: event.target.value } : prev))}
-                  type="url"
+                  disabled
+                  readOnly
+                  type="text"
                   value={lineModalDraft.product_link}
                 />
-                {lineModalErrors.product_link ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.product_link}</p> : null}
-              </label>
-
-              <label className="text-sm text-neutral-700 md:col-span-3">
-                Notes
-                <textarea
-                  className="mt-1 min-h-[86px] w-full border border-neutral-300 px-2 py-2"
-                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, notes: event.target.value } : prev))}
-                  value={lineModalDraft.notes}
-                />
+                <p className="mt-1 text-xs text-neutral-500">Managed in Products.</p>
               </label>
             </div>
             <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
