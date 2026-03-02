@@ -21,7 +21,30 @@ export function createBrowserClient(): SupabaseClient {
   }
 
   if (!browserClient) {
-    browserClient = createClient(supabaseUrl, supabaseAnonKey);
+    const supabaseOrigin = new URL(supabaseUrl).origin;
+    browserClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        fetch: async (input, init) => {
+          const inputUrl = input instanceof Request ? input.url : String(input);
+          let parsedUrl: URL | null = null;
+          try {
+            parsedUrl = new URL(inputUrl);
+          } catch {
+            parsedUrl = null;
+          }
+
+          if (parsedUrl && parsedUrl.origin === supabaseOrigin) {
+            const proxiedUrl = `/api/supabase-proxy${parsedUrl.pathname}${parsedUrl.search}`;
+            if (input instanceof Request) {
+              return fetch(new Request(proxiedUrl, input));
+            }
+            return fetch(proxiedUrl, init);
+          }
+
+          return fetch(input, init);
+        }
+      }
+    });
   }
   return browserClient;
 }
