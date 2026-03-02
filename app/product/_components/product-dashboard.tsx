@@ -38,6 +38,7 @@ interface ProductCategoryRow {
   name: string;
   parent_category_id: string | null;
   sort_order: number;
+  color_key: string | null;
   is_active: boolean;
 }
 
@@ -161,8 +162,6 @@ interface CreateOrderLineDraft {
   notes: string;
 }
 
-type CategoryDropPosition = 'before' | 'inside' | 'after';
-
 const NAV_ITEMS: Array<{ id: DashboardView; label: string }> = [
   { id: 'orders', label: 'Orders' },
   { id: 'prompts', label: 'Prompts' },
@@ -238,6 +237,41 @@ function getPriorityBadgeClass(priority: DbPriority) {
   return priority === 'urgent' ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800';
 }
 
+function summarizeReason(value: string | null | undefined, maxWords: number = 4) {
+  if (!value) return '-';
+  const words = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return '-';
+  if (words.length <= maxWords) return words.join(' ');
+  return `${words.slice(0, maxWords).join(' ')}...`;
+}
+
+function normalizeDollarAmount(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  return Math.max(Math.round(value), 0);
+}
+
+const CATEGORY_COLOR_OPTIONS: Array<{ key: string; label: string; className: string }> = [
+  { key: 'slate', label: 'Slate', className: 'border-slate-300 bg-slate-100 text-slate-800' },
+  { key: 'rose', label: 'Rose', className: 'border-rose-300 bg-rose-50 text-rose-700' },
+  { key: 'orange', label: 'Orange', className: 'border-orange-300 bg-orange-50 text-orange-700' },
+  { key: 'amber', label: 'Amber', className: 'border-amber-300 bg-amber-50 text-amber-800' },
+  { key: 'lime', label: 'Lime', className: 'border-lime-300 bg-lime-50 text-lime-800' },
+  { key: 'emerald', label: 'Emerald', className: 'border-emerald-300 bg-emerald-50 text-emerald-700' },
+  { key: 'teal', label: 'Teal', className: 'border-teal-300 bg-teal-50 text-teal-700' },
+  { key: 'cyan', label: 'Cyan', className: 'border-cyan-300 bg-cyan-50 text-cyan-700' },
+  { key: 'sky', label: 'Sky', className: 'border-sky-300 bg-sky-50 text-sky-700' },
+  { key: 'indigo', label: 'Indigo', className: 'border-indigo-300 bg-indigo-50 text-indigo-700' },
+  { key: 'violet', label: 'Violet', className: 'border-violet-300 bg-violet-50 text-violet-700' }
+];
+
+function getCategoryColorClass(colorKey: string | null | undefined) {
+  return CATEGORY_COLOR_OPTIONS.find((option) => option.key === colorKey)?.className
+    ?? CATEGORY_COLOR_OPTIONS[0].className;
+}
+
 export function ProductDashboard() {
   const supabase = useMemo(() => createBrowserClient(), []);
 
@@ -260,6 +294,7 @@ export function ProductDashboard() {
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
   const [showEditOrderModal, setShowEditOrderModal] = useState(false);
   const [cancelOrderTarget, setCancelOrderTarget] = useState<OrderRow | null>(null);
@@ -284,7 +319,6 @@ export function ProductDashboard() {
   });
   const [productFilters, setProductFilters] = useState({
     category: 'all',
-    subcategory: 'all',
     search: ''
   });
 
@@ -305,6 +339,12 @@ export function ProductDashboard() {
     Record<string, { file: File | null; description: string }>
   >({});
   const [lineAttachmentUploadingIds, setLineAttachmentUploadingIds] = useState<string[]>([]);
+  const [newCategoryDraft, setNewCategoryDraft] = useState({ name: '', color_key: 'slate' });
+  const [editingCategoryDraft, setEditingCategoryDraft] = useState<{
+    id: string;
+    name: string;
+    color_key: string;
+  } | null>(null);
   const [newVendor, setNewVendor] = useState({
     name: '',
     ordering_method: 'online' as DbOrderingMethod,
@@ -344,16 +384,6 @@ export function ProductDashboard() {
     reason: '',
     notes: ''
   });
-  const [newProductCategory, setNewProductCategory] = useState({
-    name: ''
-  });
-  const [draggedCategoryId, setDraggedCategoryId] = useState<string | null>(null);
-  const [categoryDropTarget, setCategoryDropTarget] = useState<{ id: string; position: CategoryDropPosition } | null>(null);
-  const [editingCategoryDraft, setEditingCategoryDraft] = useState<{
-    id: string;
-    name: string;
-    parent_category_id: string | null;
-  } | null>(null);
 
   const vendorById = useMemo(() => {
     const map = new Map<string, VendorRow>();
@@ -367,25 +397,10 @@ export function ProductDashboard() {
     return map;
   }, [productCategories]);
 
-  const rootCategories = useMemo(
-    () =>
-      productCategories
-        .filter((category) => !category.parent_category_id)
-        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)),
+  const categoryOptions = useMemo(
+    () => [...productCategories].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)),
     [productCategories]
   );
-
-  const subcategoriesByParent = useMemo(() => {
-    const map = new Map<string, ProductCategoryRow[]>();
-    for (const category of productCategories) {
-      if (!category.parent_category_id) continue;
-      const bucket = map.get(category.parent_category_id) ?? [];
-      bucket.push(category);
-      map.set(category.parent_category_id, bucket);
-    }
-    map.forEach((bucket) => bucket.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)));
-    return map;
-  }, [productCategories]);
 
   const productById = useMemo(() => {
     const map = new Map<string, ProductRow>();
@@ -480,7 +495,7 @@ export function ProductDashboard() {
         .order('name', { ascending: true }),
       supabase
         .from('product_categories')
-        .select('id,name,parent_category_id,sort_order,is_active')
+        .select('id,name,parent_category_id,sort_order,color_key,is_active')
         .eq('is_active', true)
         .order('parent_category_id', { ascending: true, nullsFirst: true })
         .order('sort_order', { ascending: true })
@@ -643,12 +658,10 @@ export function ProductDashboard() {
     return [...products]
       .filter((product) => {
         if (productFilters.category !== 'all' && product.category_id !== productFilters.category) return false;
-        if (productFilters.subcategory !== 'all' && product.subcategory_id !== productFilters.subcategory) return false;
         const query = productFilters.search.trim().toLowerCase();
         if (!query) return true;
         const categoryName = product.category_id ? categoryById.get(product.category_id)?.name ?? '' : '';
-        const subcategoryName = product.subcategory_id ? categoryById.get(product.subcategory_id)?.name ?? '' : '';
-        return [product.name, product.sku ?? '', product.notes ?? '', categoryName, subcategoryName]
+        return [product.name, product.sku ?? '', product.notes ?? '', categoryName]
           .join(' ')
           .toLowerCase()
           .includes(query);
@@ -727,10 +740,10 @@ export function ProductDashboard() {
           name: product.name,
           category: product.category,
           category_id: product.category_id,
-          subcategory_id: product.subcategory_id,
+          subcategory_id: null,
           preferred_vendor_id: product.preferred_vendor_id,
           vendor_product_link: product.vendor_product_link,
-          default_unit_cost: product.default_unit_cost,
+          default_unit_cost: normalizeDollarAmount(product.default_unit_cost),
           units_per_purchase: Math.max(Number(product.units_per_purchase) || 1, 1),
           default_order_quantity: Math.max(Number(product.default_order_quantity) || 1, 1),
           notes: product.notes,
@@ -740,6 +753,7 @@ export function ProductDashboard() {
         })
         .eq('id', product.id);
       if (updateError) throw updateError;
+      setExpandedProductId((prev) => (prev === product.id ? null : prev));
       setNotice('Product saved.');
     });
   };
@@ -754,11 +768,13 @@ export function ProductDashboard() {
       const { error: insertError } = await supabase.from('product_products').insert({
         name: newProduct.name.trim(),
         category_id: newProduct.category_id || null,
-        subcategory_id: newProduct.subcategory_id || null,
+        subcategory_id: null,
         preferred_vendor_id: newProduct.preferred_vendor_id || null,
         sku: newProduct.sku.trim() || null,
         vendor_product_link: newProduct.vendor_product_link.trim() || null,
-        default_unit_cost: newProduct.default_unit_cost ? Number(newProduct.default_unit_cost) : null,
+        default_unit_cost: newProduct.default_unit_cost
+          ? normalizeDollarAmount(Number(newProduct.default_unit_cost))
+          : null,
         units_per_purchase: Math.max(Number(newProduct.units_per_purchase) || 1, 1),
         default_order_quantity: Math.max(Number(newProduct.default_order_quantity) || 1, 1),
         notes: newProduct.notes.trim() || null,
@@ -777,46 +793,45 @@ export function ProductDashboard() {
         default_order_quantity: '1',
         notes: ''
       });
+      setShowAddProductModal(false);
       await loadDashboard();
       setNotice('Product added.');
     });
   };
 
-  const addProductCategory = async () => {
-    if (!newProductCategory.name.trim()) {
+  const addProductCategory = async (name: string, colorKey: string) => {
+    if (!name.trim()) {
       setError('Category name is required.');
       return;
     }
-
     await withSaveState(async () => {
       const { error: insertError } = await supabase.from('product_categories').insert({
-        name: newProductCategory.name.trim(),
+        name: name.trim(),
         parent_category_id: null,
+        color_key: colorKey,
         updated_by: 'dashboard'
       });
       if (insertError) throw insertError;
-      setNewProductCategory({ name: '' });
+      setNewCategoryDraft({ name: '', color_key: 'slate' });
       await loadDashboard();
       setNotice('Category saved.');
     });
   };
 
-  const saveProductCategoryEdit = async () => {
-    if (!editingCategoryDraft) return;
-    if (!editingCategoryDraft.name.trim()) {
+  const saveProductCategoryEdit = async (categoryId: string, name: string, colorKey: string) => {
+    if (!name.trim()) {
       setError('Category name is required.');
       return;
     }
-
     await withSaveState(async () => {
       const { error: updateError } = await supabase
         .from('product_categories')
         .update({
-          name: editingCategoryDraft.name.trim(),
-          parent_category_id: editingCategoryDraft.parent_category_id,
+          name: name.trim(),
+          color_key: colorKey,
           updated_by: 'dashboard'
         })
-        .eq('id', editingCategoryDraft.id);
+        .eq('id', categoryId);
       if (updateError) throw updateError;
       setEditingCategoryDraft(null);
       await loadDashboard();
@@ -824,118 +839,13 @@ export function ProductDashboard() {
     });
   };
 
-  const saveCategoryLayout = async (
-    updates: Array<{ id: string; parent_category_id: string | null; sort_order: number }>
-  ) => {
+  const deleteProductCategory = async (categoryId: string) => {
     await withSaveState(async () => {
-      if (updates.length === 0) return;
-      const updateCalls = updates.map((entry) =>
-        supabase
-          .from('product_categories')
-          .update({
-            parent_category_id: entry.parent_category_id,
-            sort_order: entry.sort_order,
-            updated_by: 'dashboard'
-          })
-          .eq('id', entry.id)
-      );
-      const results = await Promise.all(updateCalls);
-      const firstError = results.find((result) => result.error)?.error;
-      if (firstError) throw firstError;
+      const { error: deleteError } = await supabase.from('product_categories').delete().eq('id', categoryId);
+      if (deleteError) throw deleteError;
       await loadDashboard();
-      setNotice('Category layout updated.');
+      setNotice('Category deleted.');
     });
-  };
-
-  const resetCategoryDragState = () => {
-    setDraggedCategoryId(null);
-    setCategoryDropTarget(null);
-  };
-
-  const isDescendantCategory = (candidateId: string, potentialAncestorId: string): boolean => {
-    let current = productCategories.find((category) => category.id === candidateId);
-    while (current?.parent_category_id) {
-      if (current.parent_category_id === potentialAncestorId) return true;
-      current = productCategories.find((category) => category.id === current?.parent_category_id);
-    }
-    return false;
-  };
-
-  const moveCategoryToPosition = async (
-    draggingId: string,
-    destinationParentId: string | null,
-    destinationIndex: number
-  ) => {
-    const moving = productCategories.find((category) => category.id === draggingId);
-    if (!moving) return;
-    if (destinationParentId === moving.id) return;
-    if (destinationParentId && isDescendantCategory(destinationParentId, draggingId)) return;
-
-    const sourceParentId = moving.parent_category_id;
-    const sourceSiblings = productCategories
-      .filter((category) => category.parent_category_id === sourceParentId && category.id !== moving.id)
-      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-    const targetSiblings = productCategories
-      .filter((category) => category.parent_category_id === destinationParentId && category.id !== moving.id)
-      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-
-    const boundedIndex = Math.max(0, Math.min(destinationIndex, targetSiblings.length));
-    targetSiblings.splice(boundedIndex, 0, moving);
-
-    const updatesMap = new Map<string, { id: string; parent_category_id: string | null; sort_order: number }>();
-
-    if (sourceParentId === destinationParentId) {
-      targetSiblings.forEach((category, index) => {
-        updatesMap.set(category.id, { id: category.id, parent_category_id: destinationParentId, sort_order: index });
-      });
-    } else {
-      sourceSiblings.forEach((category, index) => {
-        updatesMap.set(category.id, { id: category.id, parent_category_id: sourceParentId, sort_order: index });
-      });
-      targetSiblings.forEach((category, index) => {
-        updatesMap.set(category.id, { id: category.id, parent_category_id: destinationParentId, sort_order: index });
-      });
-    }
-
-    const updates = Array.from(updatesMap.values());
-    if (updates.length === 0) return;
-    await saveCategoryLayout(updates);
-  };
-
-  const applyCategoryDrop = async (targetId: string, position: CategoryDropPosition) => {
-    if (!draggedCategoryId) return;
-    if (draggedCategoryId === targetId && position === 'inside') {
-      resetCategoryDragState();
-      return;
-    }
-
-    const target = productCategories.find((category) => category.id === targetId);
-    if (!target) {
-      resetCategoryDragState();
-      return;
-    }
-
-    if (position === 'inside') {
-      const children = productCategories
-        .filter((category) => category.parent_category_id === target.id && category.id !== draggedCategoryId)
-        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-      await moveCategoryToPosition(draggedCategoryId, target.id, children.length);
-      resetCategoryDragState();
-      return;
-    }
-
-    const siblingParentId = target.parent_category_id;
-    const siblings = productCategories
-      .filter((category) => category.parent_category_id === siblingParentId && category.id !== draggedCategoryId)
-      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-    const targetIndex = siblings.findIndex((category) => category.id === target.id);
-    if (targetIndex < 0) {
-      resetCategoryDragState();
-      return;
-    }
-    const destinationIndex = position === 'before' ? targetIndex : targetIndex + 1;
-    await moveCategoryToPosition(draggedCategoryId, siblingParentId, destinationIndex);
-    resetCategoryDragState();
   };
 
   const openCreateOrderModal = () => {
@@ -1686,6 +1596,7 @@ export function ProductDashboard() {
                       <th className="border-b border-neutral-300 px-4 py-3">Requested Date</th>
                       <th className="border-b border-neutral-300 px-4 py-3">Total</th>
                       <th className="border-b border-neutral-300 px-4 py-3">Priority</th>
+                      <th className="border-b border-neutral-300 px-4 py-3">Reason</th>
                       <th className="border-b border-neutral-300 px-4 py-3 text-right">Quick Cancel</th>
                     </tr>
                   </thead>
@@ -1713,6 +1624,7 @@ export function ProductDashboard() {
                                 {formatLabel(order.priority)}
                               </span>
                             </td>
+                            <td className="max-w-[220px] px-4 py-3 text-sm text-neutral-700">{summarizeReason(order.reason)}</td>
                             <td className="px-4 py-3 text-right">
                               <button
                                 aria-label={`Cancel order ${order.order_number}`}
@@ -1735,7 +1647,7 @@ export function ProductDashboard() {
                           </tr>
                           {isSelected ? (
                             <tr className="border-b border-neutral-300 bg-neutral-50">
-                              <td className="px-4 py-4" colSpan={8}>
+                              <td className="px-4 py-4" colSpan={9}>
                                 <div className="space-y-5 rounded border border-neutral-300 bg-white p-4 shadow-sm">
                                   <section>
                                     <div className="mb-2 flex items-center justify-between">
@@ -1996,169 +1908,34 @@ export function ProductDashboard() {
           {activeView === 'products' && (
             <section className="w-full bg-white">
               <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
-                <h2 className="text-lg font-semibold">Products (Catalog)</h2>
-                <p className="mt-1 text-sm text-neutral-600">
-                  Catalog details: item cost, units per ordered item, description, and sourcing vendor.
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">Products (Catalog)</h2>
+                    <p className="mt-1 text-sm text-neutral-600">
+                      Click a row to edit. Product link opens from product name.
+                    </p>
+                  </div>
+                  <button
+                    className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white hover:bg-[#6a0000]"
+                    onClick={() => setShowAddProductModal(true)}
+                    type="button"
+                  >
+                    + Add Product
+                  </button>
+                </div>
               </header>
 
-              <section className="border-b border-neutral-300 px-4 py-4 md:px-6">
-                <h3 className="text-base font-semibold">Add Product</h3>
-                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-4">
-                  <label className="text-sm text-neutral-700">
-                    Product Name
-                    <input
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))}
-                      value={newProduct.name}
-                    />
-                  </label>
-                  <label className="text-sm text-neutral-700">
-                    Category
-                    <select
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
-                      onChange={(event) =>
-                        setNewProduct((prev) => ({
-                          ...prev,
-                          category_id: event.target.value,
-                          subcategory_id: ''
-                        }))
-                      }
-                      value={newProduct.category_id}
-                    >
-                      <option value="">Select category</option>
-                      {rootCategories.map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-sm text-neutral-700">
-                    Subcategory
-                    <select
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, subcategory_id: event.target.value }))}
-                      value={newProduct.subcategory_id}
-                    >
-                      <option value="">Optional subcategory</option>
-                      {(newProduct.category_id ? subcategoriesByParent.get(newProduct.category_id) ?? [] : []).map((subcategory) => (
-                        <option key={subcategory.id} value={subcategory.id}>
-                          {subcategory.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-sm text-neutral-700">
-                    Vendor
-                    <select
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, preferred_vendor_id: event.target.value }))}
-                      value={newProduct.preferred_vendor_id}
-                    >
-                      <option value="">Select vendor</option>
-                      {vendors.map((vendor) => (
-                        <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-sm text-neutral-700">
-                    SKU
-                    <input
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, sku: event.target.value }))}
-                      value={newProduct.sku}
-                    />
-                  </label>
-                  <label className="text-sm text-neutral-700">
-                    Cost Of 1 Ordered Item
-                    <input
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, default_unit_cost: event.target.value }))}
-                      type="number"
-                      value={newProduct.default_unit_cost}
-                    />
-                  </label>
-                  <label className="text-sm text-neutral-700">
-                    Items Per Ordered Item
-                    <input
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, units_per_purchase: event.target.value }))}
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={newProduct.units_per_purchase}
-                    />
-                  </label>
-                  <label className="text-sm text-neutral-700">
-                    Default Qty To Order
-                    <input
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                      min={1}
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, default_order_quantity: event.target.value }))}
-                      step={1}
-                      type="number"
-                      value={newProduct.default_order_quantity}
-                    />
-                  </label>
-                  <label className="text-sm text-neutral-700 md:col-span-2">
-                    Vendor Link
-                    <input
-                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, vendor_product_link: event.target.value }))}
-                      value={newProduct.vendor_product_link}
-                    />
-                  </label>
-                  <label className="text-sm text-neutral-700 md:col-span-4">
-                    Notes
-                    <textarea
-                      className="mt-1 min-h-[72px] w-full border border-neutral-300 px-2 py-2 text-sm"
-                      onChange={(event) => setNewProduct((prev) => ({ ...prev, notes: event.target.value }))}
-                      value={newProduct.notes}
-                    />
-                  </label>
-                </div>
-                <button
-                  className="mt-3 min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
-                  onClick={() => void addProduct()}
-                  type="button"
-                >
-                  Add Product
-                </button>
-              </section>
-
               <section className="space-y-4 px-4 py-4 md:px-6">
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   <select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) =>
-                      setProductFilters((prev) => ({
-                        ...prev,
-                        category: event.target.value,
-                        subcategory: 'all'
-                      }))
-                    }
+                    onChange={(event) => setProductFilters((prev) => ({ ...prev, category: event.target.value }))}
                     value={productFilters.category}
                   >
                     <option value="all">All Categories</option>
-                    {rootCategories.map((category) => (
+                    {categoryOptions.map((category) => (
                       <option key={category.id} value={category.id}>
                         {category.name}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setProductFilters((prev) => ({ ...prev, subcategory: event.target.value }))}
-                    value={productFilters.subcategory}
-                  >
-                    <option value="all">All Subcategories</option>
-                    {(productFilters.category !== 'all'
-                      ? subcategoriesByParent.get(productFilters.category) ?? []
-                      : productCategories.filter((category) => !!category.parent_category_id)
-                    ).map((subcategory) => (
-                      <option key={subcategory.id} value={subcategory.id}>
-                        {subcategory.name}
                       </option>
                     ))}
                   </select>
@@ -2176,7 +1953,6 @@ export function ProductDashboard() {
                       <tr>
                         <th className="border-b border-neutral-200 px-3 py-2">Name</th>
                         <th className="border-b border-neutral-200 px-3 py-2">Category</th>
-                        <th className="border-b border-neutral-200 px-3 py-2">Subcategory</th>
                         <th className="border-b border-neutral-200 px-3 py-2">Default Qty</th>
                         <th className="border-b border-neutral-200 px-3 py-2">Cost</th>
                         <th className="border-b border-neutral-200 px-3 py-2">Vendor</th>
@@ -2192,9 +1968,32 @@ export function ProductDashboard() {
                               className="cursor-pointer border-b border-neutral-100 hover:bg-neutral-50"
                               onClick={() => setExpandedProductId((prev) => (prev === product.id ? null : product.id))}
                             >
-                              <td className="px-3 py-2 font-medium">{product.name}</td>
-                              <td className="px-3 py-2">{product.category_id ? categoryById.get(product.category_id)?.name ?? '-' : '-'}</td>
-                              <td className="px-3 py-2">{product.subcategory_id ? categoryById.get(product.subcategory_id)?.name ?? '-' : '-'}</td>
+                              <td className="px-3 py-2 font-medium">
+                                {product.vendor_product_link && /^https?:\/\//i.test(product.vendor_product_link) ? (
+                                  <a
+                                    className="underline hover:no-underline"
+                                    href={product.vendor_product_link}
+                                    onClick={(event) => event.stopPropagation()}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                  >
+                                    {product.name}
+                                  </a>
+                                ) : (
+                                  product.name
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                {product.category_id ? (
+                                  <span
+                                    className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${getCategoryColorClass(categoryById.get(product.category_id)?.color_key)}`}
+                                  >
+                                    {categoryById.get(product.category_id)?.name ?? '-'}
+                                  </span>
+                                ) : (
+                                  '-'
+                                )}
+                              </td>
                               <td className="px-3 py-2">{product.default_order_quantity}</td>
                               <td className="px-3 py-2">{currency.format(Number(product.default_unit_cost ?? 0))}</td>
                               <td className="px-3 py-2">{product.preferred_vendor_id ? vendorById.get(product.preferred_vendor_id)?.name ?? '-' : '-'}</td>
@@ -2202,148 +2001,148 @@ export function ProductDashboard() {
                             </tr>
                             {isExpanded ? (
                               <tr className="border-b border-neutral-200 bg-neutral-50">
-                                <td className="px-3 py-3" colSpan={7}>
-                                  <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2"
-                                      onChange={(event) => {
-                                        setProducts((prev) => prev.map((entry) => (entry.id === product.id ? { ...entry, name: event.target.value } : entry)));
-                                      }}
-                                      value={product.name}
-                                    />
-                                    <select
-                                      className="min-h-[34px] border border-neutral-300 bg-white px-2"
-                                      onChange={(event) =>
-                                        setProducts((prev) =>
-                                          prev.map((entry) =>
-                                            entry.id === product.id
-                                              ? { ...entry, category_id: event.target.value || null, subcategory_id: null }
-                                              : entry
+                                <td className="px-3 py-3" colSpan={6}>
+                                  <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                                    <div>
+                                      <input
+                                        className="min-h-[34px] w-full border border-neutral-300 px-2"
+                                        onChange={(event) => {
+                                          setProducts((prev) => prev.map((entry) => (entry.id === product.id ? { ...entry, name: event.target.value } : entry)));
+                                        }}
+                                        value={product.name}
+                                      />
+                                      <p className="mt-1 text-xs text-neutral-600">Product Name</p>
+                                    </div>
+                                    <div>
+                                      <select
+                                        className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
+                                        onChange={(event) =>
+                                          setProducts((prev) =>
+                                            prev.map((entry) =>
+                                              entry.id === product.id
+                                                ? { ...entry, category_id: event.target.value || null, subcategory_id: null }
+                                                : entry
+                                            )
                                           )
-                                        )
-                                      }
-                                      value={product.category_id ?? ''}
-                                    >
-                                      <option value="">Category</option>
-                                      {rootCategories.map((category) => (
-                                        <option key={category.id} value={category.id}>
-                                          {category.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <select
-                                      className="min-h-[34px] border border-neutral-300 bg-white px-2"
-                                      onChange={(event) =>
-                                        setProducts((prev) =>
-                                          prev.map((entry) =>
-                                            entry.id === product.id ? { ...entry, subcategory_id: event.target.value || null } : entry
+                                        }
+                                        value={product.category_id ?? ''}
+                                      >
+                                        <option value="">Category</option>
+                                        {categoryOptions.map((category) => (
+                                          <option key={category.id} value={category.id}>
+                                            {category.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <p className="mt-1 text-xs text-neutral-600">Category</p>
+                                    </div>
+                                    <div>
+                                      <select
+                                        className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
+                                        onChange={(event) =>
+                                          setProducts((prev) =>
+                                            prev.map((entry) =>
+                                              entry.id === product.id ? { ...entry, preferred_vendor_id: event.target.value || null } : entry
+                                            )
                                           )
-                                        )
-                                      }
-                                      value={product.subcategory_id ?? ''}
-                                    >
-                                      <option value="">Subcategory</option>
-                                      {(product.category_id ? subcategoriesByParent.get(product.category_id) ?? [] : []).map((subcategory) => (
-                                        <option key={subcategory.id} value={subcategory.id}>
-                                          {subcategory.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <select
-                                      className="min-h-[34px] border border-neutral-300 bg-white px-2"
-                                      onChange={(event) =>
-                                        setProducts((prev) =>
-                                          prev.map((entry) =>
-                                            entry.id === product.id ? { ...entry, preferred_vendor_id: event.target.value || null } : entry
+                                        }
+                                        value={product.preferred_vendor_id ?? ''}
+                                      >
+                                        <option value="">Vendor</option>
+                                        {vendors.map((vendor) => (
+                                          <option key={vendor.id} value={vendor.id}>
+                                            {vendor.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <p className="mt-1 text-xs text-neutral-600">Preferred Vendor</p>
+                                    </div>
+                                    <div>
+                                      <input
+                                        className="min-h-[34px] w-full border border-neutral-300 px-2"
+                                        min={0}
+                                        onChange={(event) =>
+                                          setProducts((prev) =>
+                                            prev.map((entry) =>
+                                              entry.id === product.id
+                                                ? {
+                                                    ...entry,
+                                                    default_unit_cost: event.target.value
+                                                      ? Math.max(Math.round(Number(event.target.value)), 0)
+                                                      : null
+                                                  }
+                                                : entry
+                                            )
                                           )
-                                        )
-                                      }
-                                      value={product.preferred_vendor_id ?? ''}
-                                    >
-                                      <option value="">Vendor</option>
-                                      {vendors.map((vendor) => (
-                                        <option key={vendor.id} value={vendor.id}>
-                                          {vendor.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2"
-                                      onChange={(event) =>
-                                        setProducts((prev) => prev.map((entry) => (entry.id === product.id ? { ...entry, sku: event.target.value } : entry)))
-                                      }
-                                      aria-label="SKU"
-                                      value={product.sku ?? ''}
-                                    />
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2"
-                                      min={0}
-                                      onChange={(event) =>
-                                        setProducts((prev) =>
-                                          prev.map((entry) =>
-                                            entry.id === product.id ? { ...entry, default_unit_cost: event.target.value ? Number(event.target.value) : null } : entry
+                                        }
+                                        step={1}
+                                        type="number"
+                                        value={product.default_unit_cost ?? ''}
+                                      />
+                                      <p className="mt-1 text-xs text-neutral-600">Cost Of 1 Ordered Item</p>
+                                    </div>
+                                    <div>
+                                      <input
+                                        className="min-h-[34px] w-full border border-neutral-300 px-2"
+                                        min={1}
+                                        onChange={(event) =>
+                                          setProducts((prev) =>
+                                            prev.map((entry) =>
+                                              entry.id === product.id ? { ...entry, units_per_purchase: Math.max(Number(event.target.value) || 1, 1) } : entry
+                                            )
                                           )
-                                        )
-                                      }
-                                      placeholder="Cost of 1 ordered item"
-                                      step="0.01"
-                                      type="number"
-                                      value={product.default_unit_cost ?? ''}
-                                    />
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2"
-                                      min={1}
-                                      onChange={(event) =>
-                                        setProducts((prev) =>
-                                          prev.map((entry) =>
-                                            entry.id === product.id ? { ...entry, units_per_purchase: Math.max(Number(event.target.value) || 1, 1) } : entry
+                                        }
+                                        step={1}
+                                        type="number"
+                                        value={product.units_per_purchase}
+                                      />
+                                      <p className="mt-1 text-xs text-neutral-600">Items Per Ordered Item</p>
+                                    </div>
+                                    <div>
+                                      <input
+                                        className="min-h-[34px] w-full border border-neutral-300 px-2"
+                                        min={1}
+                                        onChange={(event) =>
+                                          setProducts((prev) =>
+                                            prev.map((entry) =>
+                                              entry.id === product.id ? { ...entry, default_order_quantity: Math.max(Number(event.target.value) || 1, 1) } : entry
+                                            )
                                           )
-                                        )
-                                      }
-                                      placeholder="Items per ordered item"
-                                      step={1}
-                                      type="number"
-                                      value={product.units_per_purchase}
-                                    />
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2"
-                                      min={1}
-                                      onChange={(event) =>
-                                        setProducts((prev) =>
-                                          prev.map((entry) =>
-                                            entry.id === product.id ? { ...entry, default_order_quantity: Math.max(Number(event.target.value) || 1, 1) } : entry
+                                        }
+                                        step={1}
+                                        type="number"
+                                        value={product.default_order_quantity}
+                                      />
+                                      <p className="mt-1 text-xs text-neutral-600">Default Qty To Order</p>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                      <input
+                                        className="min-h-[34px] w-full border border-neutral-300 px-2"
+                                        onChange={(event) =>
+                                          setProducts((prev) =>
+                                            prev.map((entry) =>
+                                              entry.id === product.id ? { ...entry, vendor_product_link: event.target.value } : entry
+                                            )
                                           )
-                                        )
-                                      }
-                                      placeholder="Default order qty"
-                                      step={1}
-                                      type="number"
-                                      value={product.default_order_quantity}
-                                    />
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2 md:col-span-2"
-                                      onChange={(event) =>
-                                        setProducts((prev) =>
-                                          prev.map((entry) =>
-                                            entry.id === product.id ? { ...entry, vendor_product_link: event.target.value } : entry
+                                        }
+                                        value={product.vendor_product_link ?? ''}
+                                      />
+                                      <p className="mt-1 text-xs text-neutral-600">Product Link</p>
+                                    </div>
+                                    <div className="md:col-span-4">
+                                      <textarea
+                                        className="min-h-[70px] w-full border border-neutral-300 px-2 py-2"
+                                        onChange={(event) =>
+                                          setProducts((prev) =>
+                                            prev.map((entry) =>
+                                              entry.id === product.id ? { ...entry, notes: event.target.value } : entry
+                                            )
                                           )
-                                        )
-                                      }
-                                      aria-label="Vendor Link"
-                                      value={product.vendor_product_link ?? ''}
-                                    />
-                                    <textarea
-                                      className="min-h-[70px] border border-neutral-300 px-2 py-2 md:col-span-4"
-                                      onChange={(event) =>
-                                        setProducts((prev) =>
-                                          prev.map((entry) =>
-                                            entry.id === product.id ? { ...entry, notes: event.target.value } : entry
-                                          )
-                                        )
-                                      }
-                                      aria-label="Product Notes"
-                                      value={product.notes ?? ''}
-                                    />
+                                        }
+                                        value={product.notes ?? ''}
+                                      />
+                                      <p className="mt-1 text-xs text-neutral-600">Notes</p>
+                                    </div>
                                   </div>
                                   <div className="mt-2">
                                     <button
@@ -2880,188 +2679,199 @@ export function ProductDashboard() {
               </section>
               <section className="border-t border-neutral-300 px-4 py-4 md:px-6">
                 <h3 className="text-base font-semibold">Product Categories</h3>
-                <p className="mt-1 text-sm text-neutral-600">
-                  Add a category by name. Drag onto a category to nest it, or drag between categories to keep it top-level.
-                </p>
-                <div className="mt-3 flex flex-col gap-2 md:flex-row">
-                  <label className="flex-1 text-sm text-neutral-700">
+                <p className="mt-1 text-sm text-neutral-600">Single-level categories only. No subcategories.</p>
+                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[2fr_1fr_auto]">
+                  <label className="text-sm text-neutral-700">
                     Category Name
                     <input
                       className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
-                      onChange={(event) => setNewProductCategory({ name: event.target.value })}
-                      value={newProductCategory.name}
+                      onChange={(event) => setNewCategoryDraft((prev) => ({ ...prev, name: event.target.value }))}
+                      type="text"
+                      value={newCategoryDraft.name}
                     />
+                  </label>
+                  <label className="text-sm text-neutral-700">
+                    Category Color
+                    <select
+                      className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2"
+                      onChange={(event) => setNewCategoryDraft((prev) => ({ ...prev, color_key: event.target.value }))}
+                      value={newCategoryDraft.color_key}
+                    >
+                      {CATEGORY_COLOR_OPTIONS.map((option) => (
+                        <option key={option.key} value={option.key}>{option.label}</option>
+                      ))}
+                    </select>
                   </label>
                   <button
                     className="min-h-[38px] border border-brand-maroon bg-brand-maroon px-4 text-sm text-white hover:bg-[#6a0000] md:self-end"
-                    onClick={() => void addProductCategory()}
+                    onClick={() => void addProductCategory(newCategoryDraft.name, newCategoryDraft.color_key)}
                     type="button"
                   >
-                    Add
+                    Add Category
                   </button>
                 </div>
-                <div className="mt-4 rounded border border-neutral-300 bg-neutral-50 p-2">
-                  {rootCategories.length === 0 ? (
-                    <p className="px-2 py-3 text-sm text-neutral-600">No categories yet.</p>
-                  ) : (
-                    <div className="space-y-1">
-                      {rootCategories.map((category) => (
-                        <Fragment key={category.id}>
-                          <div
-                            className={`h-2 rounded ${
-                              categoryDropTarget?.id === category.id && categoryDropTarget.position === 'before'
-                                ? 'bg-brand-maroon/60'
-                                : 'bg-transparent'
-                            }`}
-                            onDragOver={(event) => {
-                              event.preventDefault();
-                              setCategoryDropTarget({ id: category.id, position: 'before' });
-                            }}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              void applyCategoryDrop(category.id, 'before');
-                            }}
-                          />
-                          <article
-                            className={`cursor-pointer rounded border px-3 py-2 ${
-                              categoryDropTarget?.id === category.id && categoryDropTarget.position === 'inside'
-                                ? 'border-brand-maroon bg-brand-maroon/10'
-                                : 'border-neutral-300 bg-white'
-                            }`}
-                            draggable
-                            onDragStart={() => setDraggedCategoryId(category.id)}
-                            onDragEnd={resetCategoryDragState}
-                            onClick={() =>
-                              setEditingCategoryDraft({
-                                id: category.id,
-                                name: category.name,
-                                parent_category_id: category.parent_category_id
-                              })
-                            }
-                            onDragOver={(event) => {
-                              event.preventDefault();
-                              setCategoryDropTarget({ id: category.id, position: 'inside' });
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault();
-                                setEditingCategoryDraft({
+                <div className="mt-4 overflow-x-auto border border-neutral-300">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
+                      <tr>
+                        <th className="border-b border-neutral-200 px-3 py-2">Category Name</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Color</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryOptions.map((category) => (
+                        <tr className="border-b border-neutral-200" key={category.id}>
+                          <td className="px-3 py-2 font-medium">{category.name}</td>
+                          <td className="px-3 py-2">
+                            <span className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${getCategoryColorClass(category.color_key)}`}>
+                              {CATEGORY_COLOR_OPTIONS.find((option) => option.key === (category.color_key ?? 'slate'))?.label ?? 'Slate'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex gap-2">
+                              <button
+                                className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
+                                onClick={() => setEditingCategoryDraft({
                                   id: category.id,
                                   name: category.name,
-                                  parent_category_id: category.parent_category_id
-                                });
-                              }
-                            }}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              void applyCategoryDrop(category.id, 'inside');
-                            }}
-                            role="button"
-                            tabIndex={0}
-                          >
-                            <p className="text-sm font-medium">{category.name}</p>
-                          </article>
-
-                          <div className="ml-5 mt-1 space-y-1">
-                            {(subcategoriesByParent.get(category.id) ?? []).map((subCategory) => (
-                              <Fragment key={subCategory.id}>
-                                <div
-                                  className={`h-2 rounded ${
-                                    categoryDropTarget?.id === subCategory.id && categoryDropTarget.position === 'before'
-                                      ? 'bg-brand-maroon/60'
-                                      : 'bg-transparent'
-                                  }`}
-                                  onDragOver={(event) => {
-                                    event.preventDefault();
-                                    setCategoryDropTarget({ id: subCategory.id, position: 'before' });
-                                  }}
-                                  onDrop={(event) => {
-                                    event.preventDefault();
-                                    void applyCategoryDrop(subCategory.id, 'before');
-                                  }}
-                                />
-                                <article
-                                  className={`cursor-pointer rounded border px-3 py-2 ${
-                                    categoryDropTarget?.id === subCategory.id && categoryDropTarget.position === 'inside'
-                                      ? 'border-brand-maroon bg-brand-maroon/10'
-                                      : 'border-neutral-300 bg-white'
-                                  }`}
-                                  draggable
-                                  onDragStart={() => setDraggedCategoryId(subCategory.id)}
-                                  onDragEnd={resetCategoryDragState}
-                                  onClick={() =>
-                                    setEditingCategoryDraft({
-                                      id: subCategory.id,
-                                      name: subCategory.name,
-                                      parent_category_id: subCategory.parent_category_id
-                                    })
-                                  }
-                                  onDragOver={(event) => {
-                                    event.preventDefault();
-                                    setCategoryDropTarget({ id: subCategory.id, position: 'inside' });
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
-                                      event.preventDefault();
-                                      setEditingCategoryDraft({
-                                        id: subCategory.id,
-                                        name: subCategory.name,
-                                        parent_category_id: subCategory.parent_category_id
-                                      });
-                                    }
-                                  }}
-                                  onDrop={(event) => {
-                                    event.preventDefault();
-                                    void applyCategoryDrop(subCategory.id, 'inside');
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <p className="text-sm font-medium">{subCategory.name}</p>
-                                </article>
-                                <div
-                                  className={`h-2 rounded ${
-                                    categoryDropTarget?.id === subCategory.id && categoryDropTarget.position === 'after'
-                                      ? 'bg-brand-maroon/60'
-                                      : 'bg-transparent'
-                                  }`}
-                                  onDragOver={(event) => {
-                                    event.preventDefault();
-                                    setCategoryDropTarget({ id: subCategory.id, position: 'after' });
-                                  }}
-                                  onDrop={(event) => {
-                                    event.preventDefault();
-                                    void applyCategoryDrop(subCategory.id, 'after');
-                                  }}
-                                />
-                              </Fragment>
-                            ))}
-                          </div>
-
-                          <div
-                            className={`h-2 rounded ${
-                              categoryDropTarget?.id === category.id && categoryDropTarget.position === 'after'
-                                ? 'bg-brand-maroon/60'
-                                : 'bg-transparent'
-                            }`}
-                            onDragOver={(event) => {
-                              event.preventDefault();
-                              setCategoryDropTarget({ id: category.id, position: 'after' });
-                            }}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              void applyCategoryDrop(category.id, 'after');
-                            }}
-                          />
-                        </Fragment>
+                                  color_key: category.color_key ?? 'slate'
+                                })}
+                                type="button"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="min-h-[32px] border border-red-700 px-3 text-xs text-red-700 hover:bg-red-50"
+                                onClick={() => void deleteProductCategory(category.id)}
+                                type="button"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
                       ))}
-                    </div>
-                  )}
+                    </tbody>
+                  </table>
                 </div>
               </section>
             </section>
           )}
       </section>
+
+      {showAddProductModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-5xl border border-neutral-300 bg-white">
+            <header className="border-b border-neutral-300 px-4 py-3">
+              <h3 className="text-base font-semibold">Add Product</h3>
+            </header>
+            <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-4">
+              <label className="text-sm text-neutral-700">
+                Product Name
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                  onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))}
+                  value={newProduct.name}
+                />
+              </label>
+              <label className="text-sm text-neutral-700">
+                Category
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setNewProduct((prev) => ({ ...prev, category_id: event.target.value }))}
+                  value={newProduct.category_id}
+                >
+                  <option value="">Select category</option>
+                  {categoryOptions.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm text-neutral-700">
+                Vendor
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setNewProduct((prev) => ({ ...prev, preferred_vendor_id: event.target.value }))}
+                  value={newProduct.preferred_vendor_id}
+                >
+                  <option value="">Select vendor</option>
+                  {vendors.map((vendor) => (
+                    <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm text-neutral-700">
+                Cost Of 1 Ordered Item
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                  min={0}
+                  onChange={(event) => setNewProduct((prev) => ({ ...prev, default_unit_cost: event.target.value }))}
+                  step={1}
+                  type="number"
+                  value={newProduct.default_unit_cost}
+                />
+              </label>
+              <label className="text-sm text-neutral-700">
+                Items Per Ordered Item
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                  min={1}
+                  onChange={(event) => setNewProduct((prev) => ({ ...prev, units_per_purchase: event.target.value }))}
+                  step={1}
+                  type="number"
+                  value={newProduct.units_per_purchase}
+                />
+              </label>
+              <label className="text-sm text-neutral-700">
+                Default Qty To Order
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                  min={1}
+                  onChange={(event) => setNewProduct((prev) => ({ ...prev, default_order_quantity: event.target.value }))}
+                  step={1}
+                  type="number"
+                  value={newProduct.default_order_quantity}
+                />
+              </label>
+              <label className="text-sm text-neutral-700 md:col-span-2">
+                Product Link
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                  onChange={(event) => setNewProduct((prev) => ({ ...prev, vendor_product_link: event.target.value }))}
+                  value={newProduct.vendor_product_link}
+                />
+              </label>
+              <label className="text-sm text-neutral-700 md:col-span-4">
+                Notes
+                <textarea
+                  className="mt-1 min-h-[96px] w-full border border-neutral-300 px-2 py-2 text-sm"
+                  onChange={(event) => setNewProduct((prev) => ({ ...prev, notes: event.target.value }))}
+                  value={newProduct.notes}
+                />
+              </label>
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
+              <button
+                className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={() => setShowAddProductModal(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                onClick={() => void addProduct()}
+                type="button"
+              >
+                Add Product
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
 
       {editingCategoryDraft ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -3069,37 +2879,39 @@ export function ProductDashboard() {
             <header className="border-b border-neutral-300 px-4 py-3">
               <h3 className="text-base font-semibold">Edit Category</h3>
             </header>
-            <div className="grid grid-cols-1 gap-3 px-4 py-4">
-              <label className="text-sm text-neutral-700">
-                Name
+            <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-2">
+              <label className="text-sm text-neutral-700 md:col-span-2">
+                Category Name
                 <input
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
-                  onChange={(event) => setEditingCategoryDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+                  onChange={(event) =>
+                    setEditingCategoryDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))
+                  }
                   type="text"
                   value={editingCategoryDraft.name}
                 />
               </label>
               <label className="text-sm text-neutral-700">
-                Parent
+                Category Color
                 <select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) =>
-                    setEditingCategoryDraft((prev) =>
-                      prev ? { ...prev, parent_category_id: event.target.value || null } : prev
-                    )
+                    setEditingCategoryDraft((prev) => (prev ? { ...prev, color_key: event.target.value } : prev))
                   }
-                  value={editingCategoryDraft.parent_category_id ?? ''}
+                  value={editingCategoryDraft.color_key}
                 >
-                  <option value="">Main category</option>
-                  {rootCategories
-                    .filter((category) => category.id !== editingCategoryDraft.id)
-                    .map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
+                  {CATEGORY_COLOR_OPTIONS.map((option) => (
+                    <option key={option.key} value={option.key}>{option.label}</option>
+                  ))}
                 </select>
               </label>
+              <div className="flex items-end">
+                <span
+                  className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${getCategoryColorClass(editingCategoryDraft.color_key)}`}
+                >
+                  Preview
+                </span>
+              </div>
             </div>
             <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
               <button
@@ -3111,7 +2923,9 @@ export function ProductDashboard() {
               </button>
               <button
                 className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
-                onClick={() => void saveProductCategoryEdit()}
+                onClick={() =>
+                  void saveProductCategoryEdit(editingCategoryDraft.id, editingCategoryDraft.name, editingCategoryDraft.color_key)
+                }
                 type="button"
               >
                 Save
@@ -3424,8 +3238,7 @@ export function ProductDashboard() {
                           >
                             <p className="font-medium">{product.name}</p>
                             <p className="text-xs text-neutral-500">
-                              {product.sku ? `SKU: ${product.sku}` : 'No SKU'}
-                              {product.default_unit_cost !== null ? ` • ${currency.format(product.default_unit_cost)}` : ''}
+                              {product.default_unit_cost !== null ? `${currency.format(product.default_unit_cost)}` : 'No default cost'}
                             </p>
                           </button>
                         ))
