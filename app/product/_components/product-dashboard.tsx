@@ -161,6 +161,8 @@ interface CreateOrderLineDraft {
   notes: string;
 }
 
+type CategoryDropPosition = 'before' | 'inside' | 'after';
+
 const NAV_ITEMS: Array<{ id: DashboardView; label: string }> = [
   { id: 'orders', label: 'Orders' },
   { id: 'prompts', label: 'Prompts' },
@@ -209,6 +211,33 @@ function createDraftId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function getStatusBadgeClass(status: DbOrderStatus) {
+  switch (status) {
+    case 'draft':
+      return 'bg-neutral-200 text-neutral-800';
+    case 'submitted':
+      return 'bg-blue-100 text-blue-800';
+    case 'approved':
+      return 'bg-emerald-100 text-emerald-800';
+    case 'ordered':
+      return 'bg-indigo-100 text-indigo-800';
+    case 'partially_received':
+      return 'bg-amber-100 text-amber-900';
+    case 'received':
+      return 'bg-green-100 text-green-900';
+    case 'archived':
+      return 'bg-slate-200 text-slate-800';
+    case 'cancelled':
+      return 'bg-red-100 text-red-800';
+    default:
+      return 'bg-neutral-200 text-neutral-800';
+  }
+}
+
+function getPriorityBadgeClass(priority: DbPriority) {
+  return priority === 'urgent' ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800';
+}
+
 export function ProductDashboard() {
   const supabase = useMemo(() => createBrowserClient(), []);
 
@@ -233,6 +262,7 @@ export function ProductDashboard() {
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
   const [showEditOrderModal, setShowEditOrderModal] = useState(false);
+  const [cancelOrderTarget, setCancelOrderTarget] = useState<OrderRow | null>(null);
   const [editingOrderDraft, setEditingOrderDraft] = useState<OrderRow | null>(null);
   const [lineModalMode, setLineModalMode] = useState<'add' | 'edit' | null>(null);
   const [lineModalOrderId, setLineModalOrderId] = useState<string | null>(null);
@@ -317,9 +347,8 @@ export function ProductDashboard() {
   const [newProductCategory, setNewProductCategory] = useState({
     name: ''
   });
-  const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null);
-  const [activeDropCategoryId, setActiveDropCategoryId] = useState<string | null>(null);
-  const [activeRootDropIndex, setActiveRootDropIndex] = useState<number | null>(null);
+  const [draggedCategoryId, setDraggedCategoryId] = useState<string | null>(null);
+  const [categoryDropTarget, setCategoryDropTarget] = useState<{ id: string; position: CategoryDropPosition } | null>(null);
   const [editingCategoryDraft, setEditingCategoryDraft] = useState<{
     id: string;
     name: string;
@@ -818,10 +847,9 @@ export function ProductDashboard() {
     });
   };
 
-  const resetDragState = () => {
-    setDraggingCategoryId(null);
-    setActiveDropCategoryId(null);
-    setActiveRootDropIndex(null);
+  const resetCategoryDragState = () => {
+    setDraggedCategoryId(null);
+    setCategoryDropTarget(null);
   };
 
   const isDescendantCategory = (candidateId: string, potentialAncestorId: string): boolean => {
@@ -833,63 +861,81 @@ export function ProductDashboard() {
     return false;
   };
 
-  const moveCategoryUnderCategory = async (draggingId: string, targetId: string) => {
-    if (draggingId === targetId) return;
-    if (isDescendantCategory(targetId, draggingId)) return;
-    const moving = productCategories.find((category) => category.id === draggingId);
-    const target = productCategories.find((category) => category.id === targetId);
-    if (!moving || !target) return;
-
-    const previousParentId = moving.parent_category_id;
-    const updates: Array<{ id: string; parent_category_id: string | null; sort_order: number }> = [];
-
-    const oldSiblings = productCategories
-      .filter((category) => category.parent_category_id === previousParentId && category.id !== moving.id)
-      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-    oldSiblings.forEach((category, index) => {
-      updates.push({ id: category.id, parent_category_id: previousParentId, sort_order: index });
-    });
-
-    const newSiblings = productCategories
-      .filter((category) => category.parent_category_id === target.id && category.id !== moving.id)
-      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-    updates.push({
-      id: moving.id,
-      parent_category_id: target.id,
-      sort_order: newSiblings.length
-    });
-
-    await saveCategoryLayout(updates);
-  };
-
-  const moveCategoryToRootPosition = async (draggingId: string, rootIndex: number) => {
+  const moveCategoryToPosition = async (
+    draggingId: string,
+    destinationParentId: string | null,
+    destinationIndex: number
+  ) => {
     const moving = productCategories.find((category) => category.id === draggingId);
     if (!moving) return;
+    if (destinationParentId === moving.id) return;
+    if (destinationParentId && isDescendantCategory(destinationParentId, draggingId)) return;
 
-    const previousParentId = moving.parent_category_id;
-    const updates: Array<{ id: string; parent_category_id: string | null; sort_order: number }> = [];
+    const sourceParentId = moving.parent_category_id;
+    const sourceSiblings = productCategories
+      .filter((category) => category.parent_category_id === sourceParentId && category.id !== moving.id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    const targetSiblings = productCategories
+      .filter((category) => category.parent_category_id === destinationParentId && category.id !== moving.id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 
-    if (previousParentId) {
-      const oldSiblings = productCategories
-        .filter((category) => category.parent_category_id === previousParentId && category.id !== moving.id)
-        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-      oldSiblings.forEach((category, index) => {
-        updates.push({ id: category.id, parent_category_id: previousParentId, sort_order: index });
+    const boundedIndex = Math.max(0, Math.min(destinationIndex, targetSiblings.length));
+    targetSiblings.splice(boundedIndex, 0, moving);
+
+    const updatesMap = new Map<string, { id: string; parent_category_id: string | null; sort_order: number }>();
+
+    if (sourceParentId === destinationParentId) {
+      targetSiblings.forEach((category, index) => {
+        updatesMap.set(category.id, { id: category.id, parent_category_id: destinationParentId, sort_order: index });
+      });
+    } else {
+      sourceSiblings.forEach((category, index) => {
+        updatesMap.set(category.id, { id: category.id, parent_category_id: sourceParentId, sort_order: index });
+      });
+      targetSiblings.forEach((category, index) => {
+        updatesMap.set(category.id, { id: category.id, parent_category_id: destinationParentId, sort_order: index });
       });
     }
 
-    const rootList = rootCategories.filter((category) => category.id !== moving.id);
-    const boundedIndex = Math.max(0, Math.min(rootIndex, rootList.length));
-    rootList.splice(boundedIndex, 0, moving);
-    rootList.forEach((category, index) => {
-      updates.push({
-        id: category.id,
-        parent_category_id: null,
-        sort_order: index
-      });
-    });
-
+    const updates = Array.from(updatesMap.values());
+    if (updates.length === 0) return;
     await saveCategoryLayout(updates);
+  };
+
+  const applyCategoryDrop = async (targetId: string, position: CategoryDropPosition) => {
+    if (!draggedCategoryId) return;
+    if (draggedCategoryId === targetId && position === 'inside') {
+      resetCategoryDragState();
+      return;
+    }
+
+    const target = productCategories.find((category) => category.id === targetId);
+    if (!target) {
+      resetCategoryDragState();
+      return;
+    }
+
+    if (position === 'inside') {
+      const children = productCategories
+        .filter((category) => category.parent_category_id === target.id && category.id !== draggedCategoryId)
+        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+      await moveCategoryToPosition(draggedCategoryId, target.id, children.length);
+      resetCategoryDragState();
+      return;
+    }
+
+    const siblingParentId = target.parent_category_id;
+    const siblings = productCategories
+      .filter((category) => category.parent_category_id === siblingParentId && category.id !== draggedCategoryId)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    const targetIndex = siblings.findIndex((category) => category.id === target.id);
+    if (targetIndex < 0) {
+      resetCategoryDragState();
+      return;
+    }
+    const destinationIndex = position === 'before' ? targetIndex : targetIndex + 1;
+    await moveCategoryToPosition(draggedCategoryId, siblingParentId, destinationIndex);
+    resetCategoryDragState();
   };
 
   const openCreateOrderModal = () => {
@@ -965,6 +1011,26 @@ export function ProductDashboard() {
       }
       await loadDashboard();
       setNotice(`Draft order ${order.order_number} cancelled.`);
+    });
+  };
+
+  const cancelOrderQuick = async (order: OrderRow) => {
+    await withSaveState(async () => {
+      if (order.status === 'cancelled') {
+        setCancelOrderTarget(null);
+        return;
+      }
+      const { error: updateError } = await supabase
+        .from('product_purchase_orders')
+        .update({
+          status: 'cancelled',
+          updated_by: 'dashboard'
+        })
+        .eq('id', order.id);
+      if (updateError) throw updateError;
+      setCancelOrderTarget(null);
+      await loadDashboard();
+      setNotice(`Order ${order.order_number} cancelled.`);
     });
   };
 
@@ -1620,6 +1686,7 @@ export function ProductDashboard() {
                       <th className="border-b border-neutral-300 px-4 py-3">Requested Date</th>
                       <th className="border-b border-neutral-300 px-4 py-3">Total</th>
                       <th className="border-b border-neutral-300 px-4 py-3">Priority</th>
+                      <th className="border-b border-neutral-300 px-4 py-3 text-right">Quick Cancel</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1633,16 +1700,43 @@ export function ProductDashboard() {
                           >
                             <td className="px-4 py-3 font-medium">{order.order_number}</td>
                             <td className="px-4 py-3">{vendorById.get(order.vendor_id)?.name ?? 'Unknown'}</td>
-                            <td className="px-4 py-3">{formatLabel(order.status)}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(order.status)}`}>
+                                {formatLabel(order.status)}
+                              </span>
+                            </td>
                             <td className="px-4 py-3">{order.date_placed ?? '-'}</td>
                             <td className="px-4 py-3">{order.requested_pickup_date ?? (order.asap ? 'ASAP' : '-')}</td>
                             <td className="px-4 py-3">{currency.format(Number(order.total_amount || 0))}</td>
-                            <td className="px-4 py-3">{formatLabel(order.priority)}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${getPriorityBadgeClass(order.priority)}`}>
+                                {formatLabel(order.priority)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                aria-label={`Cancel order ${order.order_number}`}
+                                className="inline-flex min-h-[30px] min-w-[30px] items-center justify-center rounded border border-red-700 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                disabled={order.status === 'cancelled'}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setCancelOrderTarget(order);
+                                }}
+                                type="button"
+                              >
+                                <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                                  <path d="M4 7h16" strokeLinecap="round" />
+                                  <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" strokeLinecap="round" />
+                                  <path d="M7 7l1 12a1 1 0 0 0 1 .9h6a1 1 0 0 0 1-.9L17 7" strokeLinecap="round" />
+                                  <path d="M10 11v5M14 11v5" strokeLinecap="round" />
+                                </svg>
+                              </button>
+                            </td>
                           </tr>
                           {isSelected ? (
                             <tr className="border-b border-neutral-300 bg-neutral-50">
-                              <td className="px-4 py-4" colSpan={7}>
-                                <div className="space-y-5">
+                              <td className="px-4 py-4" colSpan={8}>
+                                <div className="space-y-5 rounded border border-neutral-300 bg-white p-4 shadow-sm">
                                   <section>
                                     <div className="mb-2 flex items-center justify-between">
                                       <h3 className="text-base font-semibold">Order Details</h3>
@@ -1667,8 +1761,18 @@ export function ProductDashboard() {
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 text-sm">
                                       <p><span className="font-medium">Vendor:</span> {vendorById.get(order.vendor_id)?.name ?? 'Unknown'}</p>
-                                      <p><span className="font-medium">Status:</span> {formatLabel(order.status)}</p>
-                                      <p><span className="font-medium">Priority:</span> {formatLabel(order.priority)}</p>
+                                      <p>
+                                        <span className="font-medium">Status:</span>{' '}
+                                        <span className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold ${getStatusBadgeClass(order.status)}`}>
+                                          {formatLabel(order.status)}
+                                        </span>
+                                      </p>
+                                      <p>
+                                        <span className="font-medium">Priority:</span>{' '}
+                                        <span className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold ${getPriorityBadgeClass(order.priority)}`}>
+                                          {formatLabel(order.priority)}
+                                        </span>
+                                      </p>
                                       <p><span className="font-medium">Date placed:</span> {order.date_placed ?? '-'}</p>
                                       <p><span className="font-medium">Requested:</span> {order.requested_pickup_date ?? (order.asap ? 'ASAP' : '-')}</p>
                                       <p><span className="font-medium">Expected:</span> {order.expected_arrival_date ?? '-'}</p>
@@ -2801,26 +2905,32 @@ export function ProductDashboard() {
                     <p className="px-2 py-3 text-sm text-neutral-600">No categories yet.</p>
                   ) : (
                     <div className="space-y-1">
-                      <div
-                        className={`h-2 rounded ${activeRootDropIndex === 0 ? 'bg-brand-maroon/50' : 'bg-transparent'}`}
-                        onDragOver={(event) => {
-                          event.preventDefault();
-                          setActiveDropCategoryId(null);
-                          setActiveRootDropIndex(0);
-                        }}
-                        onDrop={() => {
-                          if (draggingCategoryId) {
-                            void moveCategoryToRootPosition(draggingCategoryId, 0).finally(resetDragState);
-                          }
-                        }}
-                      />
-                      {rootCategories.map((category, index) => (
+                      {rootCategories.map((category) => (
                         <Fragment key={category.id}>
+                          <div
+                            className={`h-2 rounded ${
+                              categoryDropTarget?.id === category.id && categoryDropTarget.position === 'before'
+                                ? 'bg-brand-maroon/60'
+                                : 'bg-transparent'
+                            }`}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              setCategoryDropTarget({ id: category.id, position: 'before' });
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              void applyCategoryDrop(category.id, 'before');
+                            }}
+                          />
                           <article
                             className={`cursor-pointer rounded border px-3 py-2 ${
-                              activeDropCategoryId === category.id ? 'border-brand-maroon bg-brand-maroon/10' : 'border-neutral-300 bg-white'
+                              categoryDropTarget?.id === category.id && categoryDropTarget.position === 'inside'
+                                ? 'border-brand-maroon bg-brand-maroon/10'
+                                : 'border-neutral-300 bg-white'
                             }`}
                             draggable
+                            onDragStart={() => setDraggedCategoryId(category.id)}
+                            onDragEnd={resetCategoryDragState}
                             onClick={() =>
                               setEditingCategoryDraft({
                                 id: category.id,
@@ -2828,13 +2938,10 @@ export function ProductDashboard() {
                                 parent_category_id: category.parent_category_id
                               })
                             }
-                            onDragEnd={resetDragState}
                             onDragOver={(event) => {
                               event.preventDefault();
-                              setActiveRootDropIndex(null);
-                              setActiveDropCategoryId(category.id);
+                              setCategoryDropTarget({ id: category.id, position: 'inside' });
                             }}
-                            onDragStart={() => setDraggingCategoryId(category.id)}
                             onKeyDown={(event) => {
                               if (event.key === 'Enter' || event.key === ' ') {
                                 event.preventDefault();
@@ -2845,10 +2952,9 @@ export function ProductDashboard() {
                                 });
                               }
                             }}
-                            onDrop={() => {
-                              if (draggingCategoryId) {
-                                void moveCategoryUnderCategory(draggingCategoryId, category.id).finally(resetDragState);
-                              }
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              void applyCategoryDrop(category.id, 'inside');
                             }}
                             role="button"
                             tabIndex={0}
@@ -2856,60 +2962,95 @@ export function ProductDashboard() {
                             <p className="text-sm font-medium">{category.name}</p>
                           </article>
 
-                          {(subcategoriesByParent.get(category.id) ?? []).map((subCategory) => (
-                            <article
-                              className={`ml-5 cursor-pointer rounded border px-3 py-2 ${
-                                activeDropCategoryId === subCategory.id ? 'border-brand-maroon bg-brand-maroon/10' : 'border-neutral-300 bg-white'
-                              }`}
-                              draggable
-                              key={subCategory.id}
-                              onClick={() =>
-                                setEditingCategoryDraft({
-                                  id: subCategory.id,
-                                  name: subCategory.name,
-                                  parent_category_id: subCategory.parent_category_id
-                                })
-                              }
-                              onDragEnd={resetDragState}
-                              onDragOver={(event) => {
-                                event.preventDefault();
-                                setActiveRootDropIndex(null);
-                                setActiveDropCategoryId(subCategory.id);
-                              }}
-                              onDragStart={() => setDraggingCategoryId(subCategory.id)}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.preventDefault();
-                                  setEditingCategoryDraft({
-                                    id: subCategory.id,
-                                    name: subCategory.name,
-                                    parent_category_id: subCategory.parent_category_id
-                                  });
-                                }
-                              }}
-                              onDrop={() => {
-                                if (draggingCategoryId) {
-                                  void moveCategoryUnderCategory(draggingCategoryId, subCategory.id).finally(resetDragState);
-                                }
-                              }}
-                              role="button"
-                              tabIndex={0}
-                            >
-                              <p className="text-sm font-medium">{subCategory.name}</p>
-                            </article>
-                          ))}
+                          <div className="ml-5 mt-1 space-y-1">
+                            {(subcategoriesByParent.get(category.id) ?? []).map((subCategory) => (
+                              <Fragment key={subCategory.id}>
+                                <div
+                                  className={`h-2 rounded ${
+                                    categoryDropTarget?.id === subCategory.id && categoryDropTarget.position === 'before'
+                                      ? 'bg-brand-maroon/60'
+                                      : 'bg-transparent'
+                                  }`}
+                                  onDragOver={(event) => {
+                                    event.preventDefault();
+                                    setCategoryDropTarget({ id: subCategory.id, position: 'before' });
+                                  }}
+                                  onDrop={(event) => {
+                                    event.preventDefault();
+                                    void applyCategoryDrop(subCategory.id, 'before');
+                                  }}
+                                />
+                                <article
+                                  className={`cursor-pointer rounded border px-3 py-2 ${
+                                    categoryDropTarget?.id === subCategory.id && categoryDropTarget.position === 'inside'
+                                      ? 'border-brand-maroon bg-brand-maroon/10'
+                                      : 'border-neutral-300 bg-white'
+                                  }`}
+                                  draggable
+                                  onDragStart={() => setDraggedCategoryId(subCategory.id)}
+                                  onDragEnd={resetCategoryDragState}
+                                  onClick={() =>
+                                    setEditingCategoryDraft({
+                                      id: subCategory.id,
+                                      name: subCategory.name,
+                                      parent_category_id: subCategory.parent_category_id
+                                    })
+                                  }
+                                  onDragOver={(event) => {
+                                    event.preventDefault();
+                                    setCategoryDropTarget({ id: subCategory.id, position: 'inside' });
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                      event.preventDefault();
+                                      setEditingCategoryDraft({
+                                        id: subCategory.id,
+                                        name: subCategory.name,
+                                        parent_category_id: subCategory.parent_category_id
+                                      });
+                                    }
+                                  }}
+                                  onDrop={(event) => {
+                                    event.preventDefault();
+                                    void applyCategoryDrop(subCategory.id, 'inside');
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                >
+                                  <p className="text-sm font-medium">{subCategory.name}</p>
+                                </article>
+                                <div
+                                  className={`h-2 rounded ${
+                                    categoryDropTarget?.id === subCategory.id && categoryDropTarget.position === 'after'
+                                      ? 'bg-brand-maroon/60'
+                                      : 'bg-transparent'
+                                  }`}
+                                  onDragOver={(event) => {
+                                    event.preventDefault();
+                                    setCategoryDropTarget({ id: subCategory.id, position: 'after' });
+                                  }}
+                                  onDrop={(event) => {
+                                    event.preventDefault();
+                                    void applyCategoryDrop(subCategory.id, 'after');
+                                  }}
+                                />
+                              </Fragment>
+                            ))}
+                          </div>
 
                           <div
-                            className={`h-2 rounded ${activeRootDropIndex === index + 1 ? 'bg-brand-maroon/50' : 'bg-transparent'}`}
+                            className={`h-2 rounded ${
+                              categoryDropTarget?.id === category.id && categoryDropTarget.position === 'after'
+                                ? 'bg-brand-maroon/60'
+                                : 'bg-transparent'
+                            }`}
                             onDragOver={(event) => {
                               event.preventDefault();
-                              setActiveDropCategoryId(null);
-                              setActiveRootDropIndex(index + 1);
+                              setCategoryDropTarget({ id: category.id, position: 'after' });
                             }}
-                            onDrop={() => {
-                              if (draggingCategoryId) {
-                                void moveCategoryToRootPosition(draggingCategoryId, index + 1).finally(resetDragState);
-                              }
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              void applyCategoryDrop(category.id, 'after');
                             }}
                           />
                         </Fragment>
@@ -2974,6 +3115,37 @@ export function ProductDashboard() {
                 type="button"
               >
                 Save
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
+
+      {cancelOrderTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md border border-neutral-300 bg-white">
+            <header className="border-b border-neutral-300 px-4 py-3">
+              <h3 className="text-base font-semibold">Cancel Order</h3>
+            </header>
+            <div className="px-4 py-4">
+              <p className="text-sm text-neutral-700">
+                Cancel <span className="font-semibold">{cancelOrderTarget.order_number}</span>? This will set status to cancelled.
+              </p>
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
+              <button
+                className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={() => setCancelOrderTarget(null)}
+                type="button"
+              >
+                Keep Order
+              </button>
+              <button
+                className="min-h-[34px] border border-red-700 bg-red-700 px-3 text-sm text-white hover:bg-red-800"
+                onClick={() => void cancelOrderQuick(cancelOrderTarget)}
+                type="button"
+              >
+                Confirm Cancel
               </button>
             </footer>
           </div>
