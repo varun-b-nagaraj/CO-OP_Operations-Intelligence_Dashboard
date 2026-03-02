@@ -32,9 +32,23 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
   const [resultStatus, setResultStatus] = useState('');
   const [showRecentPanel, setShowRecentPanel] = useState(true);
   const [error, setError] = useState('');
+  const [liveBarcodeValue, setLiveBarcodeValue] = useState('');
+  const [liveBarcodeActive, setLiveBarcodeActive] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(false);
 
   useEffect(() => {
     setSupported(typeof window !== 'undefined');
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mediaQuery = window.matchMedia('(orientation: landscape)');
+    const updateOrientation = () => setIsLandscape(mediaQuery.matches);
+    updateOrientation();
+    mediaQuery.addEventListener('change', updateOrientation);
+    return () => {
+      mediaQuery.removeEventListener('change', updateOrientation);
+    };
   }, []);
 
   useEffect(() => {
@@ -85,50 +99,95 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
     };
   }, [active, supported]);
 
+  const detectValueFromFrame = async (): Promise<string> => {
+    if (!videoRef.current || !canvasRef.current) return '';
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video.videoWidth || !video.videoHeight) return '';
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    if (!context) return '';
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    if ('BarcodeDetector' in window) {
+      const DetectorCtor = (window as unknown as { BarcodeDetector: new () => Detector }).BarcodeDetector;
+      const detector = new DetectorCtor();
+      const codes = await detector.detect(canvas);
+      return codes.find((code) => code.rawValue)?.rawValue?.trim() ?? '';
+    }
+
+    if (!zxingReaderRef.current) {
+      const { BrowserMultiFormatReader } = await import('@zxing/browser');
+      zxingReaderRef.current = new BrowserMultiFormatReader();
+    }
+    try {
+      const result = zxingReaderRef.current.decodeFromCanvas(canvas);
+      return result?.getText()?.trim() ?? '';
+    } catch {
+      return '';
+    }
+  };
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    let inFlight = false;
+    const timer = window.setInterval(() => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      void detectValueFromFrame()
+        .then((value) => {
+          if (cancelled) return;
+          if (value) {
+            setLiveBarcodeValue(value);
+            setLiveBarcodeActive(true);
+          } else {
+            setLiveBarcodeActive(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setLiveBarcodeActive(false);
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      setLiveBarcodeActive(false);
+      setLiveBarcodeValue('');
+    };
+  }, [active]);
+
   const captureFrame = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     if (isCapturing) return;
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate(15);
+    }
     setIsCapturing(true);
     setError('');
     setResultStatus('');
     try {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      if (!video.videoWidth || !video.videoHeight) {
-        throw new Error('Camera feed is not ready. Try again.');
-      }
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('Unable to read camera frame.');
-
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      let value = '';
-      if ('BarcodeDetector' in window) {
-        const DetectorCtor = (window as unknown as { BarcodeDetector: new () => Detector }).BarcodeDetector;
-        const detector = new DetectorCtor();
-        const codes = await detector.detect(canvas);
-        value = codes.find((code) => code.rawValue)?.rawValue?.trim() ?? '';
-      } else {
-        if (!zxingReaderRef.current) {
-          const { BrowserMultiFormatReader } = await import('@zxing/browser');
-          zxingReaderRef.current = new BrowserMultiFormatReader();
-        }
-        try {
-          const result = zxingReaderRef.current.decodeFromCanvas(canvas);
-          value = result?.getText()?.trim() ?? '';
-        } catch {
-          value = '';
-        }
+      let value = liveBarcodeActive && liveBarcodeValue ? liveBarcodeValue : '';
+      if (!value) {
+        value = await detectValueFromFrame();
       }
 
       if (!value) {
         setResultStatus('No barcode detected in this frame. Try again.');
+        setLiveBarcodeActive(false);
         return;
       }
 
+      setLiveBarcodeValue(value);
+      setLiveBarcodeActive(true);
       onDetected(value, scanMode);
       setResultStatus(scanMode === 'multi' ? `Scanned ${value}. +1 queued.` : `Scanned ${value}. Identified only.`);
       if (scanMode === 'single') {
@@ -179,9 +238,37 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
 
       {active ? (
         <div className="fixed inset-0 z-50 bg-black/95 p-3 sm:static sm:mt-3 sm:bg-transparent sm:p-0">
-          <div className="mx-auto flex h-full max-w-3xl flex-col sm:h-auto">
+          <div className={`mx-auto flex h-full max-w-3xl flex-col sm:h-auto ${isLandscape ? 'sm:max-w-5xl' : ''}`}>
+            <div
+              className={`mb-2 p-2 text-white sm:rounded ${
+                liveBarcodeActive ? 'border border-emerald-400 bg-emerald-950/80' : 'border border-red-400 bg-red-950/80'
+              }`}
+            >
+              <button
+                className="flex w-full items-center justify-between text-left text-xs font-medium"
+                onClick={() => setShowRecentPanel((value) => !value)}
+                type="button"
+              >
+                <span className="truncate">
+                  {liveBarcodeActive ? `Current barcode: ${liveBarcodeValue}` : 'No barcode found'}
+                </span>
+                <span>{showRecentPanel ? 'Hide' : 'Show'}</span>
+              </button>
+              {showRecentPanel ? (
+                <div className="mt-1 text-xs">
+                  <p className={liveBarcodeActive ? 'text-emerald-100' : 'text-red-100'}>
+                    {liveBarcodeActive ? 'Barcode actively detected.' : 'Waiting for barcode in frame...'}
+                  </p>
+                  {recentScan ? (
+                    <p className={liveBarcodeActive ? 'text-emerald-100' : 'text-red-100'}>
+                      Current counted qty: {recentScan.currentCount}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
             {recentScan ? (
-              <div className="mb-2 border border-emerald-400 bg-emerald-950/80 p-2 text-white sm:rounded">
+              <div className="mb-2 border border-neutral-500/60 bg-black/40 p-2 text-white sm:rounded">
                 <button
                   className="flex w-full items-center justify-between text-left text-xs font-medium"
                   onClick={() => setShowRecentPanel((value) => !value)}
@@ -195,7 +282,7 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
                   <span>{showRecentPanel ? 'Hide' : 'Show'}</span>
                 </button>
                 {showRecentPanel ? (
-                  <div className="mt-1 text-xs text-emerald-100">
+                  <div className="mt-1 text-xs text-neutral-100">
                     <p>Current counted qty for most recent item: {recentScan.currentCount}</p>
                     <p>Mode: {recentScan.mode === 'multi' ? 'Multi Scan' : 'Single Scan'}</p>
                   </div>
@@ -212,8 +299,15 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
                 Close
               </button>
             </div>
-            <video className="h-full w-full border border-neutral-300 bg-black sm:max-h-72" muted playsInline ref={videoRef} />
-            <div className="mt-2 flex items-center justify-center gap-2">
+            <video
+              className={`w-full border border-neutral-300 bg-black object-contain ${
+                isLandscape ? 'h-[56vh] sm:h-[60vh]' : 'h-full sm:max-h-72'
+              }`}
+              muted
+              playsInline
+              ref={videoRef}
+            />
+            <div className={`mt-2 flex items-center justify-center gap-2 ${isLandscape ? 'flex-wrap' : ''}`}>
               <button
                 className="min-h-[44px] rounded-full border border-white bg-white/10 px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 sm:border-neutral-600 sm:bg-neutral-800"
                 disabled={isCapturing}
