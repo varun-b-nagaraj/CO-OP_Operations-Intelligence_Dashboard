@@ -125,6 +125,16 @@ function isWeekendDateKey(dateKey: string): boolean {
   return day === 0 || day === 6;
 }
 
+function toCompactDisplayName(fullName: string): string {
+  const trimmed = fullName.trim();
+  if (!trimmed) return fullName;
+  const parts = trimmed.split(/\s+/);
+  const first = parts[0] ?? trimmed;
+  const last = parts.length > 1 ? parts[parts.length - 1] : '';
+  if (!last) return first;
+  return `${first} ${last.charAt(0)}.`;
+}
+
 function toMonthRange(year: number, month: number): { from: string; to: string } {
   const from = new Date(Date.UTC(year, month - 1, 1));
   const to = new Date(Date.UTC(year, month, 0));
@@ -1913,27 +1923,47 @@ export function ScheduleTab() {
 
             <div className="overflow-x-auto border border-neutral-300">
               <table className="w-full table-fixed text-xs md:text-sm">
+                <colgroup>
+                  <col className="w-[82px] md:w-[96px]" />
+                  {activeWeek.map((day) => (
+                    <col
+                      className={isWeekendDateKey(day.dateKey) ? 'w-[56px] md:w-[64px]' : 'w-[150px] md:w-[170px]'}
+                      key={`${day.dateKey}-col`}
+                    />
+                  ))}
+                </colgroup>
                 <thead className="bg-neutral-100">
                   <tr>
-                    <th className="border-b border-r border-neutral-300 p-2 text-left">Week {activeWeekIndex + 1}</th>
-                    {WEEKDAY_LABELS.map((label) => (
-                      <th className="border-b border-neutral-300 p-2 text-left" key={label}>
-                        {label}
-                      </th>
-                    ))}
+                    <th className="border-b border-r border-neutral-300 p-1.5 text-left">Week {activeWeekIndex + 1}</th>
+                    {activeWeek.map((day, index) => {
+                      const isWeekend = isWeekendDateKey(day.dateKey);
+                      const label = WEEKDAY_LABELS[index] ?? '';
+                      return (
+                        <th
+                          className={`border-b border-neutral-300 p-1.5 ${isWeekend ? 'text-center text-[10px] md:text-xs' : 'text-left'}`}
+                          key={`${day.dateKey}-weekday`}
+                        >
+                          {isWeekend ? label.slice(0, 2) : label}
+                        </th>
+                      );
+                    })}
                   </tr>
                   <tr>
-                    <th className="border-b border-r border-neutral-300 p-2 text-left">Date</th>
+                    <th className="border-b border-r border-neutral-300 p-1.5 text-left">Date</th>
                     {activeWeek.map((day) => {
+                      const isWeekend = isWeekendDateKey(day.dateKey);
                       const dayType = schedule.calendar[day.dateKey];
                       const dateCellClass = day.inCurrentMonth
                         ? 'bg-white text-neutral-900'
                         : 'bg-neutral-100 text-neutral-400';
                       return (
-                        <th className={`border-b border-neutral-300 p-2 text-left ${dateCellClass}`} key={`${day.dateKey}-date`}>
-                          <div className="flex items-center justify-between gap-2">
+                        <th
+                          className={`border-b border-neutral-300 p-1.5 ${isWeekend ? 'text-center' : 'text-left'} ${dateCellClass}`}
+                          key={`${day.dateKey}-date`}
+                        >
+                          <div className={`flex items-center ${isWeekend ? 'justify-center' : 'justify-between'} gap-1`}>
                             <span>{day.dayNumber}</span>
-                            {dayType && (
+                            {!isWeekend && dayType && (
                               <span className="border border-neutral-400 px-1 text-[10px] uppercase tracking-wide">
                                 {dayType}
                               </span>
@@ -1947,7 +1977,7 @@ export function ScheduleTab() {
                 <tbody>
                   {PERIOD_BANDS.map((periodBand) => (
                     <tr key={`${activeWeekIndex}-${periodBand.id}`}>
-                      <th className="border-b border-r border-neutral-300 bg-blue-50 p-2 text-left font-medium text-neutral-800">
+                      <th className="border-b border-r border-neutral-300 bg-blue-50 p-1.5 text-left text-[11px] font-medium text-neutral-800 md:text-xs">
                         {periodBand.label}
                       </th>
                       {activeWeek.map((day) => {
@@ -1981,8 +2011,8 @@ export function ScheduleTab() {
                           <td className={`border-b border-neutral-300 p-2 align-top ${baseCellTone}`} key={`${day.dateKey}-${periodBand.id}`}>
                             {!day.inCurrentMonth && <span className="text-[11px] text-neutral-400">—</span>}
                             {day.inCurrentMonth && assignments.length === 0 && isWeekend && (
-                              <p className="min-h-[44px] border border-dashed border-neutral-300 px-2 py-2 text-left text-[11px] text-neutral-500">
-                                Weekend unavailable
+                              <p className="min-h-[44px] border border-dashed border-neutral-300 px-1 py-2 text-center text-[10px] text-neutral-500">
+                                N/A
                               </p>
                             )}
                             {day.inCurrentMonth && assignments.length > 0 && (
@@ -1997,6 +2027,7 @@ export function ScheduleTab() {
                                   const effectiveName =
                                     rosterNameBySNumber.get(assignment.effectiveWorkerSNumber) ??
                                     assignment.effectiveWorkerSNumber;
+                                  const compactName = toCompactDisplayName(effectiveName);
                                   const attendanceKey = [
                                     assignment.date,
                                     assignment.period,
@@ -2102,7 +2133,7 @@ export function ScheduleTab() {
                                           className="min-w-0 flex-1 truncate text-left font-medium leading-tight"
                                           title={effectiveName}
                                         >
-                                          {effectiveName}
+                                          {compactName}
                                         </span>
                                         {isAlternate && (
                                           <span className="shrink-0 border border-sky-500 bg-sky-200 px-1 text-[10px] text-sky-900">

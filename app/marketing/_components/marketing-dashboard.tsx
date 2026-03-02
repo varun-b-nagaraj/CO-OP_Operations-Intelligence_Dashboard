@@ -1336,7 +1336,6 @@ export function MarketingDashboard() {
       navAriaLabel="Marketing navigation"
       navItems={TABS}
       onNavSelect={(id) => setActiveTab(id as DashboardTab)}
-      sidebarStateKey="marketing"
       subtitle="Events, contacts, and campaign coordination"
       title="Marketing Dashboard"
     >

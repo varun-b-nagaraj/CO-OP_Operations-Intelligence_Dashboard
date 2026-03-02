@@ -15,15 +15,13 @@ import {
   Megaphone,
   Menu,
   Package,
-  PanelLeftClose,
-  PanelLeftOpen,
   ScanBarcode,
   Settings,
   ShoppingCart,
   Users,
   UserCog
 } from 'lucide-react';
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useState } from 'react';
 
 export interface DepartmentShellNavItem {
   id: string;
@@ -70,7 +68,6 @@ interface DepartmentShellProps {
   activeNavId: string;
   onNavSelect: (id: string) => void;
   children: ReactNode;
-  sidebarStateKey?: string;
 }
 
 function resolveNavIcon(icon: DepartmentShellNavIcon | undefined) {
@@ -142,31 +139,10 @@ export function DepartmentShell({
   navItems,
   activeNavId,
   onNavSelect,
-  children,
-  sidebarStateKey
+  children
 }: DepartmentShellProps) {
-  const storageKey = useMemo(
-    () => `department-shell-collapsed:${sidebarStateKey ?? title.toLowerCase().replace(/\s+/g, '-')}`,
-    [sidebarStateKey, title]
-  );
-  const [isCollapsed, setIsCollapsed] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(storageKey);
-      setIsCollapsed(stored === '1');
-    } catch {
-      setIsCollapsed(false);
-    }
-  }, [storageKey]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, isCollapsed ? '1' : '0');
-    } catch {
-      // ignore persistence errors
-    }
-  }, [isCollapsed, storageKey]);
+  const [isHovered, setIsHovered] = useState(false);
+  const isCollapsed = !isHovered;
 
   return (
     <main className="min-h-screen w-full overflow-x-hidden text-neutral-900">
@@ -175,7 +151,14 @@ export function DepartmentShell({
           isCollapsed ? 'md:grid-cols-[72px_minmax(0,1fr)]' : 'md:grid-cols-[240px_minmax(0,1fr)]'
         }`}
       >
-        <aside className="w-full border-b border-neutral-300 bg-white md:min-h-screen md:border-b-0 md:border-r">
+        <aside
+          className={`w-full border-b border-neutral-300 bg-white transition-all duration-300 ease-out md:min-h-screen md:border-b-0 md:border-r ${
+            isCollapsed ? 'md:shadow-none' : 'md:shadow-[8px_0_24px_rgba(0,0,0,0.14)]'
+          }`}
+          onFocusCapture={() => setIsHovered(true)}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
           <div className={`border-b border-neutral-300 ${isCollapsed ? 'px-2 py-3' : 'px-4 py-4'}`}>
             <div className={`flex items-start ${isCollapsed ? 'justify-center' : 'justify-between gap-3'}`}>
               {!isCollapsed ? (
@@ -186,14 +169,6 @@ export function DepartmentShell({
               ) : (
                 <span className="sr-only">{title}</span>
               )}
-              <button
-                aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100"
-                onClick={() => setIsCollapsed((previous) => !previous)}
-                type="button"
-              >
-                {isCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-              </button>
             </div>
           </div>
           <nav aria-label={navAriaLabel} className="p-0" role="tablist">

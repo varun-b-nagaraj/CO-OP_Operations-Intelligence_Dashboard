@@ -1488,7 +1488,6 @@ export function ProductDashboard() {
         badge: item.id === 'prompts' && promptCount > 0 ? promptCount : undefined
       }))}
       onNavSelect={(id) => setActiveView(id as DashboardView)}
-      sidebarStateKey="product"
       subtitle="School Store Operations Portal"
       title="Product Dashboard"
     >

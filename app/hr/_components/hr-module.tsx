@@ -118,7 +118,6 @@ export function HRModule() {
       }}
       subtitle={resolvedModule === 'hr' ? 'People operations and attendance controls' : 'Sales log and forecast operations'}
       title={resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
-      sidebarStateKey={resolvedModule === 'hr' ? 'hr' : 'cfa'}
     >
       <section className="min-w-0 overflow-x-hidden border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-4">

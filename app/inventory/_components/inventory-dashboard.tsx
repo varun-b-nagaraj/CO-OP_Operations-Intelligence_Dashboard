@@ -983,7 +983,6 @@ export function InventoryDashboard() {
       navAriaLabel="Inventory navigation"
       navItems={TABS.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }))}
       onNavSelect={(id) => setActiveTab(id as TabId)}
-      sidebarStateKey="inventory"
       subtitle="Catalog counting, session sync, and upload workflows"
       title="Inventory Dashboard"
     >
