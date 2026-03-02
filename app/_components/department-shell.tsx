@@ -21,7 +21,7 @@ import {
   Users,
   UserCog
 } from 'lucide-react';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 
 export interface DepartmentShellNavItem {
   id: string;
@@ -141,19 +141,28 @@ export function DepartmentShell({
   onNavSelect,
   children
 }: DepartmentShellProps) {
+  const [isDesktop, setIsDesktop] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  const isCollapsed = !isHovered;
+  const isCollapsed = isDesktop ? !isHovered : false;
+  const activeItem = useMemo(
+    () => navItems.find((item) => item.id === activeNavId) ?? null,
+    [activeNavId, navItems]
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 768px)');
+    const apply = () => setIsDesktop(media.matches);
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, []);
 
   return (
     <main className="min-h-screen w-full overflow-x-hidden text-neutral-900">
-      <div
-        className={`grid min-h-screen w-full grid-cols-1 overflow-hidden border border-neutral-300 bg-white ${
-          isCollapsed ? 'md:grid-cols-[72px_minmax(0,1fr)]' : 'md:grid-cols-[240px_minmax(0,1fr)]'
-        }`}
-      >
+      <div className="relative min-h-screen w-full overflow-hidden border border-neutral-300 bg-white">
         <aside
-          className={`w-full border-b border-neutral-300 bg-white transition-all duration-300 ease-out md:min-h-screen md:border-b-0 md:border-r ${
-            isCollapsed ? 'md:shadow-none' : 'md:shadow-[8px_0_24px_rgba(0,0,0,0.14)]'
+          className={`z-30 w-full border-b border-neutral-300 bg-white transition-[width,box-shadow] duration-300 ease-out md:absolute md:inset-y-0 md:left-0 md:w-16 md:border-b-0 md:border-r ${
+            isCollapsed ? 'md:shadow-none' : 'md:w-60 md:shadow-[10px_0_28px_rgba(0,0,0,0.18)]'
           }`}
           onFocusCapture={() => setIsHovered(true)}
           onMouseEnter={() => setIsHovered(true)}
@@ -200,7 +209,14 @@ export function DepartmentShell({
           </nav>
         </aside>
 
-        <section className="ui-fade-in min-w-0 w-full flex-1 overflow-x-hidden">{children}</section>
+        <section className="ui-fade-in min-w-0 w-full flex-1 overflow-x-hidden md:pl-16">
+          <header className="border-b border-neutral-300 bg-white px-4 py-3">
+            <h2 className="text-sm font-semibold tracking-wide text-neutral-800 md:text-base">
+              {activeItem?.label ?? 'Overview'}
+            </h2>
+          </header>
+          {children}
+        </section>
       </div>
     </main>
   );

@@ -988,11 +988,7 @@ export function InventoryDashboard() {
     >
       <section className="border border-neutral-300 bg-white">
         <header className="border-b border-neutral-300 p-3 sm:p-4">
-          <h2 className="text-lg font-semibold text-neutral-900 sm:text-xl">Inventory Operations</h2>
-          <p className="mt-1 text-xs text-neutral-700 sm:text-sm">
-            Sync pushes local phone counts to backend for this active session. Host sees only this session totals.
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <div className="flex flex-wrap gap-2 text-xs">
             <span className={`border px-2 py-1 ${online ? 'border-emerald-700 text-emerald-700' : 'border-red-700 text-red-700'}`}>
               {online ? 'Online' : 'Offline'}
             </span>

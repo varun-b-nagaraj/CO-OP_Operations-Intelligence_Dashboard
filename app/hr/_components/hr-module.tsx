@@ -120,42 +120,34 @@ export function HRModule() {
       title={resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
     >
       <section className="min-w-0 overflow-x-hidden border border-neutral-300 bg-white">
-        <header className="border-b border-neutral-300 p-4">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-semibold text-neutral-900">{resolvedModule === 'hr' ? 'HR Workspace' : 'CFA Workspace'}</h2>
-              <p className="mt-1 text-sm text-neutral-700">
-                Module view is selected at launch and stays locked on this page.
-              </p>
+        {resolvedModule === 'hr' && resolvedHRTab !== 'schedule' && (
+          <div className="border-b border-neutral-300 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-neutral-700">
+                From
+                <input
+                  className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                  onChange={(event) =>
+                    setGlobalDateRange((previous) => ({ ...previous, from: event.target.value }))
+                  }
+                  type="date"
+                  value={globalDateRange.from}
+                />
+              </label>
+              <label className="text-xs text-neutral-700">
+                To
+                <input
+                  className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                  onChange={(event) =>
+                    setGlobalDateRange((previous) => ({ ...previous, to: event.target.value }))
+                  }
+                  type="date"
+                  value={globalDateRange.to}
+                />
+              </label>
             </div>
-            {resolvedModule === 'hr' && resolvedHRTab !== 'schedule' && (
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="text-xs text-neutral-700">
-                  From
-                  <input
-                    className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) =>
-                      setGlobalDateRange((previous) => ({ ...previous, from: event.target.value }))
-                    }
-                    type="date"
-                    value={globalDateRange.from}
-                  />
-                </label>
-                <label className="text-xs text-neutral-700">
-                  To
-                  <input
-                    className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) =>
-                      setGlobalDateRange((previous) => ({ ...previous, to: event.target.value }))
-                    }
-                    type="date"
-                    value={globalDateRange.to}
-                  />
-                </label>
-              </div>
-            )}
           </div>
-        </header>
+        )}
 
         {resolvedModule === 'hr' ? (
           <section className="min-w-0 overflow-x-hidden" id="module-panel-hr">

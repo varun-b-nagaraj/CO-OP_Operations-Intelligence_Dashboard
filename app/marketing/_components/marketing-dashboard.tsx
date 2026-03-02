@@ -1348,12 +1348,7 @@ export function MarketingDashboard() {
         )}
 
         <header className="border-b border-neutral-300 bg-white px-4 py-4 md:px-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="text-lg font-semibold">Marketing</h1>
-              <p className="mt-1 text-sm text-neutral-600">Manage marketing events, assets, and coordination.</p>
-            </div>
-
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <input
                 className="min-h-[38px] w-[240px] border border-neutral-300 bg-white px-3 text-sm"
