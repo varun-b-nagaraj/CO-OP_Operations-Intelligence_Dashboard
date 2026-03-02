@@ -8,9 +8,11 @@ import type {
   EventContactRow,
   EventNoteRow,
   ExternalContactRow,
+  InternalCoordinatorRow,
   MarketingEventBundle,
   MarketingEventFilters,
   MarketingEventRow,
+  MarketingReportRow,
   MarketingEventStatus
 } from '@/lib/marketing/types';
 
@@ -22,6 +24,12 @@ function asNumber(value: unknown): number | null {
 
 function sanitizePathSegment(value: string) {
   return value.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+function formatDateForSearch(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString();
 }
 
 function mapEvent(row: Record<string, unknown>): MarketingEventRow {
@@ -62,23 +70,46 @@ function mapContact(row: Record<string, unknown>): ExternalContactRow {
     role_title: (row.role_title as string | null) ?? null,
     email: (row.email as string | null) ?? null,
     phone: (row.phone as string | null) ?? null,
+    instagram_handle: (row.instagram_handle as string | null) ?? null,
+    linkedin_url: (row.linkedin_url as string | null) ?? null,
+    other_social: (row.other_social as string | null) ?? null,
+    notes: (row.notes as string | null) ?? null,
+    updated_at: String(row.updated_at ?? new Date().toISOString())
+  };
+}
+
+function mapInternalCoordinator(row: Record<string, unknown>): InternalCoordinatorRow {
+  return {
+    id: String(row.id),
+    full_name: String(row.full_name ?? ''),
+    role_title: (row.role_title as string | null) ?? null,
+    email: (row.email as string | null) ?? null,
+    phone: (row.phone as string | null) ?? null,
+    instagram_handle: (row.instagram_handle as string | null) ?? null,
+    linkedin_url: (row.linkedin_url as string | null) ?? null,
+    other_social: (row.other_social as string | null) ?? null,
     notes: (row.notes as string | null) ?? null,
     updated_at: String(row.updated_at ?? new Date().toISOString())
   };
 }
 
 function mapEventContact(row: Record<string, unknown>): EventContactRow {
-  const joined = row.contact as Record<string, unknown> | null;
+  const joinedRaw = row.contact as Record<string, unknown> | Record<string, unknown>[] | null;
+  const joined = Array.isArray(joinedRaw) ? (joinedRaw[0] ?? null) : joinedRaw;
+  const joinedCoordinatorRaw = row.internal_coordinator as Record<string, unknown> | Record<string, unknown>[] | null;
+  const joinedCoordinator = Array.isArray(joinedCoordinatorRaw) ? (joinedCoordinatorRaw[0] ?? null) : joinedCoordinatorRaw;
   return {
     id: String(row.id),
     event_id: String(row.event_id),
     contact_id: (row.contact_id as string | null) ?? null,
+    internal_coordinator_id: (row.internal_coordinator_id as string | null) ?? null,
     is_internal: Boolean(row.is_internal),
     coordinator_name: (row.coordinator_name as string | null) ?? null,
     coordinator_role: (row.coordinator_role as string | null) ?? null,
     coordinator_contact: (row.coordinator_contact as string | null) ?? null,
     coordinator_notes: (row.coordinator_notes as string | null) ?? null,
-    contact: joined ? mapContact(joined) : null
+    contact: joined ? mapContact(joined) : null,
+    internal_coordinator: joinedCoordinator ? mapInternalCoordinator(joinedCoordinator) : null
   };
 }
 
@@ -122,6 +153,27 @@ function mapCoordination(row: Record<string, unknown>): CoordinationLogRow {
   };
 }
 
+function mapReport(row: Record<string, unknown>): MarketingReportRow {
+  const linked = row.linked_event as
+    | { id?: string | null; title?: string | null; starts_at?: string | null }
+    | Array<{ id?: string | null; title?: string | null; starts_at?: string | null }>
+    | null;
+  const joined = Array.isArray(linked) ? (linked[0] ?? null) : linked;
+  return {
+    id: String(row.id),
+    title: String(row.title ?? ''),
+    category: (row.category as string | null) ?? null,
+    report_date: String(row.report_date ?? new Date().toISOString().slice(0, 10)),
+    notes: (row.notes as string | null) ?? null,
+    perceived_impact: (row.perceived_impact as string | null) ?? null,
+    optional_cost: asNumber(row.optional_cost),
+    linked_event_id: (row.linked_event_id as string | null) ?? null,
+    linked_event_title: joined?.title ?? null,
+    linked_event_starts_at: joined?.starts_at ?? null,
+    updated_at: String(row.updated_at ?? new Date().toISOString())
+  };
+}
+
 interface SaveEventInput {
   id?: string;
   title: string;
@@ -149,14 +201,28 @@ interface SaveEventInput {
   cover_asset_id: string | null;
 }
 
+interface SaveReportInput {
+  id?: string;
+  title: string;
+  category: string | null;
+  report_date: string;
+  notes: string | null;
+  perceived_impact: string | null;
+  optional_cost: number | null;
+  linked_event_id: string | null;
+}
+
 export interface MarketingRepository {
   listEvents(filters: MarketingEventFilters): Promise<MarketingEventRow[]>;
+  searchEvents(query: string): Promise<MarketingEventRow[]>;
   listContacts(query: string): Promise<ExternalContactRow[]>;
+  listInternalCoordinators(query: string): Promise<InternalCoordinatorRow[]>;
   listEventIndicators(
     eventIds: string[]
   ): Promise<Record<string, { assets: number; internalContacts: number; externalContacts: number }>>;
   listEventSearchIndex(eventIds: string[]): Promise<Record<string, { external: string; internal: string }>>;
   listLinkedEventIdsForContact(contactId: string): Promise<string[]>;
+  listLinkedEventIdsForInternalCoordinator(internalCoordinatorId: string): Promise<string[]>;
   getEventBundle(eventId: string): Promise<MarketingEventBundle>;
   saveEvent(input: SaveEventInput): Promise<MarketingEventRow>;
   deleteEvent(eventId: string): Promise<void>;
@@ -169,6 +235,7 @@ export interface MarketingRepository {
     coordinatorNotes?: string | null;
   }): Promise<EventContactRow>;
   linkExternalContact(input: { eventId: string; contactId: string }): Promise<EventContactRow>;
+  linkInternalCoordinator(input: { eventId: string; internalCoordinatorId: string }): Promise<EventContactRow>;
   unlinkEventContact(eventContactId: string): Promise<void>;
   addEventNote(input: { eventId: string; note: string; author?: string | null }): Promise<EventNoteRow>;
   addCoordinationLog(input: {
@@ -182,13 +249,19 @@ export interface MarketingRepository {
   }): Promise<CoordinationLogRow>;
   uploadAsset(input: { eventId: string; file: File; assetType: AssetType; caption?: string | null }): Promise<EventAssetRow>;
   setCoverAsset(input: { eventId: string; assetId: string }): Promise<void>;
+  saveInternalCoordinator(
+    input: Partial<InternalCoordinatorRow> & {
+      full_name: string;
+    }
+  ): Promise<InternalCoordinatorRow>;
+  saveReport(input: SaveReportInput): Promise<MarketingReportRow>;
+  deleteReport(reportId: string): Promise<void>;
   listReportRows(input: {
     query: string;
     dateFrom?: string;
     dateTo?: string;
     category?: string;
-    status?: 'all' | MarketingEventStatus;
-  }): Promise<MarketingEventRow[]>;
+  }): Promise<MarketingReportRow[]>;
 }
 
 export function createMarketingRepository(supabase: SupabaseClient): MarketingRepository {
@@ -217,6 +290,29 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       return ((data ?? []) as Record<string, unknown>[]).map(mapEvent);
     },
 
+    async searchEvents(query) {
+      const { data, error } = await supabase.from('marketing_events').select('*').order('starts_at', { ascending: false }).limit(300);
+      if (error) throw error;
+      const allRows = ((data ?? []) as Record<string, unknown>[]).map(mapEvent);
+      const trimmed = query.trim().toLowerCase();
+      if (!trimmed) return allRows.slice(0, 50);
+      return allRows
+        .filter((row) =>
+          [
+            row.title,
+            row.category ?? '',
+            row.location ?? '',
+            row.description ?? '',
+            row.starts_at,
+            formatDateForSearch(row.starts_at)
+          ]
+            .join(' ')
+            .toLowerCase()
+            .includes(trimmed)
+        )
+        .slice(0, 50);
+    },
+
     async listContacts(query) {
       let request = supabase
         .from('external_contacts')
@@ -232,6 +328,24 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       const { data, error } = await request;
       if (error) throw error;
       return ((data ?? []) as Record<string, unknown>[]).map(mapContact);
+    },
+
+    async listInternalCoordinators(query) {
+      let request = supabase
+        .from('internal_coordinators')
+        .select('*')
+        .order('full_name', { ascending: true });
+
+      if (query.trim()) {
+        const escaped = query.trim().replaceAll(',', ' ');
+        request = request.or(
+          `full_name.ilike.%${escaped}%,role_title.ilike.%${escaped}%,email.ilike.%${escaped}%,phone.ilike.%${escaped}%,notes.ilike.%${escaped}%`
+        );
+      }
+
+      const { data, error } = await request;
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(mapInternalCoordinator);
     },
 
     async listEventIndicators(eventIds) {
@@ -268,7 +382,9 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       if (!eventIds.length) return {};
       const { data, error } = await supabase
         .from('event_contacts')
-        .select('event_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,contact:external_contacts(organization,person_name,role_title,email,phone)')
+        .select(
+          'event_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,contact:external_contacts(organization,person_name,role_title,email,phone),internal_coordinator:internal_coordinators(full_name,role_title,email,phone)'
+        )
         .in('event_id', eventIds);
       if (error) throw error;
 
@@ -284,6 +400,20 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
           coordinator_name: string | null;
           coordinator_role: string | null;
           coordinator_contact: string | null;
+          internal_coordinator:
+            | {
+                full_name: string | null;
+                role_title: string | null;
+                email: string | null;
+                phone: string | null;
+              }
+            | Array<{
+                full_name: string | null;
+                role_title: string | null;
+                email: string | null;
+                phone: string | null;
+              }>
+            | null;
           contact:
             | {
                 organization: string | null;
@@ -304,11 +434,16 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       ).forEach((row) => {
         if (!output[row.event_id]) output[row.event_id] = { external: '', internal: '' };
         const joined = Array.isArray(row.contact) ? (row.contact[0] ?? null) : row.contact;
+        const joinedCoordinator = Array.isArray(row.internal_coordinator)
+          ? (row.internal_coordinator[0] ?? null)
+          : row.internal_coordinator;
         if (row.is_internal) {
           output[row.event_id].internal = [
             output[row.event_id].internal,
-            row.coordinator_name ?? '',
-            row.coordinator_role ?? '',
+            joinedCoordinator?.full_name ?? row.coordinator_name ?? '',
+            joinedCoordinator?.role_title ?? row.coordinator_role ?? '',
+            joinedCoordinator?.email ?? '',
+            joinedCoordinator?.phone ?? '',
             row.coordinator_contact ?? ''
           ]
             .join(' ')
@@ -336,13 +471,22 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       return ((data ?? []) as Array<{ event_id: string }>).map((row) => row.event_id);
     },
 
+    async listLinkedEventIdsForInternalCoordinator(internalCoordinatorId) {
+      const { data, error } = await supabase
+        .from('event_contacts')
+        .select('event_id')
+        .eq('internal_coordinator_id', internalCoordinatorId);
+      if (error) throw error;
+      return ((data ?? []) as Array<{ event_id: string }>).map((row) => row.event_id);
+    },
+
     async getEventBundle(eventId) {
       const [eventResult, eventContactsResult, assetsResult, notesResult, coordinationResult] = await Promise.all([
         supabase.from('marketing_events').select('*').eq('id', eventId).single(),
         supabase
           .from('event_contacts')
           .select(
-            'id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,notes,updated_at)'
+            'id,event_id,contact_id,internal_coordinator_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,instagram_handle,linkedin_url,other_social,notes,updated_at),internal_coordinator:internal_coordinators(id,full_name,role_title,email,phone,instagram_handle,linkedin_url,other_social,notes,updated_at)'
           )
           .eq('event_id', eventId)
           .order('created_at', { ascending: false }),
@@ -413,6 +557,9 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
         role_title: input.role_title ?? null,
         email: input.email ?? null,
         phone: input.phone ?? null,
+        instagram_handle: input.instagram_handle ?? null,
+        linkedin_url: input.linkedin_url ?? null,
+        other_social: input.other_social ?? null,
         notes: input.notes ?? null,
         updated_by: 'dashboard'
       };
@@ -446,9 +593,30 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
           event_id: input.eventId,
           contact_id: input.contactId,
           is_internal: false
-        })
+        }, { onConflict: 'event_id,contact_id' })
         .select(
-          'id,event_id,contact_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,notes,updated_at)'
+          'id,event_id,contact_id,internal_coordinator_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,instagram_handle,linkedin_url,other_social,notes,updated_at),internal_coordinator:internal_coordinators(id,full_name,role_title,email,phone,instagram_handle,linkedin_url,other_social,notes,updated_at)'
+        )
+        .single();
+      if (error) throw error;
+      return mapEventContact((data ?? {}) as Record<string, unknown>);
+    },
+
+    async linkInternalCoordinator(input) {
+      const { data, error } = await supabase
+        .from('event_contacts')
+        .upsert({
+          event_id: input.eventId,
+          internal_coordinator_id: input.internalCoordinatorId,
+          is_internal: true,
+          contact_id: null,
+          coordinator_name: null,
+          coordinator_role: null,
+          coordinator_contact: null,
+          coordinator_notes: null
+        }, { onConflict: 'event_id,internal_coordinator_id' })
+        .select(
+          'id,event_id,contact_id,internal_coordinator_id,is_internal,coordinator_name,coordinator_role,coordinator_contact,coordinator_notes,contact:external_contacts(id,organization,person_name,role_title,email,phone,instagram_handle,linkedin_url,other_social,notes,updated_at),internal_coordinator:internal_coordinators(id,full_name,role_title,email,phone,instagram_handle,linkedin_url,other_social,notes,updated_at)'
         )
         .single();
       if (error) throw error;
@@ -535,36 +703,78 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       if (eventError) throw eventError;
     },
 
+    async saveInternalCoordinator(input) {
+      const payload = {
+        id: input.id,
+        full_name: input.full_name,
+        role_title: input.role_title ?? null,
+        email: input.email ?? null,
+        phone: input.phone ?? null,
+        instagram_handle: input.instagram_handle ?? null,
+        linkedin_url: input.linkedin_url ?? null,
+        other_social: input.other_social ?? null,
+        notes: input.notes ?? null,
+        updated_by: 'dashboard'
+      };
+
+      const { data, error } = await supabase.from('internal_coordinators').upsert(payload).select('*').single();
+      if (error) throw error;
+      return mapInternalCoordinator((data ?? {}) as Record<string, unknown>);
+    },
+
+    async saveReport(input) {
+      const payload = {
+        id: input.id,
+        title: input.title,
+        category: input.category,
+        report_date: input.report_date,
+        notes: input.notes,
+        perceived_impact: input.perceived_impact,
+        optional_cost: input.optional_cost,
+        linked_event_id: input.linked_event_id,
+        updated_by: 'dashboard'
+      };
+
+      const { data, error } = await supabase
+        .from('marketing_reports')
+        .upsert(payload)
+        .select('id,title,category,report_date,notes,perceived_impact,optional_cost,linked_event_id,updated_at,linked_event:marketing_events(id,title,starts_at)')
+        .single();
+      if (error) throw error;
+      return mapReport((data ?? {}) as Record<string, unknown>);
+    },
+
+    async deleteReport(reportId) {
+      const { error } = await supabase.from('marketing_reports').delete().eq('id', reportId);
+      if (error) throw error;
+    },
+
     async listReportRows(input) {
       let request = supabase
-        .from('marketing_events')
-        .select('*')
-        .order('starts_at', { ascending: false });
-
-      if (input.status && input.status !== 'all') {
-        request = request.eq('status', input.status);
-      }
+        .from('marketing_reports')
+        .select('id,title,category,report_date,notes,perceived_impact,optional_cost,linked_event_id,updated_at,linked_event:marketing_events(id,title,starts_at)')
+        .order('report_date', { ascending: false });
 
       if (input.category && input.category !== 'all') {
         request = request.eq('category', input.category);
       }
 
       if (input.dateFrom) {
-        request = request.gte('starts_at', `${input.dateFrom}T00:00:00`);
+        request = request.gte('report_date', input.dateFrom);
       }
 
       if (input.dateTo) {
-        request = request.lte('starts_at', `${input.dateTo}T23:59:59.999`);
+        request = request.lte('report_date', input.dateTo);
       }
 
       if (input.query.trim()) {
         const escaped = input.query.trim().replaceAll(',', ' ');
-        request = request.or(`title.ilike.%${escaped}%,category.ilike.%${escaped}%`);
+        request = request.or(`title.ilike.%${escaped}%,category.ilike.%${escaped}%,notes.ilike.%${escaped}%,perceived_impact.ilike.%${escaped}%`);
       }
 
       const { data, error } = await request;
       if (error) throw error;
-      return ((data ?? []) as Record<string, unknown>[]).map(mapEvent);
+      return ((data ?? []) as Record<string, unknown>[]).map(mapReport);
     }
   };
 }

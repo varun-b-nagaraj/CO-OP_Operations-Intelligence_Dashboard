@@ -11,21 +11,25 @@ import type {
   EventContactRow,
   EventNoteRow,
   ExternalContactRow,
+  InternalCoordinatorRow,
   MarketingEventBundle,
   MarketingEventRow,
+  MarketingReportRow,
   MarketingEventStatus
 } from '@/lib/marketing/types';
 import { createBrowserClient } from '@/lib/supabase';
 
-type DashboardTab = 'calendar' | 'events' | 'contacts' | 'reports';
+type DashboardTab = 'calendar' | 'events' | 'contacts' | 'coordinators' | 'reports';
 type CalendarView = 'month' | 'list';
 
 type EventDraft = MarketingEventRow;
+type ReportDraft = MarketingReportRow;
 
 const TABS: Array<{ id: DashboardTab; label: string }> = [
   { id: 'calendar', label: 'Calendar' },
   { id: 'events', label: 'Events' },
   { id: 'contacts', label: 'Contacts' },
+  { id: 'coordinators', label: 'Coordinators' },
   { id: 'reports', label: 'Reports' }
 ];
 
@@ -109,11 +113,6 @@ function parseIntegerInput(value: string): number | null {
   if (!value.trim()) return null;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function getPrimaryEventLink(event: MarketingEventRow): string | null {
-  const first = event.links.find((entry) => entry.trim().length > 0);
-  return first ?? null;
 }
 
 function toCsvCell(value: string) {
@@ -214,7 +213,7 @@ export function MarketingDashboard() {
 
   const [events, setEvents] = useState<MarketingEventRow[]>([]);
   const [contacts, setContacts] = useState<ExternalContactRow[]>([]);
-  const [reports, setReports] = useState<MarketingEventRow[]>([]);
+  const [reports, setReports] = useState<MarketingReportRow[]>([]);
   const [eventIndicators, setEventIndicators] = useState<
     Record<string, { assets: number; internalContacts: number; externalContacts: number }>
   >({});
@@ -234,21 +233,7 @@ export function MarketingDashboard() {
   const autosaveRef = useRef<number | null>(null);
 
   const [linksInput, setLinksInput] = useState('');
-  const [newInternalCoordinator, setNewInternalCoordinator] = useState({
-    coordinatorName: '',
-    coordinatorRole: '',
-    coordinatorContact: '',
-    coordinatorNotes: ''
-  });
-  const [newContactDraft, setNewContactDraft] = useState({
-    organization: '',
-    person_name: '',
-    role_title: '',
-    email: '',
-    phone: '',
-    notes: ''
-  });
-  const [selectedContactToLink, setSelectedContactToLink] = useState('');
+  const [eventContactSearch, setEventContactSearch] = useState('');
 
   const [newNote, setNewNote] = useState('');
   const [newCoordination, setNewCoordination] = useState({
@@ -262,20 +247,46 @@ export function MarketingDashboard() {
   const [contactSearch, setContactSearch] = useState('');
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [selectedContactEventIds, setSelectedContactEventIds] = useState<string[]>([]);
+  const [contactPanelOpen, setContactPanelOpen] = useState(false);
+  const [contactEventToLink, setContactEventToLink] = useState('');
   const [contactDraft, setContactDraft] = useState({
     organization: '',
     person_name: '',
     role_title: '',
     email: '',
     phone: '',
+    instagram_handle: '',
+    linkedin_url: '',
+    other_social: '',
+    notes: ''
+  });
+
+  const [internalCoordinators, setInternalCoordinators] = useState<InternalCoordinatorRow[]>([]);
+  const [internalCoordinatorSearch, setInternalCoordinatorSearch] = useState('');
+  const [selectedInternalCoordinatorId, setSelectedInternalCoordinatorId] = useState<string | null>(null);
+  const [selectedInternalCoordinatorEventIds, setSelectedInternalCoordinatorEventIds] = useState<string[]>([]);
+  const [coordinatorPanelOpen, setCoordinatorPanelOpen] = useState(false);
+  const [coordinatorEventToLink, setCoordinatorEventToLink] = useState('');
+  const [internalCoordinatorDraft, setInternalCoordinatorDraft] = useState({
+    full_name: '',
+    role_title: '',
+    email: '',
+    phone: '',
+    instagram_handle: '',
+    linkedin_url: '',
+    other_social: '',
     notes: ''
   });
 
   const [reportSearch, setReportSearch] = useState('');
   const [reportDateFrom, setReportDateFrom] = useState('');
   const [reportDateTo, setReportDateTo] = useState('');
-  const [reportStatusFilter, setReportStatusFilter] = useState<'all' | MarketingEventStatus>('all');
   const [reportCategoryFilter, setReportCategoryFilter] = useState<string>('all');
+  const [reportEditorOpen, setReportEditorOpen] = useState(false);
+  const [reportDraft, setReportDraft] = useState<ReportDraft | null>(null);
+  const [reportLinkSearch, setReportLinkSearch] = useState('');
+  const [reportLinkResults, setReportLinkResults] = useState<MarketingEventRow[]>([]);
+  const [savingReport, setSavingReport] = useState(false);
   const [eventDateFrom, setEventDateFrom] = useState('');
   const [eventDateTo, setEventDateTo] = useState('');
   const [eventSort, setEventSort] = useState<'upcoming' | 'recently_updated' | 'recently_completed'>('upcoming');
@@ -307,28 +318,40 @@ export function MarketingDashboard() {
     return events.filter((event) => idSet.has(event.id));
   }, [events, selectedContact, selectedContactEventIds]);
 
+  const selectedInternalCoordinator = useMemo(() => {
+    if (!selectedInternalCoordinatorId) return null;
+    return internalCoordinators.find((entry) => entry.id === selectedInternalCoordinatorId) ?? null;
+  }, [internalCoordinators, selectedInternalCoordinatorId]);
+
+  const selectedInternalCoordinatorLinkedEvents = useMemo(() => {
+    if (!selectedInternalCoordinator) return [];
+    const idSet = new Set(selectedInternalCoordinatorEventIds);
+    return events.filter((event) => idSet.has(event.id));
+  }, [events, selectedInternalCoordinator, selectedInternalCoordinatorEventIds]);
+
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [eventRows, contactRows, reportRows] = await Promise.all([
+      const [eventRows, contactRows, coordinatorRows, reportRows] = await Promise.all([
         repository.listEvents({
           query: '',
           status: statusFilter,
           category: categoryFilter
         }),
         repository.listContacts(contactSearch),
+        repository.listInternalCoordinators(internalCoordinatorSearch),
         repository.listReportRows({
           query: reportSearch,
           dateFrom: reportDateFrom || undefined,
           dateTo: reportDateTo || undefined,
-          category: reportCategoryFilter,
-          status: reportStatusFilter
+          category: reportCategoryFilter
         })
       ]);
 
       setEvents(eventRows);
       setContacts(contactRows);
+      setInternalCoordinators(coordinatorRows);
       setReports(reportRows);
       if (eventRows.length) {
         const [indicators, searchIndex] = await Promise.all([
@@ -345,6 +368,9 @@ export function MarketingDashboard() {
       if (selectedContactId && !contactRows.some((entry) => entry.id === selectedContactId)) {
         setSelectedContactId(contactRows[0]?.id ?? null);
       }
+      if (selectedInternalCoordinatorId && !coordinatorRows.some((entry) => entry.id === selectedInternalCoordinatorId)) {
+        setSelectedInternalCoordinatorId(coordinatorRows[0]?.id ?? null);
+      }
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Failed to load marketing dashboard.';
       setError(message);
@@ -356,12 +382,13 @@ export function MarketingDashboard() {
     statusFilter,
     categoryFilter,
     contactSearch,
+    internalCoordinatorSearch,
     reportSearch,
     reportDateFrom,
     reportDateTo,
     reportCategoryFilter,
-    reportStatusFilter,
-    selectedContactId
+    selectedContactId,
+    selectedInternalCoordinatorId
   ]);
 
   useEffect(() => {
@@ -385,6 +412,22 @@ export function MarketingDashboard() {
   }, [repository, selectedContactId]);
 
   useEffect(() => {
+    const run = async () => {
+      if (!selectedInternalCoordinatorId) {
+        setSelectedInternalCoordinatorEventIds([]);
+        return;
+      }
+      try {
+        const linked = await repository.listLinkedEventIdsForInternalCoordinator(selectedInternalCoordinatorId);
+        setSelectedInternalCoordinatorEventIds(linked);
+      } catch {
+        setSelectedInternalCoordinatorEventIds([]);
+      }
+    };
+    void run();
+  }, [repository, selectedInternalCoordinatorId]);
+
+  useEffect(() => {
     if (!selectedContact) {
       setContactDraft({
         organization: '',
@@ -392,6 +435,9 @@ export function MarketingDashboard() {
         role_title: '',
         email: '',
         phone: '',
+        instagram_handle: '',
+        linkedin_url: '',
+        other_social: '',
         notes: ''
       });
       return;
@@ -402,9 +448,56 @@ export function MarketingDashboard() {
       role_title: selectedContact.role_title ?? '',
       email: selectedContact.email ?? '',
       phone: selectedContact.phone ?? '',
+      instagram_handle: selectedContact.instagram_handle ?? '',
+      linkedin_url: selectedContact.linkedin_url ?? '',
+      other_social: selectedContact.other_social ?? '',
       notes: selectedContact.notes ?? ''
     });
   }, [selectedContact]);
+
+  useEffect(() => {
+    if (!selectedInternalCoordinator) {
+      setInternalCoordinatorDraft({
+        full_name: '',
+        role_title: '',
+        email: '',
+        phone: '',
+        instagram_handle: '',
+        linkedin_url: '',
+        other_social: '',
+        notes: ''
+      });
+      return;
+    }
+    setInternalCoordinatorDraft({
+      full_name: selectedInternalCoordinator.full_name,
+      role_title: selectedInternalCoordinator.role_title ?? '',
+      email: selectedInternalCoordinator.email ?? '',
+      phone: selectedInternalCoordinator.phone ?? '',
+      instagram_handle: selectedInternalCoordinator.instagram_handle ?? '',
+      linkedin_url: selectedInternalCoordinator.linkedin_url ?? '',
+      other_social: selectedInternalCoordinator.other_social ?? '',
+      notes: selectedInternalCoordinator.notes ?? ''
+    });
+  }, [selectedInternalCoordinator]);
+
+  useEffect(() => {
+    if (!reportEditorOpen) return;
+    const trimmed = reportLinkSearch.trim();
+    if (!trimmed) {
+      setReportLinkResults([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void repository
+        .searchEvents(trimmed)
+        .then((rows) => setReportLinkResults(rows))
+        .catch(() => setReportLinkResults([]));
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [reportEditorOpen, reportLinkSearch, repository]);
 
   const loadEventBundle = useCallback(
     async (eventId: string) => {
@@ -415,9 +508,9 @@ export function MarketingDashboard() {
         setEventBundle(bundle);
         setEventDraft(bundle.event);
         setLinksInput(bundle.event.links.join('\n'));
+        setEventContactSearch('');
         setSelectedEventId(eventId);
         setDrawerOpen(true);
-        setSelectedContactToLink('');
       } catch (bundleError) {
         const message = bundleError instanceof Error ? bundleError.message : 'Unable to open event details.';
         setError(message);
@@ -479,52 +572,24 @@ export function MarketingDashboard() {
   );
 
   const createReport = useCallback(async () => {
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const start = new Date();
-      start.setHours(9, 0, 0, 0);
-      const end = new Date(start);
-      end.setHours(11, 0, 0, 0);
-
-      const created = await repository.saveEvent({
-        title: 'New Report',
-        status: 'completed',
-        category: null,
-        starts_at: start.toISOString(),
-        ends_at: end.toISOString(),
-        location: null,
-        description: null,
-        goals: null,
-        target_audience: null,
-        budget_planned: null,
-        budget_actual: null,
-        supplies_needed: null,
-        links: [],
-        outcome_summary: null,
-        what_worked: null,
-        what_didnt: null,
-        recommendations: null,
-        estimated_interactions: null,
-        units_sold: null,
-        revenue_impact: null,
-        engagement_notes: null,
-        cost_roi_notes: null,
-        cover_asset_id: null
-      });
-
-      setEvents((prev) => [created, ...prev]);
-      setReports((prev) => [created, ...prev]);
-      setNotice('Report created.');
-      await loadEventBundle(created.id);
-    } catch (createError) {
-      const message = createError instanceof Error ? createError.message : 'Failed to create report.';
-      setError(message);
-    } finally {
-      setSaving(false);
-    }
-  }, [loadEventBundle, repository]);
+    const today = new Date().toISOString().slice(0, 10);
+    setReportDraft({
+      id: '',
+      title: 'New Report',
+      category: null,
+      report_date: today,
+      notes: null,
+      perceived_impact: null,
+      optional_cost: null,
+      linked_event_id: null,
+      linked_event_title: null,
+      linked_event_starts_at: null,
+      updated_at: new Date().toISOString()
+    });
+    setReportLinkSearch('');
+    setReportLinkResults([]);
+    setReportEditorOpen(true);
+  }, []);
 
   const commitAutosave = useCallback(
     async (draft: EventDraft) => {
@@ -634,66 +699,30 @@ export function MarketingDashboard() {
     void onAssetFilesSelected(event.dataTransfer.files);
   };
 
-  const addInternalCoordinator = async () => {
-    if (!selectedEventId || !newInternalCoordinator.coordinatorName.trim()) return;
-
-    try {
-      const row = await repository.addInternalCoordinator({
-        eventId: selectedEventId,
-        coordinatorName: newInternalCoordinator.coordinatorName.trim(),
-        coordinatorRole: newInternalCoordinator.coordinatorRole.trim() || null,
-        coordinatorContact: newInternalCoordinator.coordinatorContact.trim() || null,
-        coordinatorNotes: newInternalCoordinator.coordinatorNotes.trim() || null
-      });
-      setEventBundle((prev) => (prev ? { ...prev, eventContacts: [row, ...prev.eventContacts] } : prev));
-      setNewInternalCoordinator({ coordinatorName: '', coordinatorRole: '', coordinatorContact: '', coordinatorNotes: '' });
-    } catch (coordinatorError) {
-      const message = coordinatorError instanceof Error ? coordinatorError.message : 'Unable to add coordinator.';
-      setError(message);
-    }
-  };
-
-  const createAndLinkContact = async () => {
-    if (!selectedEventId || !newContactDraft.organization.trim() || !newContactDraft.person_name.trim()) return;
-
-    try {
-      const created = await repository.saveContact({
-        organization: newContactDraft.organization.trim(),
-        person_name: newContactDraft.person_name.trim(),
-        role_title: newContactDraft.role_title.trim() || null,
-        email: newContactDraft.email.trim() || null,
-        phone: newContactDraft.phone.trim() || null,
-        notes: newContactDraft.notes.trim() || null
-      });
-
-      const linked = await repository.linkExternalContact({
-        eventId: selectedEventId,
-        contactId: created.id
-      });
-
-      setContacts((prev) => {
-        const exists = prev.some((entry) => entry.id === created.id);
-        return exists ? prev : [created, ...prev];
-      });
-      setEventBundle((prev) => (prev ? { ...prev, eventContacts: [linked, ...prev.eventContacts] } : prev));
-      setNewContactDraft({ organization: '', person_name: '', role_title: '', email: '', phone: '', notes: '' });
-    } catch (contactError) {
-      const message = contactError instanceof Error ? contactError.message : 'Unable to create contact.';
-      setError(message);
-    }
-  };
-
-  const linkExistingContact = async () => {
-    if (!selectedEventId || !selectedContactToLink) return;
+  const linkExternalContactToEvent = async (contactId: string) => {
+    if (!selectedEventId || !contactId) return;
     try {
       const linked = await repository.linkExternalContact({
         eventId: selectedEventId,
-        contactId: selectedContactToLink
+        contactId
       });
       setEventBundle((prev) => (prev ? { ...prev, eventContacts: [linked, ...prev.eventContacts] } : prev));
-      setSelectedContactToLink('');
     } catch (linkError) {
       const message = linkError instanceof Error ? linkError.message : 'Unable to link contact.';
+      setError(message);
+    }
+  };
+
+  const linkInternalCoordinatorToEvent = async (internalCoordinatorId: string) => {
+    if (!selectedEventId || !internalCoordinatorId) return;
+    try {
+      const linked = await repository.linkInternalCoordinator({
+        eventId: selectedEventId,
+        internalCoordinatorId
+      });
+      setEventBundle((prev) => (prev ? { ...prev, eventContacts: [linked, ...prev.eventContacts] } : prev));
+    } catch (linkError) {
+      const message = linkError instanceof Error ? linkError.message : 'Unable to link coordinator.';
       setError(message);
     }
   };
@@ -865,6 +894,9 @@ export function MarketingDashboard() {
         role_title: contactDraft.role_title.trim() || null,
         email: contactDraft.email.trim() || null,
         phone: contactDraft.phone.trim() || null,
+        instagram_handle: contactDraft.instagram_handle.trim() || null,
+        linkedin_url: contactDraft.linkedin_url.trim() || null,
+        other_social: contactDraft.other_social.trim() || null,
         notes: contactDraft.notes.trim() || null
       });
       setContacts((prev) => prev.map((entry) => (entry.id === saved.id ? saved : entry)));
@@ -884,6 +916,9 @@ export function MarketingDashboard() {
         role_title: contactDraft.role_title.trim() || null,
         email: contactDraft.email.trim() || null,
         phone: contactDraft.phone.trim() || null,
+        instagram_handle: contactDraft.instagram_handle.trim() || null,
+        linkedin_url: contactDraft.linkedin_url.trim() || null,
+        other_social: contactDraft.other_social.trim() || null,
         notes: contactDraft.notes.trim() || null
       });
       setContacts((prev) => [created, ...prev]);
@@ -895,21 +930,152 @@ export function MarketingDashboard() {
     }
   };
 
+  const saveSelectedInternalCoordinator = async () => {
+    if (!selectedInternalCoordinatorId || !internalCoordinatorDraft.full_name.trim()) return;
+    try {
+      const saved = await repository.saveInternalCoordinator({
+        id: selectedInternalCoordinatorId,
+        full_name: internalCoordinatorDraft.full_name.trim(),
+        role_title: internalCoordinatorDraft.role_title.trim() || null,
+        email: internalCoordinatorDraft.email.trim() || null,
+        phone: internalCoordinatorDraft.phone.trim() || null,
+        instagram_handle: internalCoordinatorDraft.instagram_handle.trim() || null,
+        linkedin_url: internalCoordinatorDraft.linkedin_url.trim() || null,
+        other_social: internalCoordinatorDraft.other_social.trim() || null,
+        notes: internalCoordinatorDraft.notes.trim() || null
+      });
+      setInternalCoordinators((prev) => prev.map((entry) => (entry.id === saved.id ? saved : entry)));
+      setNotice('Coordinator saved.');
+    } catch (coordinatorError) {
+      const message = coordinatorError instanceof Error ? coordinatorError.message : 'Unable to save coordinator.';
+      setError(message);
+    }
+  };
+
+  const createInternalCoordinatorFromPanel = async () => {
+    if (!internalCoordinatorDraft.full_name.trim()) return;
+    try {
+      const created = await repository.saveInternalCoordinator({
+        full_name: internalCoordinatorDraft.full_name.trim(),
+        role_title: internalCoordinatorDraft.role_title.trim() || null,
+        email: internalCoordinatorDraft.email.trim() || null,
+        phone: internalCoordinatorDraft.phone.trim() || null,
+        instagram_handle: internalCoordinatorDraft.instagram_handle.trim() || null,
+        linkedin_url: internalCoordinatorDraft.linkedin_url.trim() || null,
+        other_social: internalCoordinatorDraft.other_social.trim() || null,
+        notes: internalCoordinatorDraft.notes.trim() || null
+      });
+      setInternalCoordinators((prev) => [created, ...prev]);
+      setSelectedInternalCoordinatorId(created.id);
+      setNotice('Coordinator created.');
+    } catch (coordinatorError) {
+      const message = coordinatorError instanceof Error ? coordinatorError.message : 'Unable to create coordinator.';
+      setError(message);
+    }
+  };
+
+  const linkSelectedContactToEvent = async () => {
+    if (!selectedContactId || !contactEventToLink) return;
+    try {
+      await repository.linkExternalContact({ eventId: contactEventToLink, contactId: selectedContactId });
+      setContactEventToLink('');
+      const linked = await repository.listLinkedEventIdsForContact(selectedContactId);
+      setSelectedContactEventIds(linked);
+      setNotice('Contact linked to event.');
+    } catch (linkError) {
+      const message = linkError instanceof Error ? linkError.message : 'Unable to link contact to event.';
+      setError(message);
+    }
+  };
+
+  const linkSelectedCoordinatorToEvent = async () => {
+    if (!selectedInternalCoordinatorId || !coordinatorEventToLink) return;
+    try {
+      await repository.linkInternalCoordinator({
+        eventId: coordinatorEventToLink,
+        internalCoordinatorId: selectedInternalCoordinatorId
+      });
+      setCoordinatorEventToLink('');
+      const linked = await repository.listLinkedEventIdsForInternalCoordinator(selectedInternalCoordinatorId);
+      setSelectedInternalCoordinatorEventIds(linked);
+      setNotice('Coordinator linked to event.');
+    } catch (linkError) {
+      const message = linkError instanceof Error ? linkError.message : 'Unable to link coordinator to event.';
+      setError(message);
+    }
+  };
+
+  const openReportEditor = (report: MarketingReportRow) => {
+    setReportDraft(report);
+    setReportLinkSearch('');
+    setReportLinkResults([]);
+    setReportEditorOpen(true);
+  };
+
+  const saveReportDraft = async () => {
+    if (!reportDraft || !reportDraft.title.trim()) return;
+    setSavingReport(true);
+    setError(null);
+    try {
+      const saved = await repository.saveReport({
+        id: reportDraft.id || undefined,
+        title: reportDraft.title.trim(),
+        category: reportDraft.category?.trim() || null,
+        report_date: reportDraft.report_date,
+        notes: reportDraft.notes?.trim() || null,
+        perceived_impact: reportDraft.perceived_impact?.trim() || null,
+        optional_cost: reportDraft.optional_cost,
+        linked_event_id: reportDraft.linked_event_id
+      });
+      setReports((prev) => {
+        const exists = prev.some((entry) => entry.id === saved.id);
+        if (exists) return prev.map((entry) => (entry.id === saved.id ? saved : entry));
+        return [saved, ...prev];
+      });
+      setReportDraft(saved);
+      setNotice('Report saved.');
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : 'Failed to save report.';
+      setError(message);
+    } finally {
+      setSavingReport(false);
+    }
+  };
+
+  const deleteReportDraft = async () => {
+    if (!reportDraft?.id) {
+      setReportEditorOpen(false);
+      setReportDraft(null);
+      return;
+    }
+    const confirmed = window.confirm(`Delete report "${reportDraft.title}"?`);
+    if (!confirmed) return;
+    setSavingReport(true);
+    try {
+      await repository.deleteReport(reportDraft.id);
+      setReports((prev) => prev.filter((entry) => entry.id !== reportDraft.id));
+      setReportEditorOpen(false);
+      setReportDraft(null);
+      setNotice('Report deleted.');
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : 'Failed to delete report.';
+      setError(message);
+    } finally {
+      setSavingReport(false);
+    }
+  };
+
   const exportReportsCsv = () => {
-    const header = ['Date', 'Title', 'Category', 'Status', 'Event Link', 'Notes', 'Perceived Impact', 'Optional Cost'];
+    const header = ['Date', 'Title', 'Category', 'Linked Event', 'Notes', 'Perceived Impact', 'Optional Cost'];
     const lines = reports.map((entry) => {
-      const eventLink = getPrimaryEventLink(entry) ?? '';
-      const notes = entry.outcome_summary ?? '';
-      const impact = entry.engagement_notes ?? '';
-      const optionalCost = entry.budget_actual !== null ? entry.budget_actual.toFixed(2) : '';
+      const optionalCost = entry.optional_cost !== null ? entry.optional_cost.toFixed(2) : '';
       return [
-        formatDate(entry.starts_at),
+        formatDate(entry.report_date),
         entry.title,
         entry.category ?? '',
-        formatLabel(entry.status),
-        eventLink,
-        notes,
-        impact,
+        entry.linked_event_title ? `${entry.linked_event_title} (${formatDate(entry.linked_event_starts_at)})` : '',
+        entry.notes ?? '',
+        entry.perceived_impact ?? '',
         optionalCost
       ]
         .map((value) => toCsvCell(value))
@@ -936,6 +1102,53 @@ export function MarketingDashboard() {
     });
     return byDay;
   }, [visibleEventRows]);
+
+  const availableExternalContactsForEvent = useMemo(() => {
+    if (!eventBundle) return contacts;
+    const linkedIds = new Set(eventBundle.eventContacts.map((entry) => entry.contact_id).filter(Boolean));
+    const search = eventContactSearch.trim().toLowerCase();
+    return contacts.filter((entry) => {
+      if (linkedIds.has(entry.id)) return false;
+      if (!search) return true;
+      return [
+        entry.organization,
+        entry.person_name,
+        entry.role_title ?? '',
+        entry.email ?? '',
+        entry.phone ?? '',
+        entry.instagram_handle ?? '',
+        entry.linkedin_url ?? '',
+        entry.other_social ?? '',
+        entry.notes ?? ''
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(search);
+    });
+  }, [contacts, eventBundle, eventContactSearch]);
+
+  const availableInternalCoordinatorsForEvent = useMemo(() => {
+    if (!eventBundle) return internalCoordinators;
+    const linkedIds = new Set(eventBundle.eventContacts.map((entry) => entry.internal_coordinator_id).filter(Boolean));
+    const search = eventContactSearch.trim().toLowerCase();
+    return internalCoordinators.filter((entry) => {
+      if (linkedIds.has(entry.id)) return false;
+      if (!search) return true;
+      return [
+        entry.full_name,
+        entry.role_title ?? '',
+        entry.email ?? '',
+        entry.phone ?? '',
+        entry.instagram_handle ?? '',
+        entry.linkedin_url ?? '',
+        entry.other_social ?? '',
+        entry.notes ?? ''
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(search);
+    });
+  }, [internalCoordinators, eventBundle, eventContactSearch]);
 
   if (loading) {
     return (
@@ -1331,7 +1544,7 @@ export function MarketingDashboard() {
           )}
 
           {activeTab === 'contacts' && (
-            <section className="grid gap-3 lg:grid-cols-[1.1fr_1fr]">
+            <section className={`grid gap-3 ${contactPanelOpen ? 'lg:grid-cols-[1.1fr_1fr]' : ''}`}>
               <div className="border border-neutral-300 bg-white">
                 <div className="border-b border-neutral-300 p-3">
                   <div className="flex gap-2">
@@ -1351,8 +1564,12 @@ export function MarketingDashboard() {
                           role_title: '',
                           email: '',
                           phone: '',
+                          instagram_handle: '',
+                          linkedin_url: '',
+                          other_social: '',
                           notes: ''
                         });
+                        setContactPanelOpen(true);
                       }}
                       type="button"
                     >
@@ -1378,7 +1595,10 @@ export function MarketingDashboard() {
                           <tr
                             key={contact.id}
                             className={isSelected ? 'bg-neutral-100' : ''}
-                            onClick={() => setSelectedContactId(contact.id)}
+                            onClick={() => {
+                              setSelectedContactId(contact.id);
+                              setContactPanelOpen(true);
+                            }}
                           >
                             <td className="border-b border-neutral-200 px-3 py-2">{contact.organization}</td>
                             <td className="border-b border-neutral-200 px-3 py-2">{contact.person_name}</td>
@@ -1392,9 +1612,19 @@ export function MarketingDashboard() {
                 </div>
               </div>
 
+              {contactPanelOpen ? (
               <aside className="border border-neutral-300 bg-white p-3">
                 <div className="space-y-3 text-sm">
-                  <h3 className="text-base font-semibold">{selectedContact ? 'Contact Details' : 'Add Contact'}</h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-base font-semibold">{selectedContact ? 'Contact Details' : 'Add Contact'}</h3>
+                    <button
+                      className="min-h-[30px] border border-neutral-300 bg-white px-2 text-xs"
+                      onClick={() => setContactPanelOpen(false)}
+                      type="button"
+                    >
+                      Close X
+                    </button>
+                  </div>
                   <div className="grid gap-2">
                     <input
                       className="min-h-[34px] border border-neutral-300 px-2 text-sm"
@@ -1425,6 +1655,24 @@ export function MarketingDashboard() {
                       onChange={(event) => setContactDraft((prev) => ({ ...prev, phone: event.target.value }))}
                       placeholder="Phone"
                       value={contactDraft.phone}
+                    />
+                    <input
+                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, instagram_handle: event.target.value }))}
+                      placeholder="Instagram handle"
+                      value={contactDraft.instagram_handle}
+                    />
+                    <input
+                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, linkedin_url: event.target.value }))}
+                      placeholder="LinkedIn URL"
+                      value={contactDraft.linkedin_url}
+                    />
+                    <input
+                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, other_social: event.target.value }))}
+                      placeholder="Other social URL/handle"
+                      value={contactDraft.other_social}
                     />
                     <textarea
                       className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm"
@@ -1479,9 +1727,264 @@ export function MarketingDashboard() {
                     ) : (
                       <p className="text-neutral-600">No linked events.</p>
                     )}
+                    {selectedContact ? (
+                      <div className="mt-2 flex gap-2">
+                        <select
+                          className="min-h-[34px] flex-1 border border-neutral-300 bg-white px-2 text-sm"
+                          onChange={(event) => setContactEventToLink(event.target.value)}
+                          value={contactEventToLink}
+                        >
+                          <option value="">Link to event...</option>
+                          {events.map((entry) => (
+                            <option key={entry.id} value={entry.id}>
+                              {entry.title} ({formatDate(entry.starts_at)})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
+                          onClick={() => {
+                            void linkSelectedContactToEvent();
+                          }}
+                          type="button"
+                        >
+                          Link
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </aside>
+              ) : (
+                <button
+                  className="w-fit min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
+                  onClick={() => setContactPanelOpen(true)}
+                  type="button"
+                >
+                  Open Contact Panel
+                </button>
+              )}
+            </section>
+          )}
+
+          {activeTab === 'coordinators' && (
+            <section className={`grid gap-3 ${coordinatorPanelOpen ? 'lg:grid-cols-[1.1fr_1fr]' : ''}`}>
+              <div className="border border-neutral-300 bg-white">
+                <div className="border-b border-neutral-300 p-3">
+                  <div className="flex gap-2">
+                    <input
+                      className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setInternalCoordinatorSearch(event.target.value)}
+                      placeholder="Search coordinators"
+                      value={internalCoordinatorSearch}
+                    />
+                    <button
+                      className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
+                      onClick={() => {
+                        setSelectedInternalCoordinatorId(null);
+                        setInternalCoordinatorDraft({
+                          full_name: '',
+                          role_title: '',
+                          email: '',
+                          phone: '',
+                          instagram_handle: '',
+                          linkedin_url: '',
+                          other_social: '',
+                          notes: ''
+                        });
+                        setCoordinatorPanelOpen(true);
+                      }}
+                      type="button"
+                    >
+                      New
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-[62vh] overflow-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-neutral-50">
+                      <tr>
+                        <th className="border-b border-neutral-300 px-3 py-2">Name</th>
+                        <th className="border-b border-neutral-300 px-3 py-2">Role</th>
+                        <th className="border-b border-neutral-300 px-3 py-2">Email</th>
+                        <th className="border-b border-neutral-300 px-3 py-2">Phone</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {internalCoordinators.map((coordinator) => {
+                        const isSelected = selectedInternalCoordinatorId === coordinator.id;
+                        return (
+                          <tr
+                            key={coordinator.id}
+                            className={isSelected ? 'bg-neutral-100' : ''}
+                            onClick={() => {
+                              setSelectedInternalCoordinatorId(coordinator.id);
+                              setCoordinatorPanelOpen(true);
+                            }}
+                          >
+                            <td className="border-b border-neutral-200 px-3 py-2">{coordinator.full_name}</td>
+                            <td className="border-b border-neutral-200 px-3 py-2">{coordinator.role_title ?? '-'}</td>
+                            <td className="border-b border-neutral-200 px-3 py-2">{coordinator.email ?? '-'}</td>
+                            <td className="border-b border-neutral-200 px-3 py-2">{coordinator.phone ?? '-'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {coordinatorPanelOpen ? (
+                <aside className="border border-neutral-300 bg-white p-3">
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-base font-semibold">
+                        {selectedInternalCoordinator ? 'Coordinator Details' : 'Add Coordinator'}
+                      </h3>
+                      <button
+                        className="min-h-[30px] border border-neutral-300 bg-white px-2 text-xs"
+                        onClick={() => setCoordinatorPanelOpen(false)}
+                        type="button"
+                      >
+                        Close X
+                      </button>
+                    </div>
+                    <div className="grid gap-2">
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, full_name: event.target.value }))}
+                        placeholder="Full name"
+                        value={internalCoordinatorDraft.full_name}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, role_title: event.target.value }))}
+                        placeholder="Role/title"
+                        value={internalCoordinatorDraft.role_title}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, email: event.target.value }))}
+                        placeholder="Email"
+                        value={internalCoordinatorDraft.email}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, phone: event.target.value }))}
+                        placeholder="Phone"
+                        value={internalCoordinatorDraft.phone}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) =>
+                          setInternalCoordinatorDraft((prev) => ({ ...prev, instagram_handle: event.target.value }))
+                        }
+                        placeholder="Instagram handle"
+                        value={internalCoordinatorDraft.instagram_handle}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, linkedin_url: event.target.value }))}
+                        placeholder="LinkedIn URL"
+                        value={internalCoordinatorDraft.linkedin_url}
+                      />
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, other_social: event.target.value }))}
+                        placeholder="Other social URL/handle"
+                        value={internalCoordinatorDraft.other_social}
+                      />
+                      <textarea
+                        className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm"
+                        onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, notes: event.target.value }))}
+                        placeholder="Notes"
+                        value={internalCoordinatorDraft.notes}
+                      />
+                      <div className="flex gap-2">
+                        {selectedInternalCoordinator ? (
+                          <button
+                            className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
+                            onClick={() => {
+                              void saveSelectedInternalCoordinator();
+                            }}
+                            type="button"
+                          >
+                            Save Coordinator
+                          </button>
+                        ) : null}
+                        <button
+                          className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
+                          onClick={() => {
+                            void createInternalCoordinatorFromPanel();
+                          }}
+                          type="button"
+                        >
+                          Add Coordinator
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-neutral-300 pt-3">
+                      <p className="mb-2 text-sm font-medium">Linked Events</p>
+                      {!selectedInternalCoordinator ? (
+                        <p className="text-neutral-600">Select a coordinator to view linked events.</p>
+                      ) : selectedInternalCoordinatorLinkedEvents.length ? (
+                        <ul className="space-y-1">
+                          {selectedInternalCoordinatorLinkedEvents.map((event) => (
+                            <li key={event.id}>
+                              <button
+                                className="text-left underline-offset-2 hover:underline"
+                                onClick={() => {
+                                  void loadEventBundle(event.id);
+                                }}
+                                type="button"
+                              >
+                                {event.title} ({formatDate(event.starts_at)})
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-neutral-600">No linked events.</p>
+                      )}
+                      {selectedInternalCoordinator ? (
+                        <div className="mt-2 flex gap-2">
+                          <select
+                            className="min-h-[34px] flex-1 border border-neutral-300 bg-white px-2 text-sm"
+                            onChange={(event) => setCoordinatorEventToLink(event.target.value)}
+                            value={coordinatorEventToLink}
+                          >
+                            <option value="">Link to event...</option>
+                            {events.map((entry) => (
+                              <option key={entry.id} value={entry.id}>
+                                {entry.title} ({formatDate(entry.starts_at)})
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
+                            onClick={() => {
+                              void linkSelectedCoordinatorToEvent();
+                            }}
+                            type="button"
+                          >
+                            Link
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </aside>
+              ) : (
+                <button
+                  className="w-fit min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
+                  onClick={() => setCoordinatorPanelOpen(true)}
+                  type="button"
+                >
+                  Open Coordinator Panel
+                </button>
+              )}
             </section>
           )}
 
@@ -1512,25 +2015,13 @@ export function MarketingDashboard() {
                   value={reportCategoryFilter}
                 >
                   <option value="all">All Categories</option>
-                  {categoryOptions
-                    .filter((option) => option !== 'all')
+                  {Array.from(new Set(reports.map((entry) => entry.category).filter((entry): entry is string => Boolean(entry?.trim()))))
+                    .sort((a, b) => a.localeCompare(b))
                     .map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
                     ))}
-                </select>
-                <select
-                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                  onChange={(event) => setReportStatusFilter(event.target.value as 'all' | MarketingEventStatus)}
-                  value={reportStatusFilter}
-                >
-                  <option value="all">All Statuses</option>
-                  {STATUS_OPTIONS.map((status) => (
-                    <option key={status.value} value={status.value}>
-                      {status.label}
-                    </option>
-                  ))}
                 </select>
                 <button
                   className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
@@ -1555,7 +2046,6 @@ export function MarketingDashboard() {
                     setReportDateFrom('');
                     setReportDateTo('');
                     setReportCategoryFilter('all');
-                    setReportStatusFilter('all');
                   }}
                   type="button"
                 >
@@ -1570,55 +2060,44 @@ export function MarketingDashboard() {
                       <th className="border-b border-neutral-300 px-3 py-2">Date</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Title</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Category</th>
-                      <th className="border-b border-neutral-300 px-3 py-2">Event Link</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Linked Event</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Notes</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Perceived Impact</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Optional Cost</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {reports.map((entry) => {
-                      const eventLink = getPrimaryEventLink(entry);
-                      return (
-                        <tr
-                          key={entry.id}
-                          className="cursor-pointer hover:bg-neutral-50"
-                          onClick={() => {
-                            void loadEventBundle(entry.id);
-                          }}
-                          onKeyDown={(keyboardEvent) => {
-                            if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                              keyboardEvent.preventDefault();
-                              void loadEventBundle(entry.id);
-                            }
-                          }}
-                          role="button"
-                          tabIndex={0}
-                        >
-                          <td className="border-b border-neutral-200 px-3 py-2">{formatDate(entry.starts_at)}</td>
-                          <td className="border-b border-neutral-200 px-3 py-2">{entry.title}</td>
-                          <td className="border-b border-neutral-200 px-3 py-2">{entry.category ?? '-'}</td>
-                          <td className="border-b border-neutral-200 px-3 py-2">
-                            {eventLink ? (
-                              <a
-                                className="underline-offset-2 hover:underline"
-                                href={eventLink}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                }}
-                                rel="noreferrer"
-                                target="_blank"
-                              >
-                                Open Link
-                              </a>
-                            ) : (
-                              '-'
-                            )}
-                          </td>
-                          <td className="border-b border-neutral-200 px-3 py-2">{entry.outcome_summary ?? '-'}</td>
-                          <td className="border-b border-neutral-200 px-3 py-2">{entry.engagement_notes ?? '-'}</td>
-                        </tr>
-                      );
-                    })}
+                    {reports.map((entry) => (
+                      <tr
+                        key={entry.id}
+                        className="cursor-pointer hover:bg-neutral-50"
+                        onClick={() => {
+                          openReportEditor(entry);
+                        }}
+                        onKeyDown={(keyboardEvent) => {
+                          if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                            keyboardEvent.preventDefault();
+                            openReportEditor(entry);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <td className="border-b border-neutral-200 px-3 py-2">{formatDate(entry.report_date)}</td>
+                        <td className="border-b border-neutral-200 px-3 py-2">{entry.title}</td>
+                        <td className="border-b border-neutral-200 px-3 py-2">{entry.category ?? '-'}</td>
+                        <td className="border-b border-neutral-200 px-3 py-2">
+                          {entry.linked_event_title
+                            ? `${entry.linked_event_title} (${formatDate(entry.linked_event_starts_at)})`
+                            : '-'}
+                        </td>
+                        <td className="border-b border-neutral-200 px-3 py-2">{entry.notes ?? '-'}</td>
+                        <td className="border-b border-neutral-200 px-3 py-2">{entry.perceived_impact ?? '-'}</td>
+                        <td className="border-b border-neutral-200 px-3 py-2">
+                          {entry.optional_cost !== null ? `$${entry.optional_cost.toFixed(2)}` : '-'}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -1626,6 +2105,163 @@ export function MarketingDashboard() {
           )}
         </section>
       </section>
+
+      {reportEditorOpen && reportDraft && (
+        <div className="fixed inset-0 z-[65] bg-black/40 p-4" role="dialog" aria-modal="true">
+          <div className="mx-auto max-w-3xl border border-neutral-300 bg-white p-4 md:p-5">
+            <div className="flex items-start justify-between gap-2 border-b border-neutral-300 pb-3">
+              <div>
+                <h2 className="text-lg font-semibold">Report Details</h2>
+                <p className="text-xs text-neutral-600">Reports are standalone and can optionally link to an event.</p>
+              </div>
+              <button
+                className="min-h-[32px] border border-neutral-300 bg-white px-3 text-sm"
+                onClick={() => setReportEditorOpen(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
+              <label className="text-sm md:col-span-2">
+                <span className="mb-1 block text-xs text-neutral-600">Title</span>
+                <input
+                  className="min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setReportDraft((prev) => (prev ? { ...prev, title: event.target.value } : prev))}
+                  value={reportDraft.title}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-xs text-neutral-600">Category</span>
+                <input
+                  className="min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setReportDraft((prev) => (prev ? { ...prev, category: event.target.value || null } : prev))}
+                  value={reportDraft.category ?? ''}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-xs text-neutral-600">Report Date</span>
+                <input
+                  className="min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setReportDraft((prev) => (prev ? { ...prev, report_date: event.target.value } : prev))}
+                  type="date"
+                  value={reportDraft.report_date}
+                />
+              </label>
+              <label className="text-sm md:col-span-2">
+                <span className="mb-1 block text-xs text-neutral-600">Notes</span>
+                <textarea
+                  className="min-h-[80px] w-full border border-neutral-300 px-2 py-2"
+                  onChange={(event) => setReportDraft((prev) => (prev ? { ...prev, notes: event.target.value || null } : prev))}
+                  value={reportDraft.notes ?? ''}
+                />
+              </label>
+              <label className="text-sm md:col-span-2">
+                <span className="mb-1 block text-xs text-neutral-600">Perceived Impact</span>
+                <textarea
+                  className="min-h-[80px] w-full border border-neutral-300 px-2 py-2"
+                  onChange={(event) =>
+                    setReportDraft((prev) => (prev ? { ...prev, perceived_impact: event.target.value || null } : prev))
+                  }
+                  value={reportDraft.perceived_impact ?? ''}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-xs text-neutral-600">Optional Cost</span>
+                <input
+                  className="min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setReportDraft((prev) => (prev ? { ...prev, optional_cost: parseCurrencyInput(event.target.value) } : prev))
+                  }
+                  placeholder="0.00"
+                  value={reportDraft.optional_cost ?? ''}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 border-t border-neutral-300 pt-3">
+              <p className="text-sm font-medium">Link Event (Optional)</p>
+              <input
+                className="mt-2 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                onChange={(event) => setReportLinkSearch(event.target.value)}
+                placeholder="Type event name, date, category, location..."
+                value={reportLinkSearch}
+              />
+              <div className="mt-2 max-h-[180px] space-y-1 overflow-auto">
+                {reportLinkResults.map((event) => (
+                  <button
+                    key={event.id}
+                    className="w-full border border-neutral-200 bg-white px-2 py-1 text-left text-xs hover:bg-neutral-50"
+                    onClick={() => {
+                      setReportDraft((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              linked_event_id: event.id,
+                              linked_event_title: event.title,
+                              linked_event_starts_at: event.starts_at
+                            }
+                          : prev
+                      );
+                    }}
+                    type="button"
+                  >
+                    {event.title} ({formatDate(event.starts_at)}) {event.category ? `- ${event.category}` : ''}
+                  </button>
+                ))}
+                {reportLinkSearch.trim() && reportLinkResults.length === 0 ? (
+                  <p className="text-xs text-neutral-600">No event matches.</p>
+                ) : null}
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-sm">
+                <span className="font-medium">Linked:</span>
+                <span>
+                  {reportDraft.linked_event_title
+                    ? `${reportDraft.linked_event_title} (${formatDate(reportDraft.linked_event_starts_at)})`
+                    : 'None'}
+                </span>
+                {reportDraft.linked_event_id ? (
+                  <button
+                    className="border border-neutral-300 bg-white px-2 py-1 text-xs"
+                    onClick={() =>
+                      setReportDraft((prev) =>
+                        prev ? { ...prev, linked_event_id: null, linked_event_title: null, linked_event_starts_at: null } : prev
+                      )
+                    }
+                    type="button"
+                  >
+                    Clear Link
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between border-t border-neutral-300 pt-3">
+              <button
+                className="min-h-[34px] border border-red-300 bg-red-50 px-3 text-sm text-red-700 disabled:opacity-60"
+                disabled={savingReport}
+                onClick={() => {
+                  void deleteReportDraft();
+                }}
+                type="button"
+              >
+                Delete
+              </button>
+              <button
+                className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-4 text-sm text-white disabled:opacity-60"
+                disabled={savingReport}
+                onClick={() => {
+                  void saveReportDraft();
+                }}
+                type="button"
+              >
+                Save Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {drawerOpen && (
         <>
@@ -1807,123 +2443,70 @@ export function MarketingDashboard() {
                   <section className="space-y-2 border-t border-neutral-300 pt-4">
                     <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">Coordinators & Contacts</h3>
 
+                    <input
+                      className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setEventContactSearch(event.target.value)}
+                      placeholder="Search contacts/coordinators by organization, name, role, email, phone, social, notes"
+                      value={eventContactSearch}
+                    />
+
                     <div className="grid gap-2 md:grid-cols-2">
                       <div className="space-y-2 border border-neutral-300 p-3">
-                        <p className="text-sm font-medium">Internal Coordinators</p>
-                        <input
-                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                          onChange={(event) =>
-                            setNewInternalCoordinator((prev) => ({ ...prev, coordinatorName: event.target.value }))
-                          }
-                          placeholder="Name"
-                          value={newInternalCoordinator.coordinatorName}
-                        />
-                        <input
-                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                          onChange={(event) =>
-                            setNewInternalCoordinator((prev) => ({ ...prev, coordinatorRole: event.target.value }))
-                          }
-                          placeholder="Role"
-                          value={newInternalCoordinator.coordinatorRole}
-                        />
-                        <input
-                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                          onChange={(event) =>
-                            setNewInternalCoordinator((prev) => ({ ...prev, coordinatorContact: event.target.value }))
-                          }
-                          placeholder="Contact method (email/phone)"
-                          value={newInternalCoordinator.coordinatorContact}
-                        />
-                        <textarea
-                          className="min-h-[58px] w-full border border-neutral-300 px-2 py-2 text-sm"
-                          onChange={(event) =>
-                            setNewInternalCoordinator((prev) => ({ ...prev, coordinatorNotes: event.target.value }))
-                          }
-                          placeholder="Notes"
-                          value={newInternalCoordinator.coordinatorNotes}
-                        />
-                        <button
-                          className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
-                          onClick={() => {
-                            void addInternalCoordinator();
-                          }}
-                          type="button"
-                        >
-                          Add Internal Coordinator
-                        </button>
+                        <p className="text-sm font-medium">Match External Contact</p>
+                        <div className="max-h-[220px] space-y-1 overflow-auto">
+                          {availableExternalContactsForEvent.slice(0, 25).map((contact) => (
+                            <div key={contact.id} className="flex items-center justify-between gap-2 border border-neutral-200 p-2 text-xs">
+                              <div>
+                                <p className="font-medium">
+                                  {contact.organization} - {contact.person_name}
+                                </p>
+                                <p className="text-neutral-600">
+                                  {contact.role_title ?? '-'} | {contact.email ?? '-'} | {contact.phone ?? '-'}
+                                </p>
+                              </div>
+                              <button
+                                className="border border-neutral-400 bg-white px-2 py-1"
+                                onClick={() => {
+                                  void linkExternalContactToEvent(contact.id);
+                                }}
+                                type="button"
+                              >
+                                Add
+                              </button>
+                            </div>
+                          ))}
+                          {availableExternalContactsForEvent.length === 0 ? (
+                            <p className="text-xs text-neutral-600">No matching external contacts.</p>
+                          ) : null}
+                        </div>
                       </div>
 
                       <div className="space-y-2 border border-neutral-300 p-3">
-                        <p className="text-sm font-medium">External Contacts</p>
-                        <div className="flex gap-2">
-                          <select
-                            className="min-h-[34px] flex-1 border border-neutral-300 bg-white px-2 text-sm"
-                            onChange={(event) => setSelectedContactToLink(event.target.value)}
-                            value={selectedContactToLink}
-                          >
-                            <option value="">Select existing contact</option>
-                            {contacts.map((contact) => (
-                              <option key={contact.id} value={contact.id}>
-                                {contact.organization} - {contact.person_name}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
-                            onClick={() => {
-                              void linkExistingContact();
-                            }}
-                            type="button"
-                          >
-                            Link
-                          </button>
+                        <p className="text-sm font-medium">Match Internal Coordinator</p>
+                        <div className="max-h-[220px] space-y-1 overflow-auto">
+                          {availableInternalCoordinatorsForEvent.slice(0, 25).map((coordinator) => (
+                            <div key={coordinator.id} className="flex items-center justify-between gap-2 border border-neutral-200 p-2 text-xs">
+                              <div>
+                                <p className="font-medium">{coordinator.full_name}</p>
+                                <p className="text-neutral-600">
+                                  {coordinator.role_title ?? '-'} | {coordinator.email ?? '-'} | {coordinator.phone ?? '-'}
+                                </p>
+                              </div>
+                              <button
+                                className="border border-neutral-400 bg-white px-2 py-1"
+                                onClick={() => {
+                                  void linkInternalCoordinatorToEvent(coordinator.id);
+                                }}
+                                type="button"
+                              >
+                                Add
+                              </button>
+                            </div>
+                          ))}
+                          {availableInternalCoordinatorsForEvent.length === 0 ? (
+                            <p className="text-xs text-neutral-600">No matching internal coordinators.</p>
+                          ) : null}
                         </div>
-
-                        <input
-                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                          onChange={(event) => setNewContactDraft((prev) => ({ ...prev, organization: event.target.value }))}
-                          placeholder="Organization"
-                          value={newContactDraft.organization}
-                        />
-                        <input
-                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                          onChange={(event) => setNewContactDraft((prev) => ({ ...prev, person_name: event.target.value }))}
-                          placeholder="Person Name"
-                          value={newContactDraft.person_name}
-                        />
-                        <input
-                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                          onChange={(event) => setNewContactDraft((prev) => ({ ...prev, role_title: event.target.value }))}
-                          placeholder="Role/Title"
-                          value={newContactDraft.role_title}
-                        />
-                        <input
-                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                          onChange={(event) => setNewContactDraft((prev) => ({ ...prev, email: event.target.value }))}
-                          placeholder="Email"
-                          value={newContactDraft.email}
-                        />
-                        <input
-                          className="min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                          onChange={(event) => setNewContactDraft((prev) => ({ ...prev, phone: event.target.value }))}
-                          placeholder="Phone"
-                          value={newContactDraft.phone}
-                        />
-                        <textarea
-                          className="min-h-[58px] w-full border border-neutral-300 px-2 py-2 text-sm"
-                          onChange={(event) => setNewContactDraft((prev) => ({ ...prev, notes: event.target.value }))}
-                          placeholder="Notes"
-                          value={newContactDraft.notes}
-                        />
-                        <button
-                          className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
-                          onClick={() => {
-                            void createAndLinkContact();
-                          }}
-                          type="button"
-                        >
-                          Create & Link Contact
-                        </button>
                       </div>
                     </div>
 
@@ -1947,19 +2530,31 @@ export function MarketingDashboard() {
                             <tr key={entry.id}>
                               <td className="border-b border-neutral-200 px-2 py-2">{entry.is_internal ? 'Internal' : 'External'}</td>
                               <td className="border-b border-neutral-200 px-2 py-2">
-                                {entry.is_internal ? entry.coordinator_name ?? '-' : entry.contact?.person_name ?? '-'}
+                                {entry.is_internal
+                                  ? entry.internal_coordinator?.full_name ?? entry.coordinator_name ?? '-'
+                                  : entry.contact?.person_name ?? '-'}
                               </td>
-                              <td className="border-b border-neutral-200 px-2 py-2">{entry.contact?.organization ?? '-'}</td>
                               <td className="border-b border-neutral-200 px-2 py-2">
-                                {entry.is_internal ? entry.coordinator_role ?? '-' : entry.contact?.role_title ?? '-'}
+                                {entry.is_internal ? 'Internal Team' : entry.contact?.organization ?? '-'}
+                              </td>
+                              <td className="border-b border-neutral-200 px-2 py-2">
+                                {entry.is_internal
+                                  ? entry.internal_coordinator?.role_title ?? entry.coordinator_role ?? '-'
+                                  : entry.contact?.role_title ?? '-'}
                               </td>
                               <td className="border-b border-neutral-200 px-2 py-2">
                                 {entry.is_internal ? entry.coordinator_contact ?? '-' : '-'}
                               </td>
-                              <td className="border-b border-neutral-200 px-2 py-2">{entry.contact?.email ?? '-'}</td>
-                              <td className="border-b border-neutral-200 px-2 py-2">{entry.contact?.phone ?? '-'}</td>
                               <td className="border-b border-neutral-200 px-2 py-2">
-                                {entry.is_internal ? entry.coordinator_notes ?? '-' : entry.contact?.notes ?? '-'}
+                                {entry.is_internal ? entry.internal_coordinator?.email ?? '-' : entry.contact?.email ?? '-'}
+                              </td>
+                              <td className="border-b border-neutral-200 px-2 py-2">
+                                {entry.is_internal ? entry.internal_coordinator?.phone ?? '-' : entry.contact?.phone ?? '-'}
+                              </td>
+                              <td className="border-b border-neutral-200 px-2 py-2">
+                                {entry.is_internal
+                                  ? entry.internal_coordinator?.notes ?? entry.coordinator_notes ?? '-'
+                                  : entry.contact?.notes ?? '-'}
                               </td>
                               <td className="border-b border-neutral-200 px-2 py-2">
                                 <button

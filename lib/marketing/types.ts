@@ -39,6 +39,22 @@ export interface ExternalContactRow {
   role_title: string | null;
   email: string | null;
   phone: string | null;
+  instagram_handle: string | null;
+  linkedin_url: string | null;
+  other_social: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export interface InternalCoordinatorRow {
+  id: string;
+  full_name: string;
+  role_title: string | null;
+  email: string | null;
+  phone: string | null;
+  instagram_handle: string | null;
+  linkedin_url: string | null;
+  other_social: string | null;
   notes: string | null;
   updated_at: string;
 }
@@ -47,12 +63,14 @@ export interface EventContactRow {
   id: string;
   event_id: string;
   contact_id: string | null;
+  internal_coordinator_id: string | null;
   is_internal: boolean;
   coordinator_name: string | null;
   coordinator_role: string | null;
   coordinator_contact: string | null;
   coordinator_notes: string | null;
   contact: ExternalContactRow | null;
+  internal_coordinator: InternalCoordinatorRow | null;
 }
 
 export interface EventAssetRow {
@@ -101,4 +119,18 @@ export interface MarketingEventFilters {
   query: string;
   status: 'all' | MarketingEventStatus;
   category: string | 'all';
+}
+
+export interface MarketingReportRow {
+  id: string;
+  title: string;
+  category: string | null;
+  report_date: string;
+  notes: string | null;
+  perceived_impact: string | null;
+  optional_cost: number | null;
+  linked_event_id: string | null;
+  linked_event_title: string | null;
+  linked_event_starts_at: string | null;
+  updated_at: string;
 }
