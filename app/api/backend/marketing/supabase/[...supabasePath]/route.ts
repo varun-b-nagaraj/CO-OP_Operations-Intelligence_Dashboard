@@ -1,6 +1,6 @@
-import { createDepartmentSupabaseProxyHandlers } from '../../backend/_shared/supabase-proxy';
+import { createDepartmentSupabaseProxyHandlers } from '../../../_shared/supabase-proxy';
 
-const handlers = createDepartmentSupabaseProxyHandlers('shared');
+const handlers = createDepartmentSupabaseProxyHandlers('marketing');
 
 export const GET = handlers.GET;
 export const POST = handlers.POST;

@@ -1,6 +1,57 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let browserClient: SupabaseClient | null = null;
+type BackendDepartment = 'hr' | 'marketing' | 'product' | 'inventory' | 'shared';
+
+const HR_TABLES = new Set([
+  'students',
+  'employee_settings',
+  'shift_attendance',
+  'attendance_overrides',
+  'shift_change_requests',
+  'employee_login_credentials',
+  'schedules',
+  'strikes',
+  'points_ledger',
+  'meeting_attendance_records'
+]);
+
+const MARKETING_TABLES = new Set([
+  'marketing_events',
+  'marketing_event_categories',
+  'marketing_reports',
+  'external_contacts',
+  'internal_coordinators',
+  'event_assets',
+  'event_contacts',
+  'event_notes',
+  'coordination_logs'
+]);
+
+function getTableFromRestPath(pathname: string): string | null {
+  if (!pathname.startsWith('/rest/v1/')) return null;
+  const segments = pathname.split('/');
+  const table = segments[3];
+  return table ? decodeURIComponent(table) : null;
+}
+
+function inferDepartmentFromRequestPath(pathname: string): BackendDepartment {
+  const table = getTableFromRestPath(pathname);
+  if (table) {
+    if (table.startsWith('product_')) return 'product';
+    if (table.startsWith('inventory_')) return 'inventory';
+    if (table.startsWith('marketing_')) return 'marketing';
+    if (table.startsWith('cfa_')) return 'inventory';
+    if (MARKETING_TABLES.has(table)) return 'marketing';
+    if (HR_TABLES.has(table)) return 'hr';
+  }
+
+  if (pathname.startsWith('/storage/v1/')) {
+    return 'shared';
+  }
+
+  return 'shared';
+}
 
 function requireServerEnv(name: string, value: string | undefined): string {
   if (!value) {
@@ -34,7 +85,8 @@ export function createBrowserClient(): SupabaseClient {
           }
 
           if (parsedUrl && parsedUrl.origin === supabaseOrigin) {
-            const proxiedUrl = `/api/supabase-proxy${parsedUrl.pathname}${parsedUrl.search}`;
+            const department = inferDepartmentFromRequestPath(parsedUrl.pathname);
+            const proxiedUrl = `/api/backend/${department}/supabase${parsedUrl.pathname}${parsedUrl.search}`;
             if (input instanceof Request) {
               return fetch(new Request(proxiedUrl, input));
             }

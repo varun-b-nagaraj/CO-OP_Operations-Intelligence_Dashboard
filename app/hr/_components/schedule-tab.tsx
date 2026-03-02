@@ -354,7 +354,6 @@ export function ScheduleTab() {
   const [savedAssignmentWorkersByUid, setSavedAssignmentWorkersByUid] = useState<Record<string, string>>({});
   const [savedRosterScheduleableById, setSavedRosterScheduleableById] = useState<Record<string, boolean>>({});
   const [pendingManualEdits, setPendingManualEdits] = useState<PendingManualEdit[]>([]);
-  const [expandedAssignmentNameByUid, setExpandedAssignmentNameByUid] = useState<Record<string, boolean>>({});
   const [pendingJumpToToday, setPendingJumpToToday] = useState(false);
   const [isPersistingEdits, setIsPersistingEdits] = useState(false);
   const supabase = useBrowserSupabase();
@@ -693,7 +692,6 @@ export function ScheduleTab() {
     setShiftActionModalUid(null);
     setEmptySlotTarget(null);
     setPendingManualEdits([]);
-    setExpandedAssignmentNameByUid({});
   }, [schedule]);
 
   useEffect(() => {
@@ -2100,22 +2098,12 @@ export function ScheduleTab() {
                                         {periodBand.periods.length > 1 && (
                                           <span className="shrink-0 text-[10px] text-neutral-500">P{assignment.period}</span>
                                         )}
-                                        <button
-                                          className={`min-w-0 flex-1 text-left font-medium leading-tight ${
-                                            expandedAssignmentNameByUid[assignment.uid] ? 'whitespace-normal break-words' : 'truncate'
-                                          }`}
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            setExpandedAssignmentNameByUid((previous) => ({
-                                              ...previous,
-                                              [assignment.uid]: !previous[assignment.uid]
-                                            }));
-                                          }}
+                                        <span
+                                          className="min-w-0 flex-1 truncate text-left font-medium leading-tight"
                                           title={effectiveName}
-                                          type="button"
                                         >
                                           {effectiveName}
-                                        </button>
+                                        </span>
                                         {isAlternate && (
                                           <span className="shrink-0 border border-sky-500 bg-sky-200 px-1 text-[10px] text-sky-900">
                                             Alt
