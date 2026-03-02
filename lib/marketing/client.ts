@@ -182,7 +182,13 @@ export interface MarketingRepository {
   }): Promise<CoordinationLogRow>;
   uploadAsset(input: { eventId: string; file: File; assetType: AssetType; caption?: string | null }): Promise<EventAssetRow>;
   setCoverAsset(input: { eventId: string; assetId: string }): Promise<void>;
-  listReportRows(query: string): Promise<MarketingEventRow[]>;
+  listReportRows(input: {
+    query: string;
+    dateFrom?: string;
+    dateTo?: string;
+    category?: string;
+    status?: 'all' | MarketingEventStatus;
+  }): Promise<MarketingEventRow[]>;
 }
 
 export function createMarketingRepository(supabase: SupabaseClient): MarketingRepository {
@@ -529,15 +535,30 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
       if (eventError) throw eventError;
     },
 
-    async listReportRows(query) {
+    async listReportRows(input) {
       let request = supabase
         .from('marketing_events')
         .select('*')
-        .eq('status', 'completed')
         .order('starts_at', { ascending: false });
 
-      if (query.trim()) {
-        const escaped = query.trim().replaceAll(',', ' ');
+      if (input.status && input.status !== 'all') {
+        request = request.eq('status', input.status);
+      }
+
+      if (input.category && input.category !== 'all') {
+        request = request.eq('category', input.category);
+      }
+
+      if (input.dateFrom) {
+        request = request.gte('starts_at', `${input.dateFrom}T00:00:00`);
+      }
+
+      if (input.dateTo) {
+        request = request.lte('starts_at', `${input.dateTo}T23:59:59.999`);
+      }
+
+      if (input.query.trim()) {
+        const escaped = input.query.trim().replaceAll(',', ' ');
         request = request.or(`title.ilike.%${escaped}%,category.ilike.%${escaped}%`);
       }
 

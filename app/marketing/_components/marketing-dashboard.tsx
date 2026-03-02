@@ -111,6 +111,15 @@ function parseIntegerInput(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function getPrimaryEventLink(event: MarketingEventRow): string | null {
+  const first = event.links.find((entry) => entry.trim().length > 0);
+  return first ?? null;
+}
+
+function toCsvCell(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
 function inDateRange(value: string, from: string, to: string) {
   const parsed = new Date(value).getTime();
   if (!Number.isFinite(parsed)) return false;
@@ -263,6 +272,10 @@ export function MarketingDashboard() {
   });
 
   const [reportSearch, setReportSearch] = useState('');
+  const [reportDateFrom, setReportDateFrom] = useState('');
+  const [reportDateTo, setReportDateTo] = useState('');
+  const [reportStatusFilter, setReportStatusFilter] = useState<'all' | MarketingEventStatus>('all');
+  const [reportCategoryFilter, setReportCategoryFilter] = useState<string>('all');
   const [eventDateFrom, setEventDateFrom] = useState('');
   const [eventDateTo, setEventDateTo] = useState('');
   const [eventSort, setEventSort] = useState<'upcoming' | 'recently_updated' | 'recently_completed'>('upcoming');
@@ -305,7 +318,13 @@ export function MarketingDashboard() {
           category: categoryFilter
         }),
         repository.listContacts(contactSearch),
-        repository.listReportRows(reportSearch)
+        repository.listReportRows({
+          query: reportSearch,
+          dateFrom: reportDateFrom || undefined,
+          dateTo: reportDateTo || undefined,
+          category: reportCategoryFilter,
+          status: reportStatusFilter
+        })
       ]);
 
       setEvents(eventRows);
@@ -325,8 +344,6 @@ export function MarketingDashboard() {
 
       if (selectedContactId && !contactRows.some((entry) => entry.id === selectedContactId)) {
         setSelectedContactId(contactRows[0]?.id ?? null);
-      } else if (!selectedContactId && contactRows[0]?.id) {
-        setSelectedContactId(contactRows[0].id);
       }
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Failed to load marketing dashboard.';
@@ -334,7 +351,18 @@ export function MarketingDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [repository, statusFilter, categoryFilter, contactSearch, reportSearch, selectedContactId]);
+  }, [
+    repository,
+    statusFilter,
+    categoryFilter,
+    contactSearch,
+    reportSearch,
+    reportDateFrom,
+    reportDateTo,
+    reportCategoryFilter,
+    reportStatusFilter,
+    selectedContactId
+  ]);
 
   useEffect(() => {
     void loadDashboard();
@@ -449,6 +477,54 @@ export function MarketingDashboard() {
     },
     [loadEventBundle, repository]
   );
+
+  const createReport = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const start = new Date();
+      start.setHours(9, 0, 0, 0);
+      const end = new Date(start);
+      end.setHours(11, 0, 0, 0);
+
+      const created = await repository.saveEvent({
+        title: 'New Report',
+        status: 'completed',
+        category: null,
+        starts_at: start.toISOString(),
+        ends_at: end.toISOString(),
+        location: null,
+        description: null,
+        goals: null,
+        target_audience: null,
+        budget_planned: null,
+        budget_actual: null,
+        supplies_needed: null,
+        links: [],
+        outcome_summary: null,
+        what_worked: null,
+        what_didnt: null,
+        recommendations: null,
+        estimated_interactions: null,
+        units_sold: null,
+        revenue_impact: null,
+        engagement_notes: null,
+        cost_roi_notes: null,
+        cover_asset_id: null
+      });
+
+      setEvents((prev) => [created, ...prev]);
+      setReports((prev) => [created, ...prev]);
+      setNotice('Report created.');
+      await loadEventBundle(created.id);
+    } catch (createError) {
+      const message = createError instanceof Error ? createError.message : 'Failed to create report.';
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
+  }, [loadEventBundle, repository]);
 
   const commitAutosave = useCallback(
     async (draft: EventDraft) => {
@@ -819,6 +895,37 @@ export function MarketingDashboard() {
     }
   };
 
+  const exportReportsCsv = () => {
+    const header = ['Date', 'Title', 'Category', 'Status', 'Event Link', 'Notes', 'Perceived Impact', 'Optional Cost'];
+    const lines = reports.map((entry) => {
+      const eventLink = getPrimaryEventLink(entry) ?? '';
+      const notes = entry.outcome_summary ?? '';
+      const impact = entry.engagement_notes ?? '';
+      const optionalCost = entry.budget_actual !== null ? entry.budget_actual.toFixed(2) : '';
+      return [
+        formatDate(entry.starts_at),
+        entry.title,
+        entry.category ?? '',
+        formatLabel(entry.status),
+        eventLink,
+        notes,
+        impact,
+        optionalCost
+      ]
+        .map((value) => toCsvCell(value))
+        .join(',');
+    });
+
+    const csv = [header.map((value) => toCsvCell(value)).join(','), ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `marketing-reports-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   const visibleCalendarRowsByDay = useMemo(() => {
     const byDay = new Map<string, MarketingEventRow[]>();
     visibleEventRows.forEach((event) => {
@@ -1186,19 +1293,23 @@ export function MarketingDashboard() {
                       const attachmentCount = eventIndicators[event.id]?.assets ?? 0;
 
                       return (
-                        <tr key={event.id}>
+                        <tr
+                          key={event.id}
+                          className="cursor-pointer hover:bg-neutral-50"
+                          onClick={() => {
+                            void loadEventBundle(event.id);
+                          }}
+                          onKeyDown={(keyboardEvent) => {
+                            if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                              keyboardEvent.preventDefault();
+                              void loadEventBundle(event.id);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                        >
                           <td className="border-b border-neutral-200 px-3 py-2">{formatDate(event.starts_at)}</td>
-                          <td className="border-b border-neutral-200 px-3 py-2">
-                            <button
-                              className="text-left underline-offset-2 hover:underline"
-                              onClick={() => {
-                                void loadEventBundle(event.id);
-                              }}
-                              type="button"
-                            >
-                              {event.title}
-                            </button>
-                          </td>
+                          <td className="border-b border-neutral-200 px-3 py-2 underline-offset-2 hover:underline">{event.title}</td>
                           <td className="border-b border-neutral-200 px-3 py-2">
                             <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_CLASSES[event.status]}`}>
                               {formatLabel(event.status)}
@@ -1232,7 +1343,8 @@ export function MarketingDashboard() {
                     />
                     <button
                       className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
-                      onClick={() =>
+                      onClick={() => {
+                        setSelectedContactId(null);
                         setContactDraft({
                           organization: '',
                           person_name: '',
@@ -1240,8 +1352,8 @@ export function MarketingDashboard() {
                           email: '',
                           phone: '',
                           notes: ''
-                        })
-                      }
+                        });
+                      }}
                       type="button"
                     >
                       New
@@ -1281,49 +1393,47 @@ export function MarketingDashboard() {
               </div>
 
               <aside className="border border-neutral-300 bg-white p-3">
-                {!selectedContact ? (
-                  <p className="text-sm text-neutral-600">Select a contact to view details.</p>
-                ) : (
-                  <div className="space-y-3 text-sm">
-                    <h3 className="text-base font-semibold">Contact Details</h3>
-                    <div className="grid gap-2">
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setContactDraft((prev) => ({ ...prev, organization: event.target.value }))}
-                        placeholder="Organization"
-                        value={contactDraft.organization}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setContactDraft((prev) => ({ ...prev, person_name: event.target.value }))}
-                        placeholder="Person name"
-                        value={contactDraft.person_name}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setContactDraft((prev) => ({ ...prev, role_title: event.target.value }))}
-                        placeholder="Role/title"
-                        value={contactDraft.role_title}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setContactDraft((prev) => ({ ...prev, email: event.target.value }))}
-                        placeholder="Email"
-                        value={contactDraft.email}
-                      />
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) => setContactDraft((prev) => ({ ...prev, phone: event.target.value }))}
-                        placeholder="Phone"
-                        value={contactDraft.phone}
-                      />
-                      <textarea
-                        className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm"
-                        onChange={(event) => setContactDraft((prev) => ({ ...prev, notes: event.target.value }))}
-                        placeholder="Notes"
-                        value={contactDraft.notes}
-                      />
-                      <div className="flex gap-2">
+                <div className="space-y-3 text-sm">
+                  <h3 className="text-base font-semibold">{selectedContact ? 'Contact Details' : 'Add Contact'}</h3>
+                  <div className="grid gap-2">
+                    <input
+                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, organization: event.target.value }))}
+                      placeholder="Organization"
+                      value={contactDraft.organization}
+                    />
+                    <input
+                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, person_name: event.target.value }))}
+                      placeholder="Person name"
+                      value={contactDraft.person_name}
+                    />
+                    <input
+                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, role_title: event.target.value }))}
+                      placeholder="Role/title"
+                      value={contactDraft.role_title}
+                    />
+                    <input
+                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, email: event.target.value }))}
+                      placeholder="Email"
+                      value={contactDraft.email}
+                    />
+                    <input
+                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, phone: event.target.value }))}
+                      placeholder="Phone"
+                      value={contactDraft.phone}
+                    />
+                    <textarea
+                      className="min-h-[58px] border border-neutral-300 px-2 py-2 text-sm"
+                      onChange={(event) => setContactDraft((prev) => ({ ...prev, notes: event.target.value }))}
+                      placeholder="Notes"
+                      value={contactDraft.notes}
+                    />
+                    <div className="flex gap-2">
+                      {selectedContact ? (
                         <button
                           className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
                           onClick={() => {
@@ -1333,42 +1443,44 @@ export function MarketingDashboard() {
                         >
                           Save Contact
                         </button>
-                        <button
-                          className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
-                          onClick={() => {
-                            void createContactFromPanel();
-                          }}
-                          type="button"
-                        >
-                          Create Contact
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-neutral-300 pt-3">
-                      <p className="mb-2 text-sm font-medium">Linked Events</p>
-                      {selectedContactLinkedEvents.length ? (
-                        <ul className="space-y-1">
-                          {selectedContactLinkedEvents.map((event) => (
-                            <li key={event.id}>
-                              <button
-                                className="text-left underline-offset-2 hover:underline"
-                                onClick={() => {
-                                  void loadEventBundle(event.id);
-                                }}
-                                type="button"
-                              >
-                                {event.title} ({formatDate(event.starts_at)})
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-neutral-600">No linked events.</p>
-                      )}
+                      ) : null}
+                      <button
+                        className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm"
+                        onClick={() => {
+                          void createContactFromPanel();
+                        }}
+                        type="button"
+                      >
+                        Add Contact
+                      </button>
                     </div>
                   </div>
-                )}
+
+                  <div className="border-t border-neutral-300 pt-3">
+                    <p className="mb-2 text-sm font-medium">Linked Events</p>
+                    {!selectedContact ? (
+                      <p className="text-neutral-600">Select a contact to view linked events.</p>
+                    ) : selectedContactLinkedEvents.length ? (
+                      <ul className="space-y-1">
+                        {selectedContactLinkedEvents.map((event) => (
+                          <li key={event.id}>
+                            <button
+                              className="text-left underline-offset-2 hover:underline"
+                              onClick={() => {
+                                void loadEventBundle(event.id);
+                              }}
+                              type="button"
+                            >
+                              {event.title} ({formatDate(event.starts_at)})
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-neutral-600">No linked events.</p>
+                    )}
+                  </div>
+                </div>
               </aside>
             </section>
           )}
@@ -1379,14 +1491,75 @@ export function MarketingDashboard() {
                 <input
                   className="min-h-[36px] w-[260px] border border-neutral-300 px-2 text-sm"
                   onChange={(event) => setReportSearch(event.target.value)}
-                  placeholder="Filter completed events"
+                  placeholder="Search reports"
                   value={reportSearch}
                 />
-                <select className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm" defaultValue="all_categories">
-                  <option value="all_categories">All Categories</option>
+                <input
+                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setReportDateFrom(event.target.value)}
+                  type="date"
+                  value={reportDateFrom}
+                />
+                <input
+                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setReportDateTo(event.target.value)}
+                  type="date"
+                  value={reportDateTo}
+                />
+                <select
+                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setReportCategoryFilter(event.target.value)}
+                  value={reportCategoryFilter}
+                >
+                  <option value="all">All Categories</option>
+                  {categoryOptions
+                    .filter((option) => option !== 'all')
+                    .map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
                 </select>
-                <button className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm text-neutral-500" disabled type="button">
-                  Export CSV (Coming Soon)
+                <select
+                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                  onChange={(event) => setReportStatusFilter(event.target.value as 'all' | MarketingEventStatus)}
+                  value={reportStatusFilter}
+                >
+                  <option value="all">All Statuses</option>
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status.value} value={status.value}>
+                      {status.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
+                  onClick={exportReportsCsv}
+                  type="button"
+                >
+                  Export CSV
+                </button>
+                <button
+                  className="min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white"
+                  onClick={() => {
+                    void createReport();
+                  }}
+                  type="button"
+                >
+                  Add Report
+                </button>
+                <button
+                  className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
+                  onClick={() => {
+                    setReportSearch('');
+                    setReportDateFrom('');
+                    setReportDateTo('');
+                    setReportCategoryFilter('all');
+                    setReportStatusFilter('all');
+                  }}
+                  type="button"
+                >
+                  Reset Filters
                 </button>
               </div>
 
@@ -1397,24 +1570,55 @@ export function MarketingDashboard() {
                       <th className="border-b border-neutral-300 px-3 py-2">Date</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Title</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Category</th>
-                      <th className="border-b border-neutral-300 px-3 py-2">Interactions</th>
-                      <th className="border-b border-neutral-300 px-3 py-2">Cost</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Event Link</th>
                       <th className="border-b border-neutral-300 px-3 py-2">Notes</th>
+                      <th className="border-b border-neutral-300 px-3 py-2">Perceived Impact</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {reports.map((entry) => (
-                      <tr key={entry.id}>
-                        <td className="border-b border-neutral-200 px-3 py-2">{formatDate(entry.starts_at)}</td>
-                        <td className="border-b border-neutral-200 px-3 py-2">{entry.title}</td>
-                        <td className="border-b border-neutral-200 px-3 py-2">{entry.category ?? '-'}</td>
-                        <td className="border-b border-neutral-200 px-3 py-2">{entry.estimated_interactions ?? '-'}</td>
-                        <td className="border-b border-neutral-200 px-3 py-2">
-                          {entry.budget_actual !== null ? `$${entry.budget_actual.toFixed(2)}` : '-'}
-                        </td>
-                        <td className="border-b border-neutral-200 px-3 py-2">{entry.outcome_summary ?? '-'}</td>
-                      </tr>
-                    ))}
+                    {reports.map((entry) => {
+                      const eventLink = getPrimaryEventLink(entry);
+                      return (
+                        <tr
+                          key={entry.id}
+                          className="cursor-pointer hover:bg-neutral-50"
+                          onClick={() => {
+                            void loadEventBundle(entry.id);
+                          }}
+                          onKeyDown={(keyboardEvent) => {
+                            if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                              keyboardEvent.preventDefault();
+                              void loadEventBundle(entry.id);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <td className="border-b border-neutral-200 px-3 py-2">{formatDate(entry.starts_at)}</td>
+                          <td className="border-b border-neutral-200 px-3 py-2">{entry.title}</td>
+                          <td className="border-b border-neutral-200 px-3 py-2">{entry.category ?? '-'}</td>
+                          <td className="border-b border-neutral-200 px-3 py-2">
+                            {eventLink ? (
+                              <a
+                                className="underline-offset-2 hover:underline"
+                                href={eventLink}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                }}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                Open Link
+                              </a>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                          <td className="border-b border-neutral-200 px-3 py-2">{entry.outcome_summary ?? '-'}</td>
+                          <td className="border-b border-neutral-200 px-3 py-2">{entry.engagement_notes ?? '-'}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
