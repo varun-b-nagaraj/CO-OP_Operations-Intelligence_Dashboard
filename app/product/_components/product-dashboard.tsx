@@ -20,12 +20,24 @@ interface ProductRow {
   id: string;
   name: string;
   category: string | null;
+  category_id: string | null;
+  subcategory_id: string | null;
   preferred_vendor_id: string | null;
   vendor_product_link: string | null;
   default_unit_cost: number | null;
   units_per_purchase: number;
+  default_order_quantity: number;
+  notes: string | null;
   sku: string | null;
   barcode_upc: string | null;
+  is_active: boolean;
+}
+
+interface ProductCategoryRow {
+  id: string;
+  name: string;
+  parent_category_id: string | null;
+  sort_order: number;
   is_active: boolean;
 }
 
@@ -194,6 +206,7 @@ export function ProductDashboard() {
 
   const [settingsMap, setSettingsMap] = useState<Record<string, string>>({});
   const [vendors, setVendors] = useState<VendorRow[]>([]);
+  const [productCategories, setProductCategories] = useState<ProductCategoryRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
@@ -203,6 +216,7 @@ export function ProductDashboard() {
   const [wishlist, setWishlist] = useState<WishlistRow[]>([]);
 
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
 
   const [orderFilters, setOrderFilters] = useState({
     status: 'all',
@@ -210,19 +224,30 @@ export function ProductDashboard() {
     priority: 'all',
     search: ''
   });
+  const [productFilters, setProductFilters] = useState({
+    category: 'all',
+    subcategory: 'all',
+    search: ''
+  });
 
 
   const [newProduct, setNewProduct] = useState({
     name: '',
-    category: '',
+    category_id: '',
+    subcategory_id: '',
     preferred_vendor_id: '',
     sku: '',
     vendor_product_link: '',
     default_unit_cost: '',
-    units_per_purchase: '1'
+    units_per_purchase: '1',
+    default_order_quantity: '1',
+    notes: ''
   });
   const [orderAttachmentDrafts, setOrderAttachmentDrafts] = useState<
     Record<string, { file: File | null; description: string }>
+  >({});
+  const [orderCatalogDrafts, setOrderCatalogDrafts] = useState<
+    Record<string, { product_id: string; quantity: number; unit_price: number; units_per_purchase: number }>
   >({});
 
   const [newVendor, setNewVendor] = useState({
@@ -254,12 +279,39 @@ export function ProductDashboard() {
     backFile: null as File | null
   });
   const [promptConvertDraft, setPromptConvertDraft] = useState<PromptConvertDraft | null>(null);
+  const [newProductCategory, setNewProductCategory] = useState({
+    name: '',
+    parent_category_id: ''
+  });
 
   const vendorById = useMemo(() => {
     const map = new Map<string, VendorRow>();
     vendors.forEach((vendor) => map.set(vendor.id, vendor));
     return map;
   }, [vendors]);
+
+  const categoryById = useMemo(() => {
+    const map = new Map<string, ProductCategoryRow>();
+    productCategories.forEach((category) => map.set(category.id, category));
+    return map;
+  }, [productCategories]);
+
+  const rootCategories = useMemo(
+    () => productCategories.filter((category) => !category.parent_category_id).sort((a, b) => a.name.localeCompare(b.name)),
+    [productCategories]
+  );
+
+  const subcategoriesByParent = useMemo(() => {
+    const map = new Map<string, ProductCategoryRow[]>();
+    for (const category of productCategories) {
+      if (!category.parent_category_id) continue;
+      const bucket = map.get(category.parent_category_id) ?? [];
+      bucket.push(category);
+      map.set(category.parent_category_id, bucket);
+    }
+    map.forEach((bucket) => bucket.sort((a, b) => a.name.localeCompare(b.name)));
+    return map;
+  }, [productCategories]);
 
   const productById = useMemo(() => {
     const map = new Map<string, ProductRow>();
@@ -292,6 +344,7 @@ export function ProductDashboard() {
     const [
       settingsResult,
       vendorsResult,
+      categoriesResult,
       productsResult,
       ordersResult,
       linesResult,
@@ -307,8 +360,15 @@ export function ProductDashboard() {
         .select('id,name,ordering_method,default_link,notes,is_active')
         .order('name', { ascending: true }),
       supabase
+        .from('product_categories')
+        .select('id,name,parent_category_id,sort_order,is_active')
+        .eq('is_active', true)
+        .order('parent_category_id', { ascending: true, nullsFirst: true })
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }),
+      supabase
         .from('product_products')
-        .select('id,name,category,preferred_vendor_id,vendor_product_link,default_unit_cost,units_per_purchase,sku,barcode_upc,is_active')
+        .select('id,name,category,category_id,subcategory_id,preferred_vendor_id,vendor_product_link,default_unit_cost,units_per_purchase,default_order_quantity,notes,sku,barcode_upc,is_active')
         .eq('is_active', true)
         .order('category', { ascending: true })
         .order('name', { ascending: true }),
@@ -347,6 +407,7 @@ export function ProductDashboard() {
     const firstError = [
       settingsResult.error,
       vendorsResult.error,
+      categoriesResult.error,
       productsResult.error,
       ordersResult.error,
       linesResult.error,
@@ -390,11 +451,13 @@ export function ProductDashboard() {
 
     setSettingsMap(nextSettings);
     setVendors(((vendorsResult.data ?? []) as VendorRow[]).filter((vendor) => vendor.is_active));
+    setProductCategories(((categoriesResult.data ?? []) as ProductCategoryRow[]).filter((category) => category.is_active));
     setProducts(
       ((productsResult.data ?? []) as ProductRow[]).map((product) => ({
         ...product,
         default_unit_cost: product.default_unit_cost === null ? null : Number(product.default_unit_cost),
-        units_per_purchase: Math.max(Number(product.units_per_purchase ?? 1), 1)
+        units_per_purchase: Math.max(Number(product.units_per_purchase ?? 1), 1),
+        default_order_quantity: Math.max(Number(product.default_order_quantity ?? 1), 1)
       }))
     );
     setOrders(orderRows);
@@ -456,8 +519,21 @@ export function ProductDashboard() {
   }, [orders, orderFilters, vendorById]);
 
   const productsByCategory = useMemo(() => {
-    return [...products].sort((a, b) => a.name.localeCompare(b.name));
-  }, [products]);
+    return [...products]
+      .filter((product) => {
+        if (productFilters.category !== 'all' && product.category_id !== productFilters.category) return false;
+        if (productFilters.subcategory !== 'all' && product.subcategory_id !== productFilters.subcategory) return false;
+        const query = productFilters.search.trim().toLowerCase();
+        if (!query) return true;
+        const categoryName = product.category_id ? categoryById.get(product.category_id)?.name ?? '' : '';
+        const subcategoryName = product.subcategory_id ? categoryById.get(product.subcategory_id)?.name ?? '' : '';
+        return [product.name, product.sku ?? '', product.notes ?? '', categoryName, subcategoryName]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [products, productFilters, categoryById]);
 
   const withSaveState = useCallback(async (work: () => Promise<void>) => {
     setSaving(true);
@@ -529,10 +605,14 @@ export function ProductDashboard() {
         .update({
           name: product.name,
           category: product.category,
+          category_id: product.category_id,
+          subcategory_id: product.subcategory_id,
           preferred_vendor_id: product.preferred_vendor_id,
           vendor_product_link: product.vendor_product_link,
           default_unit_cost: product.default_unit_cost,
           units_per_purchase: Math.max(Number(product.units_per_purchase) || 1, 1),
+          default_order_quantity: Math.max(Number(product.default_order_quantity) || 1, 1),
+          notes: product.notes,
           sku: product.sku,
           barcode_upc: product.barcode_upc,
           updated_by: 'dashboard'
@@ -552,26 +632,67 @@ export function ProductDashboard() {
     await withSaveState(async () => {
       const { error: insertError } = await supabase.from('product_products').insert({
         name: newProduct.name.trim(),
-        category: newProduct.category.trim() || null,
+        category_id: newProduct.category_id || null,
+        subcategory_id: newProduct.subcategory_id || null,
         preferred_vendor_id: newProduct.preferred_vendor_id || null,
         sku: newProduct.sku.trim() || null,
         vendor_product_link: newProduct.vendor_product_link.trim() || null,
         default_unit_cost: newProduct.default_unit_cost ? Number(newProduct.default_unit_cost) : null,
         units_per_purchase: Math.max(Number(newProduct.units_per_purchase) || 1, 1),
+        default_order_quantity: Math.max(Number(newProduct.default_order_quantity) || 1, 1),
+        notes: newProduct.notes.trim() || null,
         updated_by: 'dashboard'
       });
       if (insertError) throw insertError;
       setNewProduct({
         name: '',
-        category: '',
+        category_id: '',
+        subcategory_id: '',
         preferred_vendor_id: '',
         sku: '',
         vendor_product_link: '',
         default_unit_cost: '',
-        units_per_purchase: '1'
+        units_per_purchase: '1',
+        default_order_quantity: '1',
+        notes: ''
       });
       await loadDashboard();
       setNotice('Product added.');
+    });
+  };
+
+  const addProductCategory = async () => {
+    if (!newProductCategory.name.trim()) {
+      setError('Category name is required.');
+      return;
+    }
+
+    await withSaveState(async () => {
+      const { error: insertError } = await supabase.from('product_categories').insert({
+        name: newProductCategory.name.trim(),
+        parent_category_id: newProductCategory.parent_category_id || null,
+        updated_by: 'dashboard'
+      });
+      if (insertError) throw insertError;
+      setNewProductCategory({ name: '', parent_category_id: '' });
+      await loadDashboard();
+      setNotice('Category saved.');
+    });
+  };
+
+  const saveProductCategory = async (category: ProductCategoryRow) => {
+    await withSaveState(async () => {
+      const { error: updateError } = await supabase
+        .from('product_categories')
+        .update({
+          name: category.name,
+          parent_category_id: category.parent_category_id,
+          sort_order: category.sort_order,
+          updated_by: 'dashboard'
+        })
+        .eq('id', category.id);
+      if (updateError) throw updateError;
+      setNotice('Category updated.');
     });
   };
 
@@ -660,6 +781,35 @@ export function ProductDashboard() {
       if (insertError) throw insertError;
       await loadDashboard();
       setNotice('Line added.');
+    });
+  };
+
+  const addOrderLineFromCatalog = async (
+    orderId: string,
+    productId: string,
+    quantity?: number,
+    unitPrice?: number,
+    unitsPerPurchase?: number
+  ) => {
+    const product = productById.get(productId);
+    if (!product) {
+      setError('Selected catalog item not found.');
+      return;
+    }
+    await withSaveState(async () => {
+      const { error: insertError } = await supabase.from('product_purchase_order_lines').insert({
+        purchase_order_id: orderId,
+        product_id: product.id,
+        custom_item_name: null,
+        quantity: Math.max(Math.trunc(quantity ?? product.default_order_quantity ?? 1), 1),
+        unit_price: Math.max(Number(unitPrice ?? product.default_unit_cost ?? 0), 0),
+        units_per_purchase: Math.max(Math.trunc(unitsPerPurchase ?? product.units_per_purchase ?? 1), 1),
+        product_link: product.vendor_product_link,
+        notes: null
+      });
+      if (insertError) throw insertError;
+      await loadDashboard();
+      setNotice('Catalog item added to order.');
     });
   };
 
@@ -1058,7 +1208,7 @@ export function ProductDashboard() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold">Orders</h2>
-                    <p className="mt-1 text-sm text-neutral-600">Click an order number to open full details inline.</p>
+                    <p className="mt-1 text-sm text-neutral-600">Click any order row to expand and edit everything inline.</p>
                   </div>
                   <button
                     className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white hover:bg-[#6a0000] disabled:opacity-60"
@@ -1133,16 +1283,12 @@ export function ProductDashboard() {
                       const isExpanded = expandedOrderId === order.id;
                       return (
                         <Fragment key={order.id}>
-                          <tr className="border-b border-neutral-200 hover:bg-neutral-50" key={order.id}>
-                            <td className="px-4 py-3 font-medium">
-                              <button
-                                className="underline-offset-2 hover:underline"
-                                onClick={() => setExpandedOrderId((prev) => (prev === order.id ? null : order.id))}
-                                type="button"
-                              >
-                                {order.order_number}
-                              </button>
-                            </td>
+                          <tr
+                            className="cursor-pointer border-b border-neutral-200 hover:bg-neutral-50"
+                            key={order.id}
+                            onClick={() => setExpandedOrderId((prev) => (prev === order.id ? null : order.id))}
+                          >
+                            <td className="px-4 py-3 font-medium">{order.order_number}</td>
                             <td className="px-4 py-3">{vendorById.get(order.vendor_id)?.name ?? 'Unknown'}</td>
                             <td className="px-4 py-3">{formatLabel(order.status)}</td>
                             <td className="px-4 py-3">{order.date_placed ?? '-'}</td>
@@ -1296,6 +1442,7 @@ export function ProductDashboard() {
                                         <th className="border-b border-neutral-300 px-3 py-2">Items Per Ordered Item</th>
                                         <th className="border-b border-neutral-300 px-3 py-2">Link</th>
                                         <th className="border-b border-neutral-300 px-3 py-2">Notes</th>
+                                        <th className="border-b border-neutral-300 px-3 py-2">Line Total</th>
                                         <th className="border-b border-neutral-300 px-3 py-2">Actions</th>
                                       </tr>
                                     </thead>
@@ -1467,6 +1614,9 @@ export function ProductDashboard() {
                                               value={line.notes ?? ''}
                                             />
                                           </td>
+                                          <td className="px-3 py-2 font-medium">
+                                            {currency.format(Math.max(Number(line.quantity) || 0, 0) * Math.max(Number(line.unit_price) || 0, 0))}
+                                          </td>
                                           <td className="px-3 py-2">
                                             <div className="flex gap-2">
                                               <button
@@ -1572,6 +1722,108 @@ export function ProductDashboard() {
                                   >
                                     + Add Line
                                   </button>
+                                </div>
+
+                                <div className="mt-3 border border-neutral-300 bg-white p-3">
+                                  <h4 className="text-sm font-semibold">Add Existing Catalog Item</h4>
+                                  <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[2fr_1fr_1fr_1fr_auto]">
+                                    <select
+                                      className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
+                                      onChange={(event) => {
+                                        const nextProductId = event.target.value;
+                                        const selected = productById.get(nextProductId);
+                                        setOrderCatalogDrafts((prev) => ({
+                                          ...prev,
+                                          [order.id]: {
+                                            product_id: nextProductId,
+                                            quantity: selected?.default_order_quantity ?? prev[order.id]?.quantity ?? 1,
+                                            unit_price: Number(selected?.default_unit_cost ?? prev[order.id]?.unit_price ?? 0),
+                                            units_per_purchase: selected?.units_per_purchase ?? prev[order.id]?.units_per_purchase ?? 1
+                                          }
+                                        }));
+                                      }}
+                                      value={orderCatalogDrafts[order.id]?.product_id ?? ''}
+                                    >
+                                      <option value="">Select existing item</option>
+                                      {productsByCategory.map((product) => (
+                                        <option key={product.id} value={product.id}>
+                                          {product.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                                      min={1}
+                                      onChange={(event) =>
+                                        setOrderCatalogDrafts((prev) => ({
+                                          ...prev,
+                                          [order.id]: {
+                                            product_id: prev[order.id]?.product_id ?? '',
+                                            quantity: Math.max(Number(event.target.value) || 1, 1),
+                                            unit_price: prev[order.id]?.unit_price ?? 0,
+                                            units_per_purchase: prev[order.id]?.units_per_purchase ?? 1
+                                          }
+                                        }))
+                                      }
+                                      placeholder="Qty"
+                                      step={1}
+                                      type="number"
+                                      value={orderCatalogDrafts[order.id]?.quantity ?? 1}
+                                    />
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                                      min={0}
+                                      onChange={(event) =>
+                                        setOrderCatalogDrafts((prev) => ({
+                                          ...prev,
+                                          [order.id]: {
+                                            product_id: prev[order.id]?.product_id ?? '',
+                                            quantity: prev[order.id]?.quantity ?? 1,
+                                            unit_price: Math.max(Number(event.target.value) || 0, 0),
+                                            units_per_purchase: prev[order.id]?.units_per_purchase ?? 1
+                                          }
+                                        }))
+                                      }
+                                      placeholder="Unit Price"
+                                      step="0.01"
+                                      type="number"
+                                      value={orderCatalogDrafts[order.id]?.unit_price ?? 0}
+                                    />
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                                      min={1}
+                                      onChange={(event) =>
+                                        setOrderCatalogDrafts((prev) => ({
+                                          ...prev,
+                                          [order.id]: {
+                                            product_id: prev[order.id]?.product_id ?? '',
+                                            quantity: prev[order.id]?.quantity ?? 1,
+                                            unit_price: prev[order.id]?.unit_price ?? 0,
+                                            units_per_purchase: Math.max(Number(event.target.value) || 1, 1)
+                                          }
+                                        }))
+                                      }
+                                      placeholder="Items / Ordered"
+                                      step={1}
+                                      type="number"
+                                      value={orderCatalogDrafts[order.id]?.units_per_purchase ?? 1}
+                                    />
+                                    <button
+                                      className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]"
+                                      onClick={() =>
+                                        void addOrderLineFromCatalog(
+                                          order.id,
+                                          orderCatalogDrafts[order.id]?.product_id ?? '',
+                                          orderCatalogDrafts[order.id]?.quantity,
+                                          orderCatalogDrafts[order.id]?.unit_price,
+                                          orderCatalogDrafts[order.id]?.units_per_purchase
+                                        )
+                                      }
+                                      type="button"
+                                    >
+                                      Add Existing
+                                    </button>
+                                  </div>
                                 </div>
                               </td>
                             </tr>
@@ -1719,13 +1971,43 @@ export function ProductDashboard() {
 
               <section className="border-b border-neutral-300 px-4 py-4 md:px-6">
                 <h3 className="text-base font-semibold">Add Product</h3>
-                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-4">
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm"
                     onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))}
                     placeholder="Product Name"
                     value={newProduct.name}
                   />
+                  <select
+                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                    onChange={(event) =>
+                      setNewProduct((prev) => ({
+                        ...prev,
+                        category_id: event.target.value,
+                        subcategory_id: ''
+                      }))
+                    }
+                    value={newProduct.category_id}
+                  >
+                    <option value="">Category</option>
+                    {rootCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                    onChange={(event) => setNewProduct((prev) => ({ ...prev, subcategory_id: event.target.value }))}
+                    value={newProduct.subcategory_id}
+                  >
+                    <option value="">Subcategory (optional)</option>
+                    {(newProduct.category_id ? subcategoriesByParent.get(newProduct.category_id) ?? [] : []).map((subcategory) => (
+                      <option key={subcategory.id} value={subcategory.id}>
+                        {subcategory.name}
+                      </option>
+                    ))}
+                  </select>
                   <select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setNewProduct((prev) => ({ ...prev, preferred_vendor_id: event.target.value }))}
@@ -1758,11 +2040,26 @@ export function ProductDashboard() {
                     step={1}
                     value={newProduct.units_per_purchase}
                   />
+                  <input
+                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
+                    min={1}
+                    onChange={(event) => setNewProduct((prev) => ({ ...prev, default_order_quantity: event.target.value }))}
+                    placeholder="Default Qty To Order"
+                    step={1}
+                    type="number"
+                    value={newProduct.default_order_quantity}
+                  />
+                  <input
+                    className="min-h-[36px] border border-neutral-300 px-2 text-sm md:col-span-2"
+                    onChange={(event) => setNewProduct((prev) => ({ ...prev, vendor_product_link: event.target.value }))}
+                    placeholder="Vendor Link"
+                    value={newProduct.vendor_product_link}
+                  />
                   <textarea
-                    className="min-h-[72px] border border-neutral-300 px-2 py-2 text-sm md:col-span-3"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, category: event.target.value }))}
-                    placeholder="Description"
-                    value={newProduct.category}
+                    className="min-h-[72px] border border-neutral-300 px-2 py-2 text-sm md:col-span-4"
+                    onChange={(event) => setNewProduct((prev) => ({ ...prev, notes: event.target.value }))}
+                    placeholder="Notes"
+                    value={newProduct.notes}
                   />
                 </div>
                 <button
@@ -1775,116 +2072,238 @@ export function ProductDashboard() {
               </section>
 
               <section className="space-y-4 px-4 py-4 md:px-6">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                  <select
+                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                    onChange={(event) =>
+                      setProductFilters((prev) => ({
+                        ...prev,
+                        category: event.target.value,
+                        subcategory: 'all'
+                      }))
+                    }
+                    value={productFilters.category}
+                  >
+                    <option value="all">All Categories</option>
+                    {rootCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                    onChange={(event) => setProductFilters((prev) => ({ ...prev, subcategory: event.target.value }))}
+                    value={productFilters.subcategory}
+                  >
+                    <option value="all">All Subcategories</option>
+                    {(productFilters.category !== 'all'
+                      ? subcategoriesByParent.get(productFilters.category) ?? []
+                      : productCategories.filter((category) => !!category.parent_category_id)
+                    ).map((subcategory) => (
+                      <option key={subcategory.id} value={subcategory.id}>
+                        {subcategory.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
+                    onChange={(event) => setProductFilters((prev) => ({ ...prev, search: event.target.value }))}
+                    placeholder="Search catalog"
+                    type="search"
+                    value={productFilters.search}
+                  />
+                </div>
                 <div className="overflow-x-auto border border-neutral-300">
                   <table className="min-w-full text-sm">
                     <thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
                       <tr>
                         <th className="border-b border-neutral-200 px-3 py-2">Name</th>
-                        <th className="border-b border-neutral-200 px-3 py-2">Description</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Category</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Subcategory</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Default Qty</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Cost</th>
                         <th className="border-b border-neutral-200 px-3 py-2">Vendor</th>
-                        <th className="border-b border-neutral-200 px-3 py-2">SKU</th>
-                        <th className="border-b border-neutral-200 px-3 py-2">Cost Of 1 Ordered Item</th>
-                        <th className="border-b border-neutral-200 px-3 py-2">Items Per Ordered Item</th>
-                        <th className="border-b border-neutral-200 px-3 py-2">Vendor Link</th>
-                        <th className="border-b border-neutral-200 px-3 py-2">Save</th>
+                        <th className="border-b border-neutral-200 px-3 py-2">Expand</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {productsByCategory.map((product) => (
-                        <tr className="border-b border-neutral-100" key={product.id}>
-                          <td className="px-3 py-2">
-                            <input
-                              className="min-h-[34px] w-full border border-neutral-300 px-2"
-                              onChange={(event) => {
-                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, name: event.target.value } : entry));
-                              }}
-                              value={product.name}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <textarea
-                              className="min-h-[70px] w-full border border-neutral-300 px-2 py-2"
-                              onChange={(event) => {
-                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, category: event.target.value } : entry));
-                              }}
-                              value={product.category ?? ''}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <select
-                              className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
-                              onChange={(event) => {
-                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, preferred_vendor_id: event.target.value || null } : entry));
-                              }}
-                              value={product.preferred_vendor_id ?? ''}
+                      {productsByCategory.map((product) => {
+                        const isExpanded = expandedProductId === product.id;
+                        return (
+                          <Fragment key={product.id}>
+                            <tr
+                              className="cursor-pointer border-b border-neutral-100 hover:bg-neutral-50"
+                              onClick={() => setExpandedProductId((prev) => (prev === product.id ? null : product.id))}
                             >
-                              <option value="">None</option>
-                              {vendors.map((vendor) => (
-                                <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="min-h-[34px] w-full border border-neutral-300 px-2"
-                              onChange={(event) => {
-                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, sku: event.target.value } : entry));
-                              }}
-                              value={product.sku ?? ''}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="min-h-[34px] w-32 border border-neutral-300 px-2"
-                              min={0}
-                              onChange={(event) => {
-                                const next = event.target.value;
-                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, default_unit_cost: next ? Number(next) : null } : entry));
-                              }}
-                              step="0.01"
-                              type="number"
-                              value={product.default_unit_cost ?? ''}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="min-h-[34px] w-28 border border-neutral-300 px-2"
-                              min={1}
-                              onChange={(event) => {
-                                const next = event.target.value;
-                                setProducts((prev) =>
-                                  prev.map((entry) =>
-                                    entry.id === product.id
-                                      ? { ...entry, units_per_purchase: Math.max(Number(next) || 1, 1) }
-                                      : entry
-                                  )
-                                );
-                              }}
-                              step={1}
-                              type="number"
-                              value={product.units_per_purchase}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="min-h-[34px] w-full border border-neutral-300 px-2"
-                              onChange={(event) => {
-                                setProducts((prev) => prev.map((entry) => entry.id === product.id ? { ...entry, vendor_product_link: event.target.value } : entry));
-                              }}
-                              value={product.vendor_product_link ?? ''}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <button
-                              className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
-                              onClick={() => void saveProduct(product)}
-                              type="button"
-                            >
-                              Save
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                              <td className="px-3 py-2 font-medium">{product.name}</td>
+                              <td className="px-3 py-2">{product.category_id ? categoryById.get(product.category_id)?.name ?? '-' : '-'}</td>
+                              <td className="px-3 py-2">{product.subcategory_id ? categoryById.get(product.subcategory_id)?.name ?? '-' : '-'}</td>
+                              <td className="px-3 py-2">{product.default_order_quantity}</td>
+                              <td className="px-3 py-2">{currency.format(Number(product.default_unit_cost ?? 0))}</td>
+                              <td className="px-3 py-2">{product.preferred_vendor_id ? vendorById.get(product.preferred_vendor_id)?.name ?? '-' : '-'}</td>
+                              <td className="px-3 py-2">{isExpanded ? 'Hide' : 'Edit'}</td>
+                            </tr>
+                            {isExpanded ? (
+                              <tr className="border-b border-neutral-200 bg-neutral-50">
+                                <td className="px-3 py-3" colSpan={7}>
+                                  <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2"
+                                      onChange={(event) => {
+                                        setProducts((prev) => prev.map((entry) => (entry.id === product.id ? { ...entry, name: event.target.value } : entry)));
+                                      }}
+                                      value={product.name}
+                                    />
+                                    <select
+                                      className="min-h-[34px] border border-neutral-300 bg-white px-2"
+                                      onChange={(event) =>
+                                        setProducts((prev) =>
+                                          prev.map((entry) =>
+                                            entry.id === product.id
+                                              ? { ...entry, category_id: event.target.value || null, subcategory_id: null }
+                                              : entry
+                                          )
+                                        )
+                                      }
+                                      value={product.category_id ?? ''}
+                                    >
+                                      <option value="">Category</option>
+                                      {rootCategories.map((category) => (
+                                        <option key={category.id} value={category.id}>
+                                          {category.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <select
+                                      className="min-h-[34px] border border-neutral-300 bg-white px-2"
+                                      onChange={(event) =>
+                                        setProducts((prev) =>
+                                          prev.map((entry) =>
+                                            entry.id === product.id ? { ...entry, subcategory_id: event.target.value || null } : entry
+                                          )
+                                        )
+                                      }
+                                      value={product.subcategory_id ?? ''}
+                                    >
+                                      <option value="">Subcategory</option>
+                                      {(product.category_id ? subcategoriesByParent.get(product.category_id) ?? [] : []).map((subcategory) => (
+                                        <option key={subcategory.id} value={subcategory.id}>
+                                          {subcategory.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <select
+                                      className="min-h-[34px] border border-neutral-300 bg-white px-2"
+                                      onChange={(event) =>
+                                        setProducts((prev) =>
+                                          prev.map((entry) =>
+                                            entry.id === product.id ? { ...entry, preferred_vendor_id: event.target.value || null } : entry
+                                          )
+                                        )
+                                      }
+                                      value={product.preferred_vendor_id ?? ''}
+                                    >
+                                      <option value="">Vendor</option>
+                                      {vendors.map((vendor) => (
+                                        <option key={vendor.id} value={vendor.id}>
+                                          {vendor.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2"
+                                      onChange={(event) =>
+                                        setProducts((prev) => prev.map((entry) => (entry.id === product.id ? { ...entry, sku: event.target.value } : entry)))
+                                      }
+                                      placeholder="SKU"
+                                      value={product.sku ?? ''}
+                                    />
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2"
+                                      min={0}
+                                      onChange={(event) =>
+                                        setProducts((prev) =>
+                                          prev.map((entry) =>
+                                            entry.id === product.id ? { ...entry, default_unit_cost: event.target.value ? Number(event.target.value) : null } : entry
+                                          )
+                                        )
+                                      }
+                                      placeholder="Cost of 1 ordered item"
+                                      step="0.01"
+                                      type="number"
+                                      value={product.default_unit_cost ?? ''}
+                                    />
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2"
+                                      min={1}
+                                      onChange={(event) =>
+                                        setProducts((prev) =>
+                                          prev.map((entry) =>
+                                            entry.id === product.id ? { ...entry, units_per_purchase: Math.max(Number(event.target.value) || 1, 1) } : entry
+                                          )
+                                        )
+                                      }
+                                      placeholder="Items per ordered item"
+                                      step={1}
+                                      type="number"
+                                      value={product.units_per_purchase}
+                                    />
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2"
+                                      min={1}
+                                      onChange={(event) =>
+                                        setProducts((prev) =>
+                                          prev.map((entry) =>
+                                            entry.id === product.id ? { ...entry, default_order_quantity: Math.max(Number(event.target.value) || 1, 1) } : entry
+                                          )
+                                        )
+                                      }
+                                      placeholder="Default order qty"
+                                      step={1}
+                                      type="number"
+                                      value={product.default_order_quantity}
+                                    />
+                                    <input
+                                      className="min-h-[34px] border border-neutral-300 px-2 md:col-span-2"
+                                      onChange={(event) =>
+                                        setProducts((prev) =>
+                                          prev.map((entry) =>
+                                            entry.id === product.id ? { ...entry, vendor_product_link: event.target.value } : entry
+                                          )
+                                        )
+                                      }
+                                      placeholder="Vendor Link"
+                                      value={product.vendor_product_link ?? ''}
+                                    />
+                                    <textarea
+                                      className="min-h-[70px] border border-neutral-300 px-2 py-2 md:col-span-4"
+                                      onChange={(event) =>
+                                        setProducts((prev) =>
+                                          prev.map((entry) =>
+                                            entry.id === product.id ? { ...entry, notes: event.target.value } : entry
+                                          )
+                                        )
+                                      }
+                                      placeholder="Notes"
+                                      value={product.notes ?? ''}
+                                    />
+                                  </div>
+                                  <div className="mt-2">
+                                    <button
+                                      className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
+                                      onClick={() => void saveProduct(product)}
+                                      type="button"
+                                    >
+                                      Save Product
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : null}
+                          </Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2402,6 +2821,98 @@ export function ProductDashboard() {
                     value={settingsMap['prompt.low_stock_cutoff'] ?? '2'}
                   />
                 </label>
+              </section>
+              <section className="border-t border-neutral-300 px-4 py-4 md:px-6">
+                <h3 className="text-base font-semibold">Product Categories</h3>
+                <p className="mt-1 text-sm text-neutral-600">Create main categories and subcategories used by the product catalog.</p>
+                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[2fr_2fr_auto]">
+                  <input
+                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
+                    onChange={(event) => setNewProductCategory((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="Category or Subcategory Name"
+                    value={newProductCategory.name}
+                  />
+                  <select
+                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
+                    onChange={(event) => setNewProductCategory((prev) => ({ ...prev, parent_category_id: event.target.value }))}
+                    value={newProductCategory.parent_category_id}
+                  >
+                    <option value="">Main category</option>
+                    {rootCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        Subcategory under: {category.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                    onClick={() => void addProductCategory()}
+                    type="button"
+                  >
+                    Add Category
+                  </button>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {productCategories.map((category) => (
+                    <div className="grid grid-cols-1 gap-2 border border-neutral-200 p-2 md:grid-cols-[2fr_2fr_1fr_auto]" key={category.id}>
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        onChange={(event) =>
+                          setProductCategories((prev) =>
+                            prev.map((entry) => (entry.id === category.id ? { ...entry, name: event.target.value } : entry))
+                          )
+                        }
+                        value={category.name}
+                      />
+                      <select
+                        className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
+                        onChange={(event) =>
+                          setProductCategories((prev) =>
+                            prev.map((entry) =>
+                              entry.id === category.id
+                                ? { ...entry, parent_category_id: event.target.value || null }
+                                : entry
+                            )
+                          )
+                        }
+                        value={category.parent_category_id ?? ''}
+                      >
+                        <option value="">Main category</option>
+                        {rootCategories
+                          .filter((entry) => entry.id !== category.id)
+                          .map((entry) => (
+                            <option key={entry.id} value={entry.id}>
+                              Subcategory under: {entry.name}
+                            </option>
+                          ))}
+                      </select>
+                      <input
+                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
+                        min={0}
+                        onChange={(event) =>
+                          setProductCategories((prev) =>
+                            prev.map((entry) =>
+                              entry.id === category.id
+                                ? { ...entry, sort_order: Math.max(Number(event.target.value) || 0, 0) }
+                                : entry
+                            )
+                          )
+                        }
+                        placeholder="Sort"
+                        step={1}
+                        type="number"
+                        value={category.sort_order}
+                      />
+                      <button
+                        className="min-h-[34px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
+                        onClick={() => void saveProductCategory(category)}
+                        type="button"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </section>
             </section>
           )}

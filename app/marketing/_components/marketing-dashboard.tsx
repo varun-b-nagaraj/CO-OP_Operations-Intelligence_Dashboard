@@ -20,7 +20,7 @@ import type {
 } from '@/lib/marketing/types';
 import { createBrowserClient } from '@/lib/supabase';
 
-type DashboardTab = 'calendar' | 'events' | 'contacts' | 'coordinators' | 'reports';
+type DashboardTab = 'calendar' | 'events' | 'contacts' | 'coordinators' | 'reports' | 'settings';
 type CalendarView = 'month' | 'list';
 
 type EventDraft = MarketingEventRow;
@@ -31,7 +31,8 @@ const TABS: Array<{ id: DashboardTab; label: string }> = [
   { id: 'events', label: 'Events' },
   { id: 'contacts', label: 'Contacts' },
   { id: 'coordinators', label: 'Coordinators' },
-  { id: 'reports', label: 'Reports' }
+  { id: 'reports', label: 'Reports' },
+  { id: 'settings', label: 'Settings' }
 ];
 
 const STATUS_OPTIONS: Array<{ value: MarketingEventStatus; label: string }> = [
@@ -69,6 +70,70 @@ interface PendingAssetPreview {
   previewUrl: string;
   fileName: string;
   assetType: AssetType;
+}
+
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
+function CustomSelect(props: {
+  value: string;
+  onChange: (value: string) => void;
+  options: SelectOption[];
+  className?: string;
+}) {
+  const { value, onChange, options, className } = props;
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const activeLabel = options.find((entry) => entry.value === value)?.label ?? options[0]?.label ?? '';
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocumentClick = (event: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (wrapperRef.current.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocumentClick);
+    return () => {
+      document.removeEventListener('mousedown', onDocumentClick);
+    };
+  }, [open]);
+
+  return (
+    <div className={`relative ${className ?? ''}`} ref={wrapperRef}>
+      <button
+        className="min-h-[34px] w-full border border-neutral-300 bg-white px-2 text-left text-sm"
+        onClick={() => setOpen((prev) => !prev)}
+        type="button"
+      >
+        <span className="flex items-center justify-between gap-2">
+          <span className="truncate">{activeLabel}</span>
+          <span className="text-xs text-neutral-500">{open ? '▲' : '▼'}</span>
+        </span>
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+4px)] z-50 max-h-60 w-full overflow-auto border border-neutral-300 bg-white shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              className={`block min-h-[34px] w-full border-b border-neutral-200 px-2 py-1 text-left text-sm last:border-b-0 ${
+                option.value === value ? 'bg-neutral-100 font-medium' : 'hover:bg-neutral-50'
+              }`}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function formatLabel(value: string) {
@@ -313,8 +378,12 @@ export function MarketingDashboard() {
   const [eventDateFrom, setEventDateFrom] = useState('');
   const [eventDateTo, setEventDateTo] = useState('');
   const [eventSort, setEventSort] = useState<'upcoming' | 'recently_updated' | 'recently_completed'>('upcoming');
-  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [settingsOptionalInfo, setSettingsOptionalInfo] = useState({
+    defaultEventNotes: '',
+    defaultReportNotes: '',
+    departmentPrompt: ''
+  });
 
   const [pendingAssetPreviews, setPendingAssetPreviews] = useState<PendingAssetPreview[]>([]);
   const [failedAssetUploads, setFailedAssetUploads] = useState<File[]>([]);
@@ -529,6 +598,23 @@ export function MarketingDashboard() {
     };
   }, [reportEditorOpen, reportLinkSearch, repository]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem('marketing_settings_optional_info');
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as typeof settingsOptionalInfo;
+      setSettingsOptionalInfo(parsed);
+    } catch {
+      // ignore malformed settings payload
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('marketing_settings_optional_info', JSON.stringify(settingsOptionalInfo));
+  }, [settingsOptionalInfo]);
+
   const loadEventBundle = useCallback(
     async (eventId: string) => {
       setLoadingDrawer(true);
@@ -611,7 +697,6 @@ export function MarketingDashboard() {
         return exists ? prev : [...prev, created].sort((a, b) => a.name.localeCompare(b.name));
       });
       setNewCategoryName('');
-      setCategoryModalOpen(false);
       setNotice(`Category "${created.name}" added.`);
     } catch (categoryError) {
       const message = categoryError instanceof Error ? categoryError.message : 'Unable to create category.';
@@ -1221,6 +1306,13 @@ export function MarketingDashboard() {
     });
   }, [internalCoordinators, eventBundle, eventContactSearch]);
 
+  const filteredEventCategorySuggestions = useMemo(() => {
+    const query = (eventDraft?.category ?? '').trim().toLowerCase();
+    const sorted = [...eventCategories].sort((a, b) => a.name.localeCompare(b.name));
+    if (!query) return sorted.slice(0, 10);
+    return sorted.filter((entry) => entry.name.toLowerCase().includes(query)).slice(0, 10);
+  }, [eventCategories, eventDraft?.category]);
+
   if (loading) {
     return (
       <main className="min-h-screen w-full">
@@ -1331,30 +1423,25 @@ export function MarketingDashboard() {
                     </button>
                   </div>
 
-                  <select
-                    className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setStatusFilter(event.target.value as 'all' | MarketingEventStatus)}
+                  <CustomSelect
+                    className="w-[170px]"
+                    onChange={(value) => setStatusFilter(value as 'all' | MarketingEventStatus)}
+                    options={[
+                      { value: 'all', label: 'All Statuses' },
+                      ...STATUS_OPTIONS.map((status) => ({ value: status.value, label: status.label }))
+                    ]}
                     value={statusFilter}
-                  >
-                    <option value="all">All Statuses</option>
-                    {STATUS_OPTIONS.map((status) => (
-                      <option key={status.value} value={status.value}>
-                        {status.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
 
-                  <select
-                    className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setCategoryFilter(event.target.value)}
+                  <CustomSelect
+                    className="w-[190px]"
+                    onChange={setCategoryFilter}
+                    options={categoryOptions.map((option) => ({
+                      value: option,
+                      label: option === 'all' ? 'All Categories' : option
+                    }))}
                     value={categoryFilter}
-                  >
-                    {categoryOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option === 'all' ? 'All Categories' : option}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </div>
 
@@ -1509,36 +1596,24 @@ export function MarketingDashboard() {
                   placeholder="Search"
                   value={searchQuery}
                 />
-                <select
-                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                  onChange={(event) => setStatusFilter(event.target.value as 'all' | MarketingEventStatus)}
+                <CustomSelect
+                  className="w-[170px]"
+                  onChange={(value) => setStatusFilter(value as 'all' | MarketingEventStatus)}
+                  options={[
+                    { value: 'all', label: 'All Statuses' },
+                    ...STATUS_OPTIONS.map((status) => ({ value: status.value, label: status.label }))
+                  ]}
                   value={statusFilter}
-                >
-                  <option value="all">All Statuses</option>
-                  {STATUS_OPTIONS.map((status) => (
-                    <option key={status.value} value={status.value}>
-                      {status.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                  onChange={(event) => setCategoryFilter(event.target.value)}
+                />
+                <CustomSelect
+                  className="w-[190px]"
+                  onChange={setCategoryFilter}
+                  options={categoryOptions.map((option) => ({
+                    value: option,
+                    label: option === 'all' ? 'All Categories' : option
+                  }))}
                   value={categoryFilter}
-                >
-                  {categoryOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option === 'all' ? 'All Categories' : option}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                  onClick={() => setCategoryModalOpen(true)}
-                  type="button"
-                >
-                  Manage Categories
-                </button>
+                />
                 <input
                   className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                   onChange={(event) => setEventDateFrom(event.target.value)}
@@ -1551,15 +1626,16 @@ export function MarketingDashboard() {
                   type="date"
                   value={eventDateTo}
                 />
-                <select
-                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                  onChange={(event) => setEventSort(event.target.value as 'upcoming' | 'recently_updated' | 'recently_completed')}
+                <CustomSelect
+                  className="w-[210px]"
+                  onChange={(value) => setEventSort(value as 'upcoming' | 'recently_updated' | 'recently_completed')}
+                  options={[
+                    { value: 'upcoming', label: 'Sort: Upcoming first' },
+                    { value: 'recently_updated', label: 'Sort: Recently updated' },
+                    { value: 'recently_completed', label: 'Sort: Recently completed' }
+                  ]}
                   value={eventSort}
-                >
-                  <option value="upcoming">Sort: Upcoming first</option>
-                  <option value="recently_updated">Sort: Recently updated</option>
-                  <option value="recently_completed">Sort: Recently completed</option>
-                </select>
+                />
               </div>
 
               <div className="overflow-auto border border-neutral-300 bg-white">
@@ -1631,7 +1707,7 @@ export function MarketingDashboard() {
                   value={contactSearch}
                 />
                 <button
-                  className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
+                  className="min-h-[36px] min-w-[148px] border border-neutral-700 bg-neutral-800 px-4 text-sm text-white"
                   onClick={() => {
                     setContactCreateDraft({
                       organization: '',
@@ -1689,14 +1765,18 @@ export function MarketingDashboard() {
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                   <button className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white" onClick={() => { void saveSelectedContact(); }} type="button">Save Contact</button>
-                                  <select className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm" onChange={(event) => setContactEventToLink(event.target.value)} value={contactEventToLink}>
-                                    <option value="">Link to event...</option>
-                                    {events.map((entry) => (
-                                      <option key={entry.id} value={entry.id}>
-                                        {entry.title} ({formatDate(entry.starts_at)})
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <CustomSelect
+                                    className="min-w-[260px]"
+                                    onChange={setContactEventToLink}
+                                    options={[
+                                      { value: '', label: 'Link to event...' },
+                                      ...events.map((entry) => ({
+                                        value: entry.id,
+                                        label: `${entry.title} (${formatDate(entry.starts_at)})`
+                                      }))
+                                    ]}
+                                    value={contactEventToLink}
+                                  />
                                   <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => { void linkSelectedContactToEvent(); }} type="button">Link</button>
                                 </div>
                               </td>
@@ -1721,7 +1801,7 @@ export function MarketingDashboard() {
                   value={internalCoordinatorSearch}
                 />
                 <button
-                  className="min-h-[36px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white"
+                  className="min-h-[36px] min-w-[168px] border border-neutral-700 bg-neutral-800 px-4 text-sm text-white"
                   onClick={() => {
                     setInternalCoordinatorCreateDraft({
                       full_name: '',
@@ -1777,14 +1857,18 @@ export function MarketingDashboard() {
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                   <button className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-sm text-white" onClick={() => { void saveSelectedInternalCoordinator(); }} type="button">Save Coordinator</button>
-                                  <select className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm" onChange={(event) => setCoordinatorEventToLink(event.target.value)} value={coordinatorEventToLink}>
-                                    <option value="">Link to event...</option>
-                                    {events.map((entry) => (
-                                      <option key={entry.id} value={entry.id}>
-                                        {entry.title} ({formatDate(entry.starts_at)})
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <CustomSelect
+                                    className="min-w-[260px]"
+                                    onChange={setCoordinatorEventToLink}
+                                    options={[
+                                      { value: '', label: 'Link to event...' },
+                                      ...events.map((entry) => ({
+                                        value: entry.id,
+                                        label: `${entry.title} (${formatDate(entry.starts_at)})`
+                                      }))
+                                    ]}
+                                    value={coordinatorEventToLink}
+                                  />
                                   <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => { void linkSelectedCoordinatorToEvent(); }} type="button">Link</button>
                                 </div>
                               </td>
@@ -1795,6 +1879,85 @@ export function MarketingDashboard() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'settings' && (
+            <section className="space-y-3">
+              <div className="border border-neutral-300 bg-white p-3">
+                <h3 className="text-sm font-semibold text-neutral-900">Category Settings</h3>
+                <p className="mt-1 text-xs text-neutral-600">Create and manage reusable event categories used across Calendar/Events/Reports.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <input
+                    className="min-h-[36px] min-w-[260px] flex-1 border border-neutral-300 px-2 text-sm"
+                    onChange={(event) => setNewCategoryName(event.target.value)}
+                    placeholder="New category name"
+                    value={newCategoryName}
+                  />
+                  <button
+                    className="min-h-[36px] min-w-[120px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white"
+                    onClick={() => {
+                      void createCategory();
+                    }}
+                    type="button"
+                  >
+                    Add Category
+                  </button>
+                </div>
+                <div className="mt-3 max-h-64 overflow-auto border border-neutral-300">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-neutral-50">
+                      <tr>
+                        <th className="border-b border-neutral-300 px-2 py-2">Category</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eventCategories.map((entry) => (
+                        <tr key={entry.id}>
+                          <td className="border-b border-neutral-200 px-2 py-2">{entry.name}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="border border-neutral-300 bg-white p-3">
+                <h3 className="text-sm font-semibold text-neutral-900">Optional Info Settings</h3>
+                <p className="mt-1 text-xs text-neutral-600">Customize optional helper text defaults used by your team.</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <label className="text-sm md:col-span-2">
+                    <span className="mb-1 block text-xs text-neutral-600">Default Event Notes Prompt</span>
+                    <textarea
+                      className="min-h-[70px] w-full border border-neutral-300 px-2 py-2"
+                      onChange={(event) =>
+                        setSettingsOptionalInfo((prev) => ({ ...prev, defaultEventNotes: event.target.value }))
+                      }
+                      value={settingsOptionalInfo.defaultEventNotes}
+                    />
+                  </label>
+                  <label className="text-sm md:col-span-2">
+                    <span className="mb-1 block text-xs text-neutral-600">Default Report Notes Prompt</span>
+                    <textarea
+                      className="min-h-[70px] w-full border border-neutral-300 px-2 py-2"
+                      onChange={(event) =>
+                        setSettingsOptionalInfo((prev) => ({ ...prev, defaultReportNotes: event.target.value }))
+                      }
+                      value={settingsOptionalInfo.defaultReportNotes}
+                    />
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-xs text-neutral-600">Department Field Prompt</span>
+                    <input
+                      className="min-h-[36px] w-full border border-neutral-300 px-2"
+                      onChange={(event) =>
+                        setSettingsOptionalInfo((prev) => ({ ...prev, departmentPrompt: event.target.value }))
+                      }
+                      value={settingsOptionalInfo.departmentPrompt}
+                    />
+                  </label>
+                </div>
               </div>
             </section>
           )}
@@ -1820,20 +1983,17 @@ export function MarketingDashboard() {
                   type="date"
                   value={reportDateTo}
                 />
-                <select
-                  className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                  onChange={(event) => setReportCategoryFilter(event.target.value)}
+                <CustomSelect
+                  className="w-[190px]"
+                  onChange={setReportCategoryFilter}
+                  options={[
+                    { value: 'all', label: 'All Categories' },
+                    ...Array.from(new Set(reports.map((entry) => entry.category).filter((entry): entry is string => Boolean(entry?.trim()))))
+                      .sort((a, b) => a.localeCompare(b))
+                      .map((option) => ({ value: option, label: option }))
+                  ]}
                   value={reportCategoryFilter}
-                >
-                  <option value="all">All Categories</option>
-                  {Array.from(new Set(reports.map((entry) => entry.category).filter((entry): entry is string => Boolean(entry?.trim()))))
-                    .sort((a, b) => a.localeCompare(b))
-                    .map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                </select>
+                />
                 <button
                   className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm"
                   onClick={exportReportsCsv}
@@ -1970,54 +2130,6 @@ export function MarketingDashboard() {
                 <button className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white" onClick={() => { void createInternalCoordinatorFromModal(); }} type="button">
                   Create Coordinator
                 </button>
-              </div>
-            </div>
-          </aside>
-        </>
-      ) : null}
-
-      {categoryModalOpen ? (
-        <>
-          <button
-            className="fixed inset-0 z-[60] bg-black/25"
-            onClick={() => setCategoryModalOpen(false)}
-            type="button"
-            aria-label="Close category modal"
-          />
-          <aside className="fixed inset-y-0 right-0 z-[70] w-full max-w-[460px] overflow-y-auto border-l border-neutral-300 bg-white shadow-[0_0_24px_rgba(0,0,0,0.15)]">
-            <div className="p-4 md:p-6">
-              <div className="flex items-center justify-between border-b border-neutral-300 pb-3">
-                <h3 className="text-base font-semibold">Manage Categories</h3>
-                <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => setCategoryModalOpen(false)} type="button">
-                  Close
-                </button>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <input
-                  className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
-                  onChange={(event) => setNewCategoryName(event.target.value)}
-                  placeholder="New category name"
-                  value={newCategoryName}
-                />
-                <button className="min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white" onClick={() => { void createCategory(); }} type="button">
-                  Add
-                </button>
-              </div>
-              <div className="mt-3 max-h-[65vh] overflow-auto border border-neutral-300">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-neutral-50">
-                    <tr>
-                      <th className="border-b border-neutral-300 px-2 py-2">Category</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {eventCategories.map((entry) => (
-                      <tr key={entry.id}>
-                        <td className="border-b border-neutral-200 px-2 py-2">{entry.name}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
             </div>
           </aside>
@@ -2243,24 +2355,25 @@ export function MarketingDashboard() {
                         <div className="flex gap-2">
                           <input
                             className="min-h-[36px] w-full border border-neutral-300 px-2"
-                            list="marketing-category-options"
                             onChange={(event) => onDraftFieldChange('category', event.target.value || null)}
                             placeholder="Search or type category"
                             value={eventDraft.category ?? ''}
                           />
-                          <button
-                            className="min-h-[36px] border border-neutral-300 bg-white px-2 text-xs"
-                            onClick={() => setCategoryModalOpen(true)}
-                            type="button"
-                          >
-                            + Category
-                          </button>
                         </div>
-                        <datalist id="marketing-category-options">
-                          {eventCategories.map((entry) => (
-                            <option key={entry.id} value={entry.name} />
-                          ))}
-                        </datalist>
+                        {filteredEventCategorySuggestions.length ? (
+                          <div className="mt-1 max-h-28 overflow-auto border border-neutral-200 bg-white">
+                            {filteredEventCategorySuggestions.map((entry) => (
+                              <button
+                                key={entry.id}
+                                className="block w-full border-b border-neutral-200 px-2 py-1 text-left text-xs hover:bg-neutral-50 last:border-b-0"
+                                onClick={() => onDraftFieldChange('category', entry.name)}
+                                type="button"
+                              >
+                                {entry.name}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                       </label>
 
                       <label className="text-sm">
@@ -2295,17 +2408,11 @@ export function MarketingDashboard() {
 
                       <label className="text-sm">
                         <span className="mb-1 block text-xs text-neutral-600">Status</span>
-                        <select
-                          className="min-h-[36px] w-full border border-neutral-300 bg-white px-2"
-                          onChange={(event) => onDraftFieldChange('status', event.target.value as MarketingEventStatus)}
+                        <CustomSelect
+                          onChange={(value) => onDraftFieldChange('status', value as MarketingEventStatus)}
+                          options={STATUS_OPTIONS.map((status) => ({ value: status.value, label: status.label }))}
                           value={eventDraft.status}
-                        >
-                          {STATUS_OPTIONS.map((status) => (
-                            <option key={status.value} value={status.value}>
-                              {status.label}
-                            </option>
-                          ))}
-                        </select>
+                        />
                       </label>
 
                       <label className="md:col-span-2 text-sm">
@@ -2518,17 +2625,12 @@ export function MarketingDashboard() {
                         placeholder="Caption"
                         value={assetDraftCaption}
                       />
-                      <select
-                        className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
-                        onChange={(event) => setAssetDraftType(event.target.value as AssetType)}
+                      <CustomSelect
+                        className="min-w-[132px]"
+                        onChange={(value) => setAssetDraftType(value as AssetType)}
+                        options={ASSET_TYPES.map((type) => ({ value: type.value, label: type.label }))}
                         value={assetDraftType}
-                      >
-                        {ASSET_TYPES.map((type) => (
-                          <option key={type.value} value={type.value}>
-                            {type.label}
-                          </option>
-                        ))}
-                      </select>
+                      />
                       <label className="inline-flex min-h-[34px] items-center border border-neutral-700 bg-neutral-800 px-3 text-sm text-white">
                         Upload
                         <input
@@ -2662,17 +2764,11 @@ export function MarketingDashboard() {
                         placeholder="Contacted party"
                         value={newCoordination.contactedParty}
                       />
-                      <select
-                        className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
-                        onChange={(event) => setNewCoordination((prev) => ({ ...prev, method: event.target.value as CoordinationMethod }))}
+                      <CustomSelect
+                        onChange={(value) => setNewCoordination((prev) => ({ ...prev, method: value as CoordinationMethod }))}
+                        options={METHODS.map((method) => ({ value: method.value, label: method.label }))}
                         value={newCoordination.method}
-                      >
-                        {METHODS.map((method) => (
-                          <option key={method.value} value={method.value}>
-                            {method.label}
-                          </option>
-                        ))}
-                      </select>
+                      />
                       <textarea
                         className="min-h-[64px] border border-neutral-300 px-2 py-2 text-sm"
                         onChange={(event) => setNewCoordination((prev) => ({ ...prev, summary: event.target.value }))}
