@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
@@ -117,9 +117,9 @@ interface AttachmentRow {
   size_bytes: number | null;
 }
 
-interface OrderAttachmentRow {
+interface LineAttachmentRow {
   id: string;
-  purchase_order_id: string;
+  purchase_order_line_id: string;
   description: string | null;
   attachment_id: string;
   attachment: AttachmentRow | null;
@@ -149,6 +149,16 @@ interface PromptConvertDraft {
   notes: string;
   requested_pickup_date: string;
   priority: DbPriority;
+}
+
+interface CreateOrderLineDraft {
+  id: string;
+  product_id: string;
+  quantity: number;
+  unit_price: number;
+  units_per_purchase: number;
+  product_link: string;
+  notes: string;
 }
 
 const NAV_ITEMS: Array<{ id: DashboardView; label: string }> = [
@@ -195,6 +205,10 @@ function generateOrderNumber() {
   return `PO-${now.getFullYear()}-${Math.floor(now.getTime() / 1000)}`;
 }
 
+function createDraftId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function ProductDashboard() {
   const supabase = useMemo(() => createBrowserClient(), []);
 
@@ -212,16 +226,30 @@ export function ProductDashboard() {
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
   const [designs, setDesigns] = useState<DesignRow[]>([]);
   const [attachments, setAttachments] = useState<AttachmentRow[]>([]);
-  const [orderAttachments, setOrderAttachments] = useState<OrderAttachmentRow[]>([]);
+  const [lineAttachments, setLineAttachments] = useState<LineAttachmentRow[]>([]);
   const [wishlist, setWishlist] = useState<WishlistRow[]>([]);
 
-  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
+  const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
+  const [showEditOrderModal, setShowEditOrderModal] = useState(false);
+  const [editingOrderDraft, setEditingOrderDraft] = useState<OrderRow | null>(null);
+  const [lineModalMode, setLineModalMode] = useState<'add' | 'edit' | null>(null);
+  const [lineModalOrderId, setLineModalOrderId] = useState<string | null>(null);
+  const [lineModalLineId, setLineModalLineId] = useState<string | null>(null);
+  const [lineModalDraft, setLineModalDraft] = useState<CreateOrderLineDraft | null>(null);
+  const [lineModalErrors, setLineModalErrors] = useState<Record<string, string>>({});
+  const [lineProductDropdownOpen, setLineProductDropdownOpen] = useState(false);
+  const [lineProductQuery, setLineProductQuery] = useState('');
+  const [lineFilesModalLineId, setLineFilesModalLineId] = useState<string | null>(null);
+  const lineProductDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const [orderFilters, setOrderFilters] = useState({
     status: 'all',
     vendor: 'all',
     priority: 'all',
+    date_from: '',
+    date_to: '',
     search: ''
   });
   const [productFilters, setProductFilters] = useState({
@@ -243,13 +271,10 @@ export function ProductDashboard() {
     default_order_quantity: '1',
     notes: ''
   });
-  const [orderAttachmentDrafts, setOrderAttachmentDrafts] = useState<
+  const [lineAttachmentDrafts, setLineAttachmentDrafts] = useState<
     Record<string, { file: File | null; description: string }>
   >({});
-  const [orderCatalogDrafts, setOrderCatalogDrafts] = useState<
-    Record<string, { product_id: string; quantity: number; unit_price: number; units_per_purchase: number }>
-  >({});
-
+  const [lineAttachmentUploadingIds, setLineAttachmentUploadingIds] = useState<string[]>([]);
   const [newVendor, setNewVendor] = useState({
     name: '',
     ordering_method: 'online' as DbOrderingMethod,
@@ -279,10 +304,27 @@ export function ProductDashboard() {
     backFile: null as File | null
   });
   const [promptConvertDraft, setPromptConvertDraft] = useState<PromptConvertDraft | null>(null);
-  const [newProductCategory, setNewProductCategory] = useState({
-    name: '',
-    parent_category_id: ''
+  const [newOrderDraft, setNewOrderDraft] = useState({
+    vendor_id: '',
+    priority: 'normal' as DbPriority,
+    asap: false,
+    date_placed: '',
+    requested_pickup_date: '',
+    expected_arrival_date: '',
+    reason: '',
+    notes: ''
   });
+  const [newProductCategory, setNewProductCategory] = useState({
+    name: ''
+  });
+  const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null);
+  const [activeDropCategoryId, setActiveDropCategoryId] = useState<string | null>(null);
+  const [activeRootDropIndex, setActiveRootDropIndex] = useState<number | null>(null);
+  const [editingCategoryDraft, setEditingCategoryDraft] = useState<{
+    id: string;
+    name: string;
+    parent_category_id: string | null;
+  } | null>(null);
 
   const vendorById = useMemo(() => {
     const map = new Map<string, VendorRow>();
@@ -297,7 +339,10 @@ export function ProductDashboard() {
   }, [productCategories]);
 
   const rootCategories = useMemo(
-    () => productCategories.filter((category) => !category.parent_category_id).sort((a, b) => a.name.localeCompare(b.name)),
+    () =>
+      productCategories
+        .filter((category) => !category.parent_category_id)
+        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)),
     [productCategories]
   );
 
@@ -309,7 +354,7 @@ export function ProductDashboard() {
       bucket.push(category);
       map.set(category.parent_category_id, bucket);
     }
-    map.forEach((bucket) => bucket.sort((a, b) => a.name.localeCompare(b.name)));
+    map.forEach((bucket) => bucket.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)));
     return map;
   }, [productCategories]);
 
@@ -319,23 +364,58 @@ export function ProductDashboard() {
     return map;
   }, [products]);
 
+  const lineById = useMemo(() => {
+    const map = new Map<string, OrderLineRow>();
+    for (const order of orders) {
+      for (const line of order.lines) {
+        map.set(line.id, line);
+      }
+    }
+    return map;
+  }, [orders]);
+
   const attachmentById = useMemo(() => {
     const map = new Map<string, AttachmentRow>();
     attachments.forEach((attachment) => map.set(attachment.id, attachment));
     return map;
   }, [attachments]);
 
-  const orderAttachmentsByOrder = useMemo(() => {
-    const map = new Map<string, OrderAttachmentRow[]>();
-    for (const row of orderAttachments) {
-      const bucket = map.get(row.purchase_order_id) ?? [];
+  const lineAttachmentsByLine = useMemo(() => {
+    const map = new Map<string, LineAttachmentRow[]>();
+    for (const row of lineAttachments) {
+      const bucket = map.get(row.purchase_order_line_id) ?? [];
       bucket.push(row);
-      map.set(row.purchase_order_id, bucket);
+      map.set(row.purchase_order_line_id, bucket);
     }
     return map;
-  }, [orderAttachments]);
+  }, [lineAttachments]);
 
   const promptCount = useMemo(() => prompts.filter((prompt) => prompt.status === 'open').length, [prompts]);
+
+  const filteredLineProductOptions = useMemo(() => {
+    const query = lineProductQuery.trim().toLowerCase();
+    return products
+      .filter((product) => {
+        if (!query) return true;
+        return [product.name, product.sku ?? '', product.barcode_upc ?? '', product.notes ?? '']
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      })
+      .slice(0, 60);
+  }, [products, lineProductQuery]);
+
+  useEffect(() => {
+    if (!lineProductDropdownOpen) return;
+    const onWindowPointerDown = (event: MouseEvent) => {
+      if (!lineProductDropdownRef.current) return;
+      if (!lineProductDropdownRef.current.contains(event.target as Node)) {
+        setLineProductDropdownOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onWindowPointerDown);
+    return () => window.removeEventListener('mousedown', onWindowPointerDown);
+  }, [lineProductDropdownOpen]);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -351,7 +431,7 @@ export function ProductDashboard() {
       promptsResult,
       designsResult,
       attachmentsResult,
-      orderAttachmentsResult,
+      lineAttachmentsResult,
       wishlistResult
     ] = await Promise.all([
       supabase.from('product_settings').select('key,value'),
@@ -395,8 +475,8 @@ export function ProductDashboard() {
         .order('created_at', { ascending: false })
         .limit(500),
       supabase
-        .from('product_purchase_order_attachments')
-        .select('id,purchase_order_id,description,attachment_id,attachment:product_attachments(id,bucket,storage_path,file_name,mime_type,size_bytes)')
+        .from('product_purchase_order_line_attachments')
+        .select('id,purchase_order_line_id,description,attachment_id,attachment:product_attachments(id,bucket,storage_path,file_name,mime_type,size_bytes)')
         .order('created_at', { ascending: false }),
       supabase
         .from('product_wishlist_items')
@@ -414,7 +494,7 @@ export function ProductDashboard() {
       promptsResult.error,
       designsResult.error,
       attachmentsResult.error,
-      orderAttachmentsResult.error,
+      lineAttachmentsResult.error,
       wishlistResult.error
     ].find(Boolean);
 
@@ -477,16 +557,16 @@ export function ProductDashboard() {
       }))
     );
     setAttachments((attachmentsResult.data ?? []) as AttachmentRow[]);
-    setOrderAttachments(
-      ((orderAttachmentsResult.data ?? []) as Array<{
+    setLineAttachments(
+      ((lineAttachmentsResult.data ?? []) as Array<{
         id: string;
-        purchase_order_id: string;
+        purchase_order_line_id: string;
         description: string | null;
         attachment_id: string;
         attachment: AttachmentRow | AttachmentRow[] | null;
       }>).map((row) => ({
         id: row.id,
-        purchase_order_id: row.purchase_order_id,
+        purchase_order_line_id: row.purchase_order_line_id,
         description: row.description,
         attachment_id: row.attachment_id,
         attachment: Array.isArray(row.attachment) ? (row.attachment[0] ?? null) : (row.attachment ?? null)
@@ -511,6 +591,8 @@ export function ProductDashboard() {
       if (orderFilters.status !== 'all' && order.status !== orderFilters.status) return false;
       if (orderFilters.priority !== 'all' && order.priority !== orderFilters.priority) return false;
       if (orderFilters.vendor !== 'all' && order.vendor_id !== orderFilters.vendor) return false;
+      if (orderFilters.date_from && (order.date_placed ?? '') < orderFilters.date_from) return false;
+      if (orderFilters.date_to && (order.date_placed ?? '') > orderFilters.date_to) return false;
       const query = orderFilters.search.trim().toLowerCase();
       if (!query) return true;
       const vendorName = vendorById.get(order.vendor_id)?.name ?? '';
@@ -670,39 +752,165 @@ export function ProductDashboard() {
     await withSaveState(async () => {
       const { error: insertError } = await supabase.from('product_categories').insert({
         name: newProductCategory.name.trim(),
-        parent_category_id: newProductCategory.parent_category_id || null,
+        parent_category_id: null,
         updated_by: 'dashboard'
       });
       if (insertError) throw insertError;
-      setNewProductCategory({ name: '', parent_category_id: '' });
+      setNewProductCategory({ name: '' });
       await loadDashboard();
       setNotice('Category saved.');
     });
   };
 
-  const saveProductCategory = async (category: ProductCategoryRow) => {
+  const saveProductCategoryEdit = async () => {
+    if (!editingCategoryDraft) return;
+    if (!editingCategoryDraft.name.trim()) {
+      setError('Category name is required.');
+      return;
+    }
+
     await withSaveState(async () => {
       const { error: updateError } = await supabase
         .from('product_categories')
         .update({
-          name: category.name,
-          parent_category_id: category.parent_category_id,
-          sort_order: category.sort_order,
+          name: editingCategoryDraft.name.trim(),
+          parent_category_id: editingCategoryDraft.parent_category_id,
           updated_by: 'dashboard'
         })
-        .eq('id', category.id);
+        .eq('id', editingCategoryDraft.id);
       if (updateError) throw updateError;
+      setEditingCategoryDraft(null);
+      await loadDashboard();
       setNotice('Category updated.');
     });
   };
 
+  const saveCategoryLayout = async (
+    updates: Array<{ id: string; parent_category_id: string | null; sort_order: number }>
+  ) => {
+    await withSaveState(async () => {
+      if (updates.length === 0) return;
+      const updateCalls = updates.map((entry) =>
+        supabase
+          .from('product_categories')
+          .update({
+            parent_category_id: entry.parent_category_id,
+            sort_order: entry.sort_order,
+            updated_by: 'dashboard'
+          })
+          .eq('id', entry.id)
+      );
+      const results = await Promise.all(updateCalls);
+      const firstError = results.find((result) => result.error)?.error;
+      if (firstError) throw firstError;
+      await loadDashboard();
+      setNotice('Category layout updated.');
+    });
+  };
+
+  const resetDragState = () => {
+    setDraggingCategoryId(null);
+    setActiveDropCategoryId(null);
+    setActiveRootDropIndex(null);
+  };
+
+  const isDescendantCategory = (candidateId: string, potentialAncestorId: string): boolean => {
+    let current = productCategories.find((category) => category.id === candidateId);
+    while (current?.parent_category_id) {
+      if (current.parent_category_id === potentialAncestorId) return true;
+      current = productCategories.find((category) => category.id === current?.parent_category_id);
+    }
+    return false;
+  };
+
+  const moveCategoryUnderCategory = async (draggingId: string, targetId: string) => {
+    if (draggingId === targetId) return;
+    if (isDescendantCategory(targetId, draggingId)) return;
+    const moving = productCategories.find((category) => category.id === draggingId);
+    const target = productCategories.find((category) => category.id === targetId);
+    if (!moving || !target) return;
+
+    const previousParentId = moving.parent_category_id;
+    const updates: Array<{ id: string; parent_category_id: string | null; sort_order: number }> = [];
+
+    const oldSiblings = productCategories
+      .filter((category) => category.parent_category_id === previousParentId && category.id !== moving.id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    oldSiblings.forEach((category, index) => {
+      updates.push({ id: category.id, parent_category_id: previousParentId, sort_order: index });
+    });
+
+    const newSiblings = productCategories
+      .filter((category) => category.parent_category_id === target.id && category.id !== moving.id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    updates.push({
+      id: moving.id,
+      parent_category_id: target.id,
+      sort_order: newSiblings.length
+    });
+
+    await saveCategoryLayout(updates);
+  };
+
+  const moveCategoryToRootPosition = async (draggingId: string, rootIndex: number) => {
+    const moving = productCategories.find((category) => category.id === draggingId);
+    if (!moving) return;
+
+    const previousParentId = moving.parent_category_id;
+    const updates: Array<{ id: string; parent_category_id: string | null; sort_order: number }> = [];
+
+    if (previousParentId) {
+      const oldSiblings = productCategories
+        .filter((category) => category.parent_category_id === previousParentId && category.id !== moving.id)
+        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+      oldSiblings.forEach((category, index) => {
+        updates.push({ id: category.id, parent_category_id: previousParentId, sort_order: index });
+      });
+    }
+
+    const rootList = rootCategories.filter((category) => category.id !== moving.id);
+    const boundedIndex = Math.max(0, Math.min(rootIndex, rootList.length));
+    rootList.splice(boundedIndex, 0, moving);
+    rootList.forEach((category, index) => {
+      updates.push({
+        id: category.id,
+        parent_category_id: null,
+        sort_order: index
+      });
+    });
+
+    await saveCategoryLayout(updates);
+  };
+
+  const openCreateOrderModal = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    setNewOrderDraft({
+      vendor_id: vendors[0]?.id ?? '',
+      priority: 'normal',
+      asap: false,
+      date_placed: today,
+      requested_pickup_date: today,
+      expected_arrival_date: '',
+      reason: '',
+      notes: ''
+    });
+    setShowCreateOrderModal(true);
+  };
+
   const createOrder = async () => {
     await withSaveState(async () => {
-      const fallbackVendor = vendors[0]?.id;
-      if (!fallbackVendor) throw new Error('Create a vendor first.');
+      if (!newOrderDraft.vendor_id) throw new Error('Select a vendor before creating the order.');
+      if (!newOrderDraft.date_placed) throw new Error('Date placed is required.');
+      if (!newOrderDraft.asap && !newOrderDraft.requested_pickup_date) {
+        throw new Error('Requested pickup date is required unless ASAP is enabled.');
+      }
+
       const requester = settingsMap['order.requester_default'] ?? '';
       const activity = settingsMap['order.activity_account_default'] ?? '';
       const account = settingsMap['order.account_number_default'] ?? '';
+      if (!requester || !activity || !account) {
+        throw new Error('Missing required defaults in Settings (requester/activity/account).');
+      }
 
       const { data, error: insertError } = await supabase
         .from('product_purchase_orders')
@@ -711,19 +919,24 @@ export function ProductDashboard() {
           requester_name: requester,
           activity_account: activity,
           account_number: account,
-          vendor_id: fallbackVendor,
+          vendor_id: newOrderDraft.vendor_id,
           status: 'draft',
-          priority: 'normal',
-          date_placed: new Date().toISOString().slice(0, 10),
-          requested_pickup_date: new Date().toISOString().slice(0, 10),
+          priority: newOrderDraft.priority,
+          asap: newOrderDraft.asap,
+          date_placed: newOrderDraft.date_placed,
+          requested_pickup_date: newOrderDraft.asap ? null : newOrderDraft.requested_pickup_date,
+          expected_arrival_date: newOrderDraft.expected_arrival_date || null,
+          reason: newOrderDraft.reason.trim() || null,
+          notes: newOrderDraft.notes.trim() || null,
           updated_by: 'dashboard'
         })
         .select('id')
         .single();
       if (insertError) throw insertError;
       await loadDashboard();
+      setShowCreateOrderModal(false);
       if (data?.id) {
-        setExpandedOrderId(data.id);
+        setSelectedOrderId(data.id);
       }
       setNotice('Order created.');
     });
@@ -737,8 +950,8 @@ export function ProductDashboard() {
     await withSaveState(async () => {
       const { error: deleteError } = await supabase.from('product_purchase_orders').delete().eq('id', order.id);
       if (deleteError) throw deleteError;
-      if (expandedOrderId === order.id) {
-        setExpandedOrderId(null);
+      if (selectedOrderId === order.id) {
+        setSelectedOrderId(null);
       }
       await loadDashboard();
       setNotice(`Draft order ${order.order_number} cancelled.`);
@@ -768,74 +981,128 @@ export function ProductDashboard() {
     });
   };
 
-  const addOrderLine = async (orderId: string) => {
-    await withSaveState(async () => {
-      const { error: insertError } = await supabase.from('product_purchase_order_lines').insert({
-        purchase_order_id: orderId,
-        custom_item_name: 'New item',
-        quantity: 1,
-        unit_price: 0,
-        units_per_purchase: 1,
-        notes: null
-      });
-      if (insertError) throw insertError;
-      await loadDashboard();
-      setNotice('Line added.');
-    });
+  const openEditOrderModal = (order: OrderRow) => {
+    setEditingOrderDraft({ ...order });
+    setShowEditOrderModal(true);
   };
 
-  const addOrderLineFromCatalog = async (
-    orderId: string,
-    productId: string,
-    quantity?: number,
-    unitPrice?: number,
-    unitsPerPurchase?: number
-  ) => {
-    const product = productById.get(productId);
-    if (!product) {
-      setError('Selected catalog item not found.');
-      return;
+  const saveEditOrderModal = async () => {
+    if (!editingOrderDraft) return;
+    await saveOrderHeader(editingOrderDraft);
+    setShowEditOrderModal(false);
+    setEditingOrderDraft(null);
+  };
+
+  const validateLineDraft = (draft: CreateOrderLineDraft): Record<string, string> => {
+    const nextErrors: Record<string, string> = {};
+    if (!draft.product_id) nextErrors.product_id = 'Product is required.';
+    if (!Number.isFinite(draft.quantity) || draft.quantity < 1) nextErrors.quantity = 'Quantity must be at least 1.';
+    if (!Number.isFinite(draft.unit_price) || draft.unit_price < 0) nextErrors.unit_price = 'Unit cost must be 0 or more.';
+    if (!Number.isFinite(draft.units_per_purchase) || draft.units_per_purchase < 1) {
+      nextErrors.units_per_purchase = 'Items per ordered item must be at least 1.';
     }
-    await withSaveState(async () => {
-      const { error: insertError } = await supabase.from('product_purchase_order_lines').insert({
-        purchase_order_id: orderId,
-        product_id: product.id,
-        custom_item_name: null,
-        quantity: Math.max(Math.trunc(quantity ?? product.default_order_quantity ?? 1), 1),
-        unit_price: Math.max(Number(unitPrice ?? product.default_unit_cost ?? 0), 0),
-        units_per_purchase: Math.max(Math.trunc(unitsPerPurchase ?? product.units_per_purchase ?? 1), 1),
-        product_link: product.vendor_product_link,
-        notes: null
-      });
-      if (insertError) throw insertError;
-      await loadDashboard();
-      setNotice('Catalog item added to order.');
+    const normalizedLink = draft.product_link.trim();
+    if (!normalizedLink) nextErrors.product_link = 'Link is required.';
+    if (normalizedLink && !/^https?:\/\//i.test(normalizedLink)) nextErrors.product_link = 'Link must start with http:// or https://.';
+    return nextErrors;
+  };
+
+  const openAddLineItemModal = (orderId: string) => {
+    setLineModalMode('add');
+    setLineModalOrderId(orderId);
+    setLineModalLineId(null);
+    setLineModalErrors({});
+    setLineProductQuery('');
+    setLineProductDropdownOpen(false);
+    setLineModalDraft({
+      id: createDraftId(),
+      product_id: '',
+      quantity: 1,
+      unit_price: 0,
+      units_per_purchase: 1,
+      product_link: '',
+      notes: ''
     });
   };
 
-  const saveOrderLine = async (line: OrderLineRow) => {
-    await withSaveState(async () => {
-      const hasNamedProduct = !!line.product_id;
-      const customName = (line.custom_item_name ?? '').trim();
-      if (!hasNamedProduct && !customName) {
-        throw new Error('Line item must have either a product or a custom item name.');
-      }
+  const openEditLineItemModal = (orderId: string, line: OrderLineRow) => {
+    setLineModalMode('edit');
+    setLineModalOrderId(orderId);
+    setLineModalLineId(line.id);
+    setLineModalErrors({});
+    setLineProductQuery(line.product_id ? productById.get(line.product_id)?.name ?? '' : '');
+    setLineProductDropdownOpen(false);
+    setLineModalDraft({
+      id: line.id,
+      product_id: line.product_id ?? '',
+      quantity: Math.max(Number(line.quantity) || 1, 1),
+      unit_price: Math.max(Number(line.unit_price) || 0, 0),
+      units_per_purchase: Math.max(Number(line.units_per_purchase) || 1, 1),
+      product_link: line.product_link ?? '',
+      notes: line.notes ?? ''
+    });
+  };
 
-      const { error: updateError } = await supabase
-        .from('product_purchase_order_lines')
-        .update({
-          product_id: line.product_id,
-          custom_item_name: customName || null,
-          quantity: line.quantity,
-          unit_price: line.unit_price,
-          units_per_purchase: Math.max(Number(line.units_per_purchase) || 1, 1),
-          product_link: line.product_link,
-          notes: line.notes
-        })
-        .eq('id', line.id);
-      if (updateError) throw updateError;
+  const closeLineModal = () => {
+    setLineModalMode(null);
+    setLineModalOrderId(null);
+    setLineModalLineId(null);
+    setLineModalDraft(null);
+    setLineModalErrors({});
+    setLineProductQuery('');
+    setLineProductDropdownOpen(false);
+  };
+
+  const applyLineProductSelection = (product: ProductRow) => {
+    setLineModalDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            product_id: product.id,
+            unit_price: Number(product.default_unit_cost ?? prev.unit_price),
+            units_per_purchase: product.units_per_purchase ?? prev.units_per_purchase,
+            product_link: product.vendor_product_link ?? prev.product_link
+          }
+        : prev
+    );
+    setLineProductQuery(product.name);
+    setLineProductDropdownOpen(false);
+  };
+
+  const saveLineModal = async () => {
+    if (!lineModalMode || !lineModalDraft || !lineModalOrderId) return;
+    const errors = validateLineDraft(lineModalDraft);
+    setLineModalErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    await withSaveState(async () => {
+      const payload = {
+        product_id: lineModalDraft.product_id,
+        custom_item_name: null,
+        quantity: Math.max(Math.trunc(lineModalDraft.quantity), 1),
+        unit_price: Math.max(Number(lineModalDraft.unit_price), 0),
+        units_per_purchase: Math.max(Math.trunc(lineModalDraft.units_per_purchase), 1),
+        product_link: lineModalDraft.product_link.trim(),
+        notes: lineModalDraft.notes.trim() || null
+      };
+
+      if (lineModalMode === 'add') {
+        const { error: insertError } = await supabase.from('product_purchase_order_lines').insert({
+          purchase_order_id: lineModalOrderId,
+          ...payload
+        });
+        if (insertError) throw insertError;
+      } else {
+        const { error: updateError } = await supabase
+          .from('product_purchase_order_lines')
+          .update(payload)
+          .eq('id', lineModalLineId as string);
+        if (updateError) throw updateError;
+      }
       await loadDashboard();
-      setNotice('Order line saved.');
+      setSelectedOrderId(lineModalOrderId);
+      closeLineModal();
+      setNotice(lineModalMode === 'add' ? 'Line item added.' : 'Line item updated.');
     });
   };
 
@@ -876,6 +1143,10 @@ export function ProductDashboard() {
       const notes = (overrides?.notes ?? 'Converted from reorder prompt').trim();
       const requestedPickupDate = overrides?.requested_pickup_date || new Date().toISOString().slice(0, 10);
       const priority = overrides?.priority ?? 'normal';
+      const defaultLink = product.vendor_product_link?.trim() || '';
+      if (!defaultLink || !/^https?:\/\//i.test(defaultLink)) {
+        throw new Error(`Product "${product.name}" needs a valid default link before converting prompt to order.`);
+      }
 
       const { data: orderRow, error: orderError } = await supabase
         .from('product_purchase_orders')
@@ -907,7 +1178,7 @@ export function ProductDashboard() {
         quantity,
         unit_price: Number.isFinite(unitPrice) ? unitPrice : 0,
         units_per_purchase: Math.max(Number(product.units_per_purchase) || 1, 1),
-        product_link: product.vendor_product_link,
+        product_link: defaultLink,
         notes: notes || 'Auto-created from prompt'
       });
       if (lineError) throw lineError;
@@ -920,7 +1191,7 @@ export function ProductDashboard() {
 
       await loadDashboard();
       setActiveView('orders');
-      setExpandedOrderId(orderId);
+      setSelectedOrderId(orderId);
       setPromptConvertDraft(null);
       setNotice('Prompt converted into a draft order.');
     });
@@ -1019,31 +1290,63 @@ export function ProductDashboard() {
     [supabase]
   );
 
-  const uploadOrderAttachment = async (orderId: string) => {
-    const draft = orderAttachmentDrafts[orderId];
+  const uploadLineAttachment = async (lineId: string) => {
+    const draft = lineAttachmentDrafts[lineId];
     if (!draft?.file) {
       setError('Select an image/file first.');
       return;
     }
+    if (lineAttachmentUploadingIds.includes(lineId)) {
+      return;
+    }
 
-    await withSaveState(async () => {
-      const attachmentId = await uploadAttachment(draft.file as File, `orders/${orderId}`);
+    setLineFilesModalLineId(null);
+    setNotice('Uploading line item file in background...');
+    setLineAttachmentUploadingIds((prev) => [...prev, lineId]);
+    setLineAttachmentDrafts((prev) => ({
+      ...prev,
+      [lineId]: { file: null, description: '' }
+    }));
+
+    try {
+      const attachmentId = await uploadAttachment(draft.file as File, `orders/lines/${lineId}`);
       if (!attachmentId) throw new Error('Failed to create attachment metadata.');
 
-      const { error: relationError } = await supabase.from('product_purchase_order_attachments').insert({
-        purchase_order_id: orderId,
+      const { error: relationError } = await supabase.from('product_purchase_order_line_attachments').insert({
+        purchase_order_line_id: lineId,
         attachment_id: attachmentId,
         description: draft.description.trim() || null,
         created_by: 'dashboard'
       });
       if (relationError) throw relationError;
 
-      setOrderAttachmentDrafts((prev) => ({
-        ...prev,
-        [orderId]: { file: null, description: '' }
-      }));
       await loadDashboard();
-      setNotice('Order attachment uploaded.');
+      setNotice('Line item attachment uploaded.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to upload line item attachment.';
+      setError(message);
+    } finally {
+      setLineAttachmentUploadingIds((prev) => prev.filter((id) => id !== lineId));
+    }
+  };
+
+  const removeLineAttachment = async (entry: LineAttachmentRow) => {
+    await withSaveState(async () => {
+      if (entry.attachment) {
+        const { error: storageError } = await supabase.storage
+          .from(entry.attachment.bucket)
+          .remove([entry.attachment.storage_path]);
+        if (storageError) throw storageError;
+      }
+
+      const { error: deleteAttachmentError } = await supabase
+        .from('product_attachments')
+        .delete()
+        .eq('id', entry.attachment_id);
+      if (deleteAttachmentError) throw deleteAttachmentError;
+
+      await loadDashboard();
+      setNotice('Line item file removed.');
     });
   };
 
@@ -1204,16 +1507,13 @@ export function ProductDashboard() {
 
           {activeView === 'orders' && (
             <section className="w-full bg-white">
-              <header className="border-b border-neutral-300 bg-white px-4 py-4 md:px-6">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">Orders</h2>
-                    <p className="mt-1 text-sm text-neutral-600">Click any order row to expand and edit everything inline.</p>
-                  </div>
+              <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold">Orders</h2>
                   <button
                     className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white hover:bg-[#6a0000] disabled:opacity-60"
                     disabled={saving}
-                    onClick={createOrder}
+                    onClick={openCreateOrderModal}
                     type="button"
                   >
                     + New Order
@@ -1221,52 +1521,78 @@ export function ProductDashboard() {
                 </div>
               </header>
 
-              <section className="border-b border-neutral-300 bg-white px-4 py-3 md:px-6" aria-label="Order filters">
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-                  <select
-                    className="min-h-[38px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setOrderFilters((prev) => ({ ...prev, status: event.target.value }))}
-                    value={orderFilters.status}
-                  >
-                    <option value="all">All Statuses</option>
-                    {ORDER_STATUSES.map((status) => (
-                      <option key={status} value={status}>{formatLabel(status)}</option>
-                    ))}
-                  </select>
-
-                  <select
-                    className="min-h-[38px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setOrderFilters((prev) => ({ ...prev, vendor: event.target.value }))}
-                    value={orderFilters.vendor}
-                  >
-                    <option value="all">All Vendors</option>
-                    {vendors.map((vendor) => (
-                      <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
-                    ))}
-                  </select>
-
-                  <select
-                    className="min-h-[38px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setOrderFilters((prev) => ({ ...prev, priority: event.target.value }))}
-                    value={orderFilters.priority}
-                  >
-                    <option value="all">All Priorities</option>
-                    <option value="normal">Normal</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-
-                  <input
-                    className="min-h-[38px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setOrderFilters((prev) => ({ ...prev, search: event.target.value }))}
-                    placeholder="Search orders"
-                    type="search"
-                    value={orderFilters.search}
-                  />
+              <section className="border-b border-neutral-300 px-4 py-3 md:px-6">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-6">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                    Status
+                    <select
+                      className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2 text-sm"
+                      onChange={(event) => setOrderFilters((prev) => ({ ...prev, status: event.target.value }))}
+                      value={orderFilters.status}
+                    >
+                      <option value="all">All Statuses</option>
+                      {ORDER_STATUSES.map((status) => (
+                        <option key={status} value={status}>{formatLabel(status)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                    Vendor
+                    <select
+                      className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2 text-sm"
+                      onChange={(event) => setOrderFilters((prev) => ({ ...prev, vendor: event.target.value }))}
+                      value={orderFilters.vendor}
+                    >
+                      <option value="all">All Vendors</option>
+                      {vendors.map((vendor) => (
+                        <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                    Priority
+                    <select
+                      className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2 text-sm"
+                      onChange={(event) => setOrderFilters((prev) => ({ ...prev, priority: event.target.value }))}
+                      value={orderFilters.priority}
+                    >
+                      <option value="all">All Priorities</option>
+                      <option value="normal">Normal</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                    Date From
+                    <input
+                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setOrderFilters((prev) => ({ ...prev, date_from: event.target.value }))}
+                      type="date"
+                      value={orderFilters.date_from}
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                    Date To
+                    <input
+                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setOrderFilters((prev) => ({ ...prev, date_to: event.target.value }))}
+                      type="date"
+                      value={orderFilters.date_to}
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                    Search
+                    <input
+                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setOrderFilters((prev) => ({ ...prev, search: event.target.value }))}
+                      type="search"
+                      value={orderFilters.search}
+                    />
+                  </label>
                 </div>
               </section>
 
               <div className="overflow-x-auto">
-                <table className="min-w-full bg-white text-sm">
+                <table className="min-w-full text-sm">
                   <thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
                     <tr>
                       <th className="border-b border-neutral-300 px-4 py-3">Order #</th>
@@ -1280,550 +1606,135 @@ export function ProductDashboard() {
                   </thead>
                   <tbody>
                     {filteredOrders.map((order) => {
-                      const isExpanded = expandedOrderId === order.id;
+                      const isSelected = selectedOrderId === order.id;
                       return (
                         <Fragment key={order.id}>
                           <tr
-                            className="cursor-pointer border-b border-neutral-200 hover:bg-neutral-50"
-                            key={order.id}
-                            onClick={() => setExpandedOrderId((prev) => (prev === order.id ? null : order.id))}
+                            className={`cursor-pointer border-b border-neutral-200 ${isSelected ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`}
+                            onClick={() => setSelectedOrderId((prev) => (prev === order.id ? null : order.id))}
                           >
                             <td className="px-4 py-3 font-medium">{order.order_number}</td>
                             <td className="px-4 py-3">{vendorById.get(order.vendor_id)?.name ?? 'Unknown'}</td>
                             <td className="px-4 py-3">{formatLabel(order.status)}</td>
                             <td className="px-4 py-3">{order.date_placed ?? '-'}</td>
-                            <td className="px-4 py-3">{order.requested_pickup_date ?? '-'}</td>
+                            <td className="px-4 py-3">{order.requested_pickup_date ?? (order.asap ? 'ASAP' : '-')}</td>
                             <td className="px-4 py-3">{currency.format(Number(order.total_amount || 0))}</td>
                             <td className="px-4 py-3">{formatLabel(order.priority)}</td>
                           </tr>
-
-                          {isExpanded ? (
-                            <tr className="bg-neutral-50" key={`${order.id}-detail`}>
+                          {isSelected ? (
+                            <tr className="border-b border-neutral-300 bg-neutral-50">
                               <td className="px-4 py-4" colSpan={7}>
-                                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                                  <label className="text-sm text-neutral-700">
-                                    Vendor
-                                    <select
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, vendor_id: event.target.value } : entry));
-                                      }}
-                                      value={order.vendor_id}
-                                    >
-                                      {vendors.map((vendor) => (
-                                        <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
-                                      ))}
-                                    </select>
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700">
-                                    Status
-                                    <select
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, status: event.target.value as DbOrderStatus } : entry));
-                                      }}
-                                      value={order.status}
-                                    >
-                                      {ORDER_STATUSES.map((status) => (
-                                        <option key={status} value={status}>{formatLabel(status)}</option>
-                                      ))}
-                                    </select>
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700">
-                                    Priority
-                                    <select
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, priority: event.target.value as DbPriority } : entry));
-                                      }}
-                                      value={order.priority}
-                                    >
-                                      <option value="normal">Normal</option>
-                                      <option value="urgent">Urgent</option>
-                                    </select>
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700">
-                                    Date Placed
-                                    <input
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, date_placed: event.target.value || null } : entry));
-                                      }}
-                                      type="date"
-                                      value={order.date_placed ?? ''}
-                                    />
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700">
-                                    Requested Pickup Date
-                                    <input
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, requested_pickup_date: event.target.value || null } : entry));
-                                      }}
-                                      type="date"
-                                      value={order.requested_pickup_date ?? ''}
-                                    />
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700">
-                                    Expected Arrival
-                                    <input
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, expected_arrival_date: event.target.value || null } : entry));
-                                      }}
-                                      type="date"
-                                      value={order.expected_arrival_date ?? ''}
-                                    />
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700 lg:col-span-3">
-                                    Reason
-                                    <input
-                                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, reason: event.target.value } : entry));
-                                      }}
-                                      type="text"
-                                      value={order.reason ?? ''}
-                                    />
-                                  </label>
-
-                                  <label className="text-sm text-neutral-700 lg:col-span-3">
-                                    Notes
-                                    <textarea
-                                      className="mt-1 min-h-[84px] w-full border border-neutral-300 px-2 py-2"
-                                      onChange={(event) => {
-                                        setOrders((prev) => prev.map((entry) => entry.id === order.id ? { ...entry, notes: event.target.value } : entry));
-                                      }}
-                                      value={order.notes ?? ''}
-                                    />
-                                  </label>
-                                </div>
-
-                                <div className="mt-3 flex flex-wrap items-center gap-2">
-                                  <button
-                                    className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
-                                    onClick={() => void saveOrderHeader(order)}
-                                    type="button"
-                                  >
-                                    Save Order
-                                  </button>
-                                  <button
-                                    className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
-                                    onClick={() => setExpandedOrderId(null)}
-                                    type="button"
-                                  >
-                                    Close
-                                  </button>
-                                  {order.status === 'draft' ? (
-                                    <button
-                                      className="min-h-[34px] border border-red-700 px-3 text-sm text-red-700 hover:bg-red-50"
-                                      onClick={() => void cancelDraftOrder(order)}
-                                      type="button"
-                                    >
-                                      Cancel Draft
-                                    </button>
-                                  ) : null}
-                                </div>
-
-                                <div className="mt-4 overflow-x-auto">
-                                  <table className="min-w-full bg-white text-sm">
-                                    <thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
-                                      <tr>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Product</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Custom Item</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">How Many Ordered</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Cost Of 1 Ordered Item</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Items Per Ordered Item</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Link</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Notes</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Line Total</th>
-                                        <th className="border-b border-neutral-300 px-3 py-2">Actions</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {order.lines.map((line) => (
-                                        <tr className="border-b border-neutral-200" key={line.id}>
-                                          <td className="px-3 py-2">
-                                            <select
-                                              className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
-                                              onChange={(event) => {
-                                                const nextProductId = event.target.value || null;
-                                                setOrders((prev) =>
-                                                  prev.map((entry) =>
-                                                    entry.id !== order.id
-                                                      ? entry
-                                                      : {
-                                                          ...entry,
-                                                          lines: entry.lines.map((candidate) =>
-                                                            candidate.id !== line.id
-                                                              ? candidate
-                                                              : {
-                                                                  ...candidate,
-                                                                  product_id: nextProductId,
-                                                                  custom_item_name: nextProductId ? null : candidate.custom_item_name
-                                                                }
-                                                          )
-                                                        }
-                                                  )
-                                                );
-                                              }}
-                                              value={line.product_id ?? ''}
-                                            >
-                                              <option value="">Custom Item</option>
-                                              {products.map((product) => (
-                                                <option key={product.id} value={product.id}>{product.name}</option>
-                                              ))}
-                                            </select>
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            <input
-                                              className="min-h-[34px] w-full border border-neutral-300 px-2"
-                                              onChange={(event) => {
-                                                setOrders((prev) =>
-                                                  prev.map((entry) =>
-                                                    entry.id !== order.id
-                                                      ? entry
-                                                      : {
-                                                          ...entry,
-                                                          lines: entry.lines.map((candidate) =>
-                                                            candidate.id === line.id ? { ...candidate, custom_item_name: event.target.value } : candidate
-                                                          )
-                                                        }
-                                                  )
-                                                );
-                                              }}
-                                              type="text"
-                                              value={line.custom_item_name ?? ''}
-                                            />
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            <input
-                                              className="min-h-[34px] w-24 border border-neutral-300 px-2"
-                                              min={1}
-                                              onChange={(event) => {
-                                                setOrders((prev) =>
-                                                  prev.map((entry) =>
-                                                    entry.id !== order.id
-                                                      ? entry
-                                                      : {
-                                                          ...entry,
-                                                          lines: entry.lines.map((candidate) =>
-                                                            candidate.id === line.id ? { ...candidate, quantity: Math.max(Number(event.target.value), 1) } : candidate
-                                                          )
-                                                        }
-                                                  )
-                                                );
-                                              }}
-                                              type="number"
-                                              value={line.quantity}
-                                            />
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            <input
-                                              className="min-h-[34px] w-28 border border-neutral-300 px-2"
-                                              min={0}
-                                              onChange={(event) => {
-                                                setOrders((prev) =>
-                                                  prev.map((entry) =>
-                                                    entry.id !== order.id
-                                                      ? entry
-                                                      : {
-                                                          ...entry,
-                                                          lines: entry.lines.map((candidate) =>
-                                                            candidate.id === line.id ? { ...candidate, unit_price: Math.max(Number(event.target.value), 0) } : candidate
-                                                          )
-                                                        }
-                                                  )
-                                                );
-                                              }}
-                                              step="0.01"
-                                              type="number"
-                                              value={line.unit_price}
-                                            />
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            <input
-                                              className="min-h-[34px] w-28 border border-neutral-300 px-2"
-                                              min={1}
-                                              onChange={(event) => {
-                                                setOrders((prev) =>
-                                                  prev.map((entry) =>
-                                                    entry.id !== order.id
-                                                      ? entry
-                                                      : {
-                                                          ...entry,
-                                                          lines: entry.lines.map((candidate) =>
-                                                            candidate.id === line.id
-                                                              ? { ...candidate, units_per_purchase: Math.max(Number(event.target.value), 1) }
-                                                              : candidate
-                                                          )
-                                                        }
-                                                  )
-                                                );
-                                              }}
-                                              step={1}
-                                              type="number"
-                                              value={line.units_per_purchase}
-                                            />
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            <input
-                                              className="min-h-[34px] w-full border border-neutral-300 px-2"
-                                              onChange={(event) => {
-                                                setOrders((prev) =>
-                                                  prev.map((entry) =>
-                                                    entry.id !== order.id
-                                                      ? entry
-                                                      : {
-                                                          ...entry,
-                                                          lines: entry.lines.map((candidate) =>
-                                                            candidate.id === line.id ? { ...candidate, product_link: event.target.value } : candidate
-                                                          )
-                                                        }
-                                                  )
-                                                );
-                                              }}
-                                              type="url"
-                                              value={line.product_link ?? ''}
-                                            />
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            <input
-                                              className="min-h-[34px] w-full border border-neutral-300 px-2"
-                                              onChange={(event) => {
-                                                setOrders((prev) =>
-                                                  prev.map((entry) =>
-                                                    entry.id !== order.id
-                                                      ? entry
-                                                      : {
-                                                          ...entry,
-                                                          lines: entry.lines.map((candidate) =>
-                                                            candidate.id === line.id ? { ...candidate, notes: event.target.value } : candidate
-                                                          )
-                                                        }
-                                                  )
-                                                );
-                                              }}
-                                              type="text"
-                                              value={line.notes ?? ''}
-                                            />
-                                          </td>
-                                          <td className="px-3 py-2 font-medium">
-                                            {currency.format(Math.max(Number(line.quantity) || 0, 0) * Math.max(Number(line.unit_price) || 0, 0))}
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            <div className="flex gap-2">
-                                              <button
-                                                className="min-h-[32px] border border-neutral-300 px-2 text-xs hover:bg-neutral-100"
-                                                onClick={() => void saveOrderLine(line)}
-                                                type="button"
-                                              >
-                                                Save
-                                              </button>
-                                              <button
-                                                className="min-h-[32px] border border-red-700 px-2 text-xs text-red-700 hover:bg-red-50"
-                                                onClick={() => void removeOrderLine(line.id)}
-                                                type="button"
-                                              >
-                                                Remove
-                                              </button>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-
-                                <div className="mt-4 border border-neutral-300 bg-white p-3">
-                                  <h4 className="text-sm font-semibold">Order Images / Files</h4>
-                                  <p className="mt-1 text-xs text-neutral-600">
-                                    Upload images/files for this order and add a description for each.
-                                  </p>
-                                  <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[1fr_2fr_auto]">
-                                    <input
-                                      className="border border-neutral-300 p-2 text-xs"
-                                      onChange={(event) =>
-                                        setOrderAttachmentDrafts((prev) => ({
-                                          ...prev,
-                                          [order.id]: {
-                                            file: event.target.files?.[0] ?? null,
-                                            description: prev[order.id]?.description ?? ''
-                                          }
-                                        }))
-                                      }
-                                      type="file"
-                                    />
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                                      onChange={(event) =>
-                                        setOrderAttachmentDrafts((prev) => ({
-                                          ...prev,
-                                          [order.id]: {
-                                            file: prev[order.id]?.file ?? null,
-                                            description: event.target.value
-                                          }
-                                        }))
-                                      }
-                                      placeholder="Image/File description"
-                                      value={orderAttachmentDrafts[order.id]?.description ?? ''}
-                                    />
-                                    <button
-                                      className="min-h-[34px] border border-neutral-700 bg-neutral-800 px-3 text-xs text-white hover:bg-neutral-900"
-                                      onClick={() => void uploadOrderAttachment(order.id)}
-                                      type="button"
-                                    >
-                                      Add Image
-                                    </button>
-                                  </div>
-                                  <div className="mt-3 space-y-2">
-                                    {(orderAttachmentsByOrder.get(order.id) ?? []).map((entry) => {
-                                      const publicUrl = entry.attachment
-                                        ? supabase.storage
-                                            .from(entry.attachment.bucket)
-                                            .getPublicUrl(entry.attachment.storage_path).data.publicUrl
-                                        : '';
-                                      return (
-                                        <article
-                                          className="flex items-center justify-between border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs"
-                                          key={entry.id}
+                                <div className="space-y-5">
+                                  <section>
+                                    <div className="mb-2 flex items-center justify-between">
+                                      <h3 className="text-base font-semibold">Order Details</h3>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          className="min-h-[34px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
+                                          onClick={() => openEditOrderModal(order)}
+                                          type="button"
                                         >
-                                          <div className="min-w-0">
-                                            <p className="font-medium">{entry.attachment?.file_name ?? 'Attachment'}</p>
-                                            <p className="text-neutral-600">{entry.description || 'No description'}</p>
-                                          </div>
-                                          {publicUrl ? (
-                                            <a
-                                              className="border border-neutral-400 px-2 py-1 hover:bg-white"
-                                              href={publicUrl}
-                                              rel="noreferrer"
-                                              target="_blank"
-                                            >
-                                              Open
-                                            </a>
-                                          ) : null}
-                                        </article>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
+                                          Edit Order
+                                        </button>
+                                        {order.status === 'draft' ? (
+                                          <button
+                                            className="min-h-[34px] border border-red-700 px-3 text-xs text-red-700 hover:bg-red-50"
+                                            onClick={() => void cancelDraftOrder(order)}
+                                            type="button"
+                                          >
+                                            Cancel Draft
+                                          </button>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-sm">
+                                      <p><span className="font-medium">Vendor:</span> {vendorById.get(order.vendor_id)?.name ?? 'Unknown'}</p>
+                                      <p><span className="font-medium">Status:</span> {formatLabel(order.status)}</p>
+                                      <p><span className="font-medium">Priority:</span> {formatLabel(order.priority)}</p>
+                                      <p><span className="font-medium">Date placed:</span> {order.date_placed ?? '-'}</p>
+                                      <p><span className="font-medium">Requested:</span> {order.requested_pickup_date ?? (order.asap ? 'ASAP' : '-')}</p>
+                                      <p><span className="font-medium">Expected:</span> {order.expected_arrival_date ?? '-'}</p>
+                                      <p className="col-span-2"><span className="font-medium">Reason:</span> {order.reason ?? '-'}</p>
+                                      <p className="col-span-2"><span className="font-medium">Notes:</span> {order.notes ?? '-'}</p>
+                                    </div>
+                                  </section>
 
-                                <div className="mt-3 flex flex-wrap items-center gap-2">
-                                  <button
-                                    className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
-                                    onClick={() => void addOrderLine(order.id)}
-                                    type="button"
-                                  >
-                                    + Add Line
-                                  </button>
-                                </div>
-
-                                <div className="mt-3 border border-neutral-300 bg-white p-3">
-                                  <h4 className="text-sm font-semibold">Add Existing Catalog Item</h4>
-                                  <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[2fr_1fr_1fr_1fr_auto]">
-                                    <select
-                                      className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
-                                      onChange={(event) => {
-                                        const nextProductId = event.target.value;
-                                        const selected = productById.get(nextProductId);
-                                        setOrderCatalogDrafts((prev) => ({
-                                          ...prev,
-                                          [order.id]: {
-                                            product_id: nextProductId,
-                                            quantity: selected?.default_order_quantity ?? prev[order.id]?.quantity ?? 1,
-                                            unit_price: Number(selected?.default_unit_cost ?? prev[order.id]?.unit_price ?? 0),
-                                            units_per_purchase: selected?.units_per_purchase ?? prev[order.id]?.units_per_purchase ?? 1
-                                          }
-                                        }));
-                                      }}
-                                      value={orderCatalogDrafts[order.id]?.product_id ?? ''}
-                                    >
-                                      <option value="">Select existing item</option>
-                                      {productsByCategory.map((product) => (
-                                        <option key={product.id} value={product.id}>
-                                          {product.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                                      min={1}
-                                      onChange={(event) =>
-                                        setOrderCatalogDrafts((prev) => ({
-                                          ...prev,
-                                          [order.id]: {
-                                            product_id: prev[order.id]?.product_id ?? '',
-                                            quantity: Math.max(Number(event.target.value) || 1, 1),
-                                            unit_price: prev[order.id]?.unit_price ?? 0,
-                                            units_per_purchase: prev[order.id]?.units_per_purchase ?? 1
-                                          }
-                                        }))
-                                      }
-                                      placeholder="Qty"
-                                      step={1}
-                                      type="number"
-                                      value={orderCatalogDrafts[order.id]?.quantity ?? 1}
-                                    />
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                                      min={0}
-                                      onChange={(event) =>
-                                        setOrderCatalogDrafts((prev) => ({
-                                          ...prev,
-                                          [order.id]: {
-                                            product_id: prev[order.id]?.product_id ?? '',
-                                            quantity: prev[order.id]?.quantity ?? 1,
-                                            unit_price: Math.max(Number(event.target.value) || 0, 0),
-                                            units_per_purchase: prev[order.id]?.units_per_purchase ?? 1
-                                          }
-                                        }))
-                                      }
-                                      placeholder="Unit Price"
-                                      step="0.01"
-                                      type="number"
-                                      value={orderCatalogDrafts[order.id]?.unit_price ?? 0}
-                                    />
-                                    <input
-                                      className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                                      min={1}
-                                      onChange={(event) =>
-                                        setOrderCatalogDrafts((prev) => ({
-                                          ...prev,
-                                          [order.id]: {
-                                            product_id: prev[order.id]?.product_id ?? '',
-                                            quantity: prev[order.id]?.quantity ?? 1,
-                                            unit_price: prev[order.id]?.unit_price ?? 0,
-                                            units_per_purchase: Math.max(Number(event.target.value) || 1, 1)
-                                          }
-                                        }))
-                                      }
-                                      placeholder="Items / Ordered"
-                                      step={1}
-                                      type="number"
-                                      value={orderCatalogDrafts[order.id]?.units_per_purchase ?? 1}
-                                    />
-                                    <button
-                                      className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]"
-                                      onClick={() =>
-                                        void addOrderLineFromCatalog(
-                                          order.id,
-                                          orderCatalogDrafts[order.id]?.product_id ?? '',
-                                          orderCatalogDrafts[order.id]?.quantity,
-                                          orderCatalogDrafts[order.id]?.unit_price,
-                                          orderCatalogDrafts[order.id]?.units_per_purchase
-                                        )
-                                      }
-                                      type="button"
-                                    >
-                                      Add Existing
-                                    </button>
-                                  </div>
+                                  <section>
+                                    <div className="mb-2 flex items-center justify-between">
+                                      <h4 className="text-sm font-semibold uppercase tracking-wide text-neutral-600">Line Items</h4>
+                                      <button
+                                        className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]"
+                                        onClick={() => openAddLineItemModal(order.id)}
+                                        type="button"
+                                      >
+                                        Add Existing Catalog Item
+                                      </button>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                      <table className="min-w-full text-xs">
+                                        <thead className="bg-neutral-100 text-left uppercase tracking-wide text-neutral-600">
+                                          <tr>
+                                            <th className="border-b border-neutral-300 px-2 py-2">Product</th>
+                                            <th className="border-b border-neutral-300 px-2 py-2">How Many Ordered</th>
+                                            <th className="border-b border-neutral-300 px-2 py-2">Cost Of 1 Ordered Item</th>
+                                            <th className="border-b border-neutral-300 px-2 py-2">Items Per Ordered Item</th>
+                                            <th className="border-b border-neutral-300 px-2 py-2">Link</th>
+                                            <th className="border-b border-neutral-300 px-2 py-2">Notes</th>
+                                            <th className="border-b border-neutral-300 px-2 py-2">Line Total</th>
+                                            <th className="border-b border-neutral-300 px-2 py-2">Actions</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {order.lines.map((line) => (
+                                            <tr className="border-b border-neutral-200" key={line.id}>
+                                              <td className="px-2 py-2">{line.product_id ? productById.get(line.product_id)?.name ?? 'Unknown' : '-'}</td>
+                                              <td className="px-2 py-2">{line.quantity}</td>
+                                              <td className="px-2 py-2">{currency.format(line.unit_price)}</td>
+                                              <td className="px-2 py-2">{line.units_per_purchase}</td>
+                                              <td className="px-2 py-2">
+                                                {line.product_link ? (
+                                                  <a className="underline hover:no-underline" href={line.product_link} rel="noreferrer" target="_blank">Open</a>
+                                                ) : '-'}
+                                              </td>
+                                              <td className="px-2 py-2">{line.notes ?? '-'}</td>
+                                              <td className="px-2 py-2">{currency.format(Math.max(Number(line.quantity) || 0, 0) * Math.max(Number(line.unit_price) || 0, 0))}</td>
+                                              <td className="px-2 py-2">
+                                                <div className="flex gap-1">
+                                                  <button
+                                                    className="min-h-[30px] border border-neutral-300 px-2 text-[11px] hover:bg-neutral-100"
+                                                    onClick={() => {
+                                                      setLineFilesModalLineId(line.id);
+                                                      setLineAttachmentDrafts((prev) => ({
+                                                        ...prev,
+                                                        [line.id]: prev[line.id] ?? { file: null, description: '' }
+                                                      }));
+                                                    }}
+                                                    type="button"
+                                                  >
+                                                    Files ({lineAttachmentsByLine.get(line.id)?.length ?? 0})
+                                                  </button>
+                                                  <button
+                                                    className="min-h-[30px] border border-neutral-300 px-2 text-[11px] hover:bg-neutral-100"
+                                                    onClick={() => openEditLineItemModal(order.id, line)}
+                                                    type="button"
+                                                  >
+                                                    Edit
+                                                  </button>
+                                                  <button
+                                                    className="min-h-[30px] border border-red-700 px-2 text-[11px] text-red-700 hover:bg-red-50"
+                                                    onClick={() => void removeOrderLine(line.id)}
+                                                    type="button"
+                                                  >
+                                                    Remove
+                                                  </button>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </section>
                                 </div>
                               </td>
                             </tr>
@@ -1972,95 +1883,118 @@ export function ProductDashboard() {
               <section className="border-b border-neutral-300 px-4 py-4 md:px-6">
                 <h3 className="text-base font-semibold">Add Product</h3>
                 <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-4">
-                  <input
-                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))}
-                    placeholder="Product Name"
-                    value={newProduct.name}
-                  />
-                  <select
-                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) =>
-                      setNewProduct((prev) => ({
-                        ...prev,
-                        category_id: event.target.value,
-                        subcategory_id: ''
-                      }))
-                    }
-                    value={newProduct.category_id}
-                  >
-                    <option value="">Category</option>
-                    {rootCategories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, subcategory_id: event.target.value }))}
-                    value={newProduct.subcategory_id}
-                  >
-                    <option value="">Subcategory (optional)</option>
-                    {(newProduct.category_id ? subcategoriesByParent.get(newProduct.category_id) ?? [] : []).map((subcategory) => (
-                      <option key={subcategory.id} value={subcategory.id}>
-                        {subcategory.name}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, preferred_vendor_id: event.target.value }))}
-                    value={newProduct.preferred_vendor_id}
-                  >
-                    <option value="">Vendor</option>
-                    {vendors.map((vendor) => (
-                      <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
-                    ))}
-                  </select>
-                  <input
-                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, sku: event.target.value }))}
-                    placeholder="SKU"
-                    value={newProduct.sku}
-                  />
-                  <input
-                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, default_unit_cost: event.target.value }))}
-                    placeholder="Cost Of 1 Ordered Item"
-                    type="number"
-                    value={newProduct.default_unit_cost}
-                  />
-                  <input
-                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, units_per_purchase: event.target.value }))}
-                    placeholder="How Many Items Per Ordered Item"
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={newProduct.units_per_purchase}
-                  />
-                  <input
-                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    min={1}
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, default_order_quantity: event.target.value }))}
-                    placeholder="Default Qty To Order"
-                    step={1}
-                    type="number"
-                    value={newProduct.default_order_quantity}
-                  />
-                  <input
-                    className="min-h-[36px] border border-neutral-300 px-2 text-sm md:col-span-2"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, vendor_product_link: event.target.value }))}
-                    placeholder="Vendor Link"
-                    value={newProduct.vendor_product_link}
-                  />
-                  <textarea
-                    className="min-h-[72px] border border-neutral-300 px-2 py-2 text-sm md:col-span-4"
-                    onChange={(event) => setNewProduct((prev) => ({ ...prev, notes: event.target.value }))}
-                    placeholder="Notes"
-                    value={newProduct.notes}
-                  />
+                  <label className="text-sm text-neutral-700">
+                    Product Name
+                    <input
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))}
+                      value={newProduct.name}
+                    />
+                  </label>
+                  <label className="text-sm text-neutral-700">
+                    Category
+                    <select
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
+                      onChange={(event) =>
+                        setNewProduct((prev) => ({
+                          ...prev,
+                          category_id: event.target.value,
+                          subcategory_id: ''
+                        }))
+                      }
+                      value={newProduct.category_id}
+                    >
+                      <option value="">Select category</option>
+                      {rootCategories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-sm text-neutral-700">
+                    Subcategory
+                    <select
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, subcategory_id: event.target.value }))}
+                      value={newProduct.subcategory_id}
+                    >
+                      <option value="">Optional subcategory</option>
+                      {(newProduct.category_id ? subcategoriesByParent.get(newProduct.category_id) ?? [] : []).map((subcategory) => (
+                        <option key={subcategory.id} value={subcategory.id}>
+                          {subcategory.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-sm text-neutral-700">
+                    Vendor
+                    <select
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, preferred_vendor_id: event.target.value }))}
+                      value={newProduct.preferred_vendor_id}
+                    >
+                      <option value="">Select vendor</option>
+                      {vendors.map((vendor) => (
+                        <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-sm text-neutral-700">
+                    SKU
+                    <input
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, sku: event.target.value }))}
+                      value={newProduct.sku}
+                    />
+                  </label>
+                  <label className="text-sm text-neutral-700">
+                    Cost Of 1 Ordered Item
+                    <input
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, default_unit_cost: event.target.value }))}
+                      type="number"
+                      value={newProduct.default_unit_cost}
+                    />
+                  </label>
+                  <label className="text-sm text-neutral-700">
+                    Items Per Ordered Item
+                    <input
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, units_per_purchase: event.target.value }))}
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={newProduct.units_per_purchase}
+                    />
+                  </label>
+                  <label className="text-sm text-neutral-700">
+                    Default Qty To Order
+                    <input
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                      min={1}
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, default_order_quantity: event.target.value }))}
+                      step={1}
+                      type="number"
+                      value={newProduct.default_order_quantity}
+                    />
+                  </label>
+                  <label className="text-sm text-neutral-700 md:col-span-2">
+                    Vendor Link
+                    <input
+                      className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2 text-sm"
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, vendor_product_link: event.target.value }))}
+                      value={newProduct.vendor_product_link}
+                    />
+                  </label>
+                  <label className="text-sm text-neutral-700 md:col-span-4">
+                    Notes
+                    <textarea
+                      className="mt-1 min-h-[72px] w-full border border-neutral-300 px-2 py-2 text-sm"
+                      onChange={(event) => setNewProduct((prev) => ({ ...prev, notes: event.target.value }))}
+                      value={newProduct.notes}
+                    />
+                  </label>
                 </div>
                 <button
                   className="mt-3 min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
@@ -2216,7 +2150,7 @@ export function ProductDashboard() {
                                       onChange={(event) =>
                                         setProducts((prev) => prev.map((entry) => (entry.id === product.id ? { ...entry, sku: event.target.value } : entry)))
                                       }
-                                      placeholder="SKU"
+                                      aria-label="SKU"
                                       value={product.sku ?? ''}
                                     />
                                     <input
@@ -2273,7 +2207,7 @@ export function ProductDashboard() {
                                           )
                                         )
                                       }
-                                      placeholder="Vendor Link"
+                                      aria-label="Vendor Link"
                                       value={product.vendor_product_link ?? ''}
                                     />
                                     <textarea
@@ -2285,7 +2219,7 @@ export function ProductDashboard() {
                                           )
                                         )
                                       }
-                                      placeholder="Notes"
+                                      aria-label="Product Notes"
                                       value={product.notes ?? ''}
                                     />
                                   </div>
@@ -2345,7 +2279,7 @@ export function ProductDashboard() {
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm"
                     onChange={(event) => setNewVendor((prev) => ({ ...prev, notes: event.target.value }))}
-                    placeholder="Notes"
+                    aria-label="Vendor Notes"
                     value={newVendor.notes}
                   />
                 </div>
@@ -2637,7 +2571,7 @@ export function ProductDashboard() {
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm md:col-span-2"
                     onChange={(event) => setNewWishlistItem((prev) => ({ ...prev, notes: event.target.value }))}
-                    placeholder="Notes"
+                    aria-label="Wishlist Notes"
                     value={newWishlistItem.notes}
                   />
                 </div>
@@ -2824,99 +2758,679 @@ export function ProductDashboard() {
               </section>
               <section className="border-t border-neutral-300 px-4 py-4 md:px-6">
                 <h3 className="text-base font-semibold">Product Categories</h3>
-                <p className="mt-1 text-sm text-neutral-600">Create main categories and subcategories used by the product catalog.</p>
-                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[2fr_2fr_auto]">
-                  <input
-                    className="min-h-[36px] border border-neutral-300 px-2 text-sm"
-                    onChange={(event) => setNewProductCategory((prev) => ({ ...prev, name: event.target.value }))}
-                    placeholder="Category or Subcategory Name"
-                    value={newProductCategory.name}
-                  />
-                  <select
-                    className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
-                    onChange={(event) => setNewProductCategory((prev) => ({ ...prev, parent_category_id: event.target.value }))}
-                    value={newProductCategory.parent_category_id}
-                  >
-                    <option value="">Main category</option>
-                    {rootCategories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        Subcategory under: {category.name}
-                      </option>
-                    ))}
-                  </select>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Add a category by name. Drag onto a category to nest it, or drag between categories to keep it top-level.
+                </p>
+                <div className="mt-3 flex flex-col gap-2 md:flex-row">
+                  <label className="flex-1 text-sm text-neutral-700">
+                    Category Name
+                    <input
+                      className="mt-1 min-h-[38px] w-full border border-neutral-300 px-2"
+                      onChange={(event) => setNewProductCategory({ name: event.target.value })}
+                      value={newProductCategory.name}
+                    />
+                  </label>
                   <button
-                    className="min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                    className="min-h-[38px] border border-brand-maroon bg-brand-maroon px-4 text-sm text-white hover:bg-[#6a0000] md:self-end"
                     onClick={() => void addProductCategory()}
                     type="button"
                   >
-                    Add Category
+                    Add
                   </button>
                 </div>
-                <div className="mt-3 space-y-2">
-                  {productCategories.map((category) => (
-                    <div className="grid grid-cols-1 gap-2 border border-neutral-200 p-2 md:grid-cols-[2fr_2fr_1fr_auto]" key={category.id}>
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        onChange={(event) =>
-                          setProductCategories((prev) =>
-                            prev.map((entry) => (entry.id === category.id ? { ...entry, name: event.target.value } : entry))
-                          )
-                        }
-                        value={category.name}
+                <div className="mt-4 rounded border border-neutral-300 bg-neutral-50 p-2">
+                  {rootCategories.length === 0 ? (
+                    <p className="px-2 py-3 text-sm text-neutral-600">No categories yet.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      <div
+                        className={`h-2 rounded ${activeRootDropIndex === 0 ? 'bg-brand-maroon/50' : 'bg-transparent'}`}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          setActiveDropCategoryId(null);
+                          setActiveRootDropIndex(0);
+                        }}
+                        onDrop={() => {
+                          if (draggingCategoryId) {
+                            void moveCategoryToRootPosition(draggingCategoryId, 0).finally(resetDragState);
+                          }
+                        }}
                       />
-                      <select
-                        className="min-h-[34px] border border-neutral-300 bg-white px-2 text-sm"
-                        onChange={(event) =>
-                          setProductCategories((prev) =>
-                            prev.map((entry) =>
-                              entry.id === category.id
-                                ? { ...entry, parent_category_id: event.target.value || null }
-                                : entry
-                            )
-                          )
-                        }
-                        value={category.parent_category_id ?? ''}
-                      >
-                        <option value="">Main category</option>
-                        {rootCategories
-                          .filter((entry) => entry.id !== category.id)
-                          .map((entry) => (
-                            <option key={entry.id} value={entry.id}>
-                              Subcategory under: {entry.name}
-                            </option>
+                      {rootCategories.map((category, index) => (
+                        <Fragment key={category.id}>
+                          <article
+                            className={`cursor-pointer rounded border px-3 py-2 ${
+                              activeDropCategoryId === category.id ? 'border-brand-maroon bg-brand-maroon/10' : 'border-neutral-300 bg-white'
+                            }`}
+                            draggable
+                            onClick={() =>
+                              setEditingCategoryDraft({
+                                id: category.id,
+                                name: category.name,
+                                parent_category_id: category.parent_category_id
+                              })
+                            }
+                            onDragEnd={resetDragState}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              setActiveRootDropIndex(null);
+                              setActiveDropCategoryId(category.id);
+                            }}
+                            onDragStart={() => setDraggingCategoryId(category.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                setEditingCategoryDraft({
+                                  id: category.id,
+                                  name: category.name,
+                                  parent_category_id: category.parent_category_id
+                                });
+                              }
+                            }}
+                            onDrop={() => {
+                              if (draggingCategoryId) {
+                                void moveCategoryUnderCategory(draggingCategoryId, category.id).finally(resetDragState);
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            <p className="text-sm font-medium">{category.name}</p>
+                          </article>
+
+                          {(subcategoriesByParent.get(category.id) ?? []).map((subCategory) => (
+                            <article
+                              className={`ml-5 cursor-pointer rounded border px-3 py-2 ${
+                                activeDropCategoryId === subCategory.id ? 'border-brand-maroon bg-brand-maroon/10' : 'border-neutral-300 bg-white'
+                              }`}
+                              draggable
+                              key={subCategory.id}
+                              onClick={() =>
+                                setEditingCategoryDraft({
+                                  id: subCategory.id,
+                                  name: subCategory.name,
+                                  parent_category_id: subCategory.parent_category_id
+                                })
+                              }
+                              onDragEnd={resetDragState}
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                setActiveRootDropIndex(null);
+                                setActiveDropCategoryId(subCategory.id);
+                              }}
+                              onDragStart={() => setDraggingCategoryId(subCategory.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  setEditingCategoryDraft({
+                                    id: subCategory.id,
+                                    name: subCategory.name,
+                                    parent_category_id: subCategory.parent_category_id
+                                  });
+                                }
+                              }}
+                              onDrop={() => {
+                                if (draggingCategoryId) {
+                                  void moveCategoryUnderCategory(draggingCategoryId, subCategory.id).finally(resetDragState);
+                                }
+                              }}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <p className="text-sm font-medium">{subCategory.name}</p>
+                            </article>
                           ))}
-                      </select>
-                      <input
-                        className="min-h-[34px] border border-neutral-300 px-2 text-sm"
-                        min={0}
-                        onChange={(event) =>
-                          setProductCategories((prev) =>
-                            prev.map((entry) =>
-                              entry.id === category.id
-                                ? { ...entry, sort_order: Math.max(Number(event.target.value) || 0, 0) }
-                                : entry
-                            )
-                          )
-                        }
-                        placeholder="Sort"
-                        step={1}
-                        type="number"
-                        value={category.sort_order}
-                      />
-                      <button
-                        className="min-h-[34px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100"
-                        onClick={() => void saveProductCategory(category)}
-                        type="button"
-                      >
-                        Save
-                      </button>
+
+                          <div
+                            className={`h-2 rounded ${activeRootDropIndex === index + 1 ? 'bg-brand-maroon/50' : 'bg-transparent'}`}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              setActiveDropCategoryId(null);
+                              setActiveRootDropIndex(index + 1);
+                            }}
+                            onDrop={() => {
+                              if (draggingCategoryId) {
+                                void moveCategoryToRootPosition(draggingCategoryId, index + 1).finally(resetDragState);
+                              }
+                            }}
+                          />
+                        </Fragment>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               </section>
             </section>
           )}
       </section>
+
+      {editingCategoryDraft ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-xl border border-neutral-300 bg-white">
+            <header className="border-b border-neutral-300 px-4 py-3">
+              <h3 className="text-base font-semibold">Edit Category</h3>
+            </header>
+            <div className="grid grid-cols-1 gap-3 px-4 py-4">
+              <label className="text-sm text-neutral-700">
+                Name
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setEditingCategoryDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+                  type="text"
+                  value={editingCategoryDraft.name}
+                />
+              </label>
+              <label className="text-sm text-neutral-700">
+                Parent
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                  onChange={(event) =>
+                    setEditingCategoryDraft((prev) =>
+                      prev ? { ...prev, parent_category_id: event.target.value || null } : prev
+                    )
+                  }
+                  value={editingCategoryDraft.parent_category_id ?? ''}
+                >
+                  <option value="">Main category</option>
+                  {rootCategories
+                    .filter((category) => category.id !== editingCategoryDraft.id)
+                    .map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
+              <button
+                className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={() => setEditingCategoryDraft(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                onClick={() => void saveProductCategoryEdit()}
+                type="button"
+              >
+                Save
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
+
+      {showCreateOrderModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl border border-neutral-300 bg-white">
+            <header className="border-b border-neutral-300 px-4 py-3">
+              <h3 className="text-base font-semibold">Create Order</h3>
+            </header>
+            <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-2">
+              <label className="text-sm text-neutral-700">
+                Vendor
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                  onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, vendor_id: event.target.value }))}
+                  value={newOrderDraft.vendor_id}
+                >
+                  <option value="">Select vendor</option>
+                  {vendors.map((vendor) => (
+                    <option key={vendor.id} value={vendor.id}>
+                      {vendor.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm text-neutral-700">
+                Priority
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                  onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, priority: event.target.value as DbPriority }))}
+                  value={newOrderDraft.priority}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </label>
+              <label className="text-sm text-neutral-700">
+                ASAP
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    checked={newOrderDraft.asap}
+                    onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, asap: event.target.checked }))}
+                    type="checkbox"
+                  />
+                  <span className="text-sm text-neutral-700">Mark as ASAP (no requested pickup date)</span>
+                </div>
+              </label>
+              <label className="text-sm text-neutral-700">
+                Date Placed
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, date_placed: event.target.value }))}
+                  type="date"
+                  value={newOrderDraft.date_placed}
+                />
+              </label>
+              <label className="text-sm text-neutral-700 md:col-span-1">
+                Requested Pickup Date
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, requested_pickup_date: event.target.value }))}
+                  disabled={newOrderDraft.asap}
+                  type="date"
+                  value={newOrderDraft.requested_pickup_date}
+                />
+              </label>
+              <label className="text-sm text-neutral-700">
+                Expected Arrival
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, expected_arrival_date: event.target.value }))}
+                  type="date"
+                  value={newOrderDraft.expected_arrival_date}
+                />
+              </label>
+              <label className="text-sm text-neutral-700 md:col-span-3">
+                Reason
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, reason: event.target.value }))}
+                  type="text"
+                  value={newOrderDraft.reason}
+                />
+              </label>
+              <label className="text-sm text-neutral-700 md:col-span-3">
+                Notes
+                <textarea
+                  className="mt-1 min-h-[90px] w-full border border-neutral-300 px-2 py-2"
+                  onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, notes: event.target.value }))}
+                  value={newOrderDraft.notes}
+                />
+              </label>
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
+              <button
+                className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={() => setShowCreateOrderModal(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                onClick={() => void createOrder()}
+                type="button"
+              >
+                Confirm Create Order
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
+
+      {showEditOrderModal && editingOrderDraft ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl border border-neutral-300 bg-white">
+            <header className="border-b border-neutral-300 px-4 py-3">
+              <h3 className="text-base font-semibold">Edit Order</h3>
+            </header>
+            <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-2">
+              <label className="text-sm text-neutral-700">
+                Vendor
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                  onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, vendor_id: event.target.value } : prev))}
+                  value={editingOrderDraft.vendor_id}
+                >
+                  {vendors.map((vendor) => (
+                    <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm text-neutral-700">
+                Status
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                  onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, status: event.target.value as DbOrderStatus } : prev))}
+                  value={editingOrderDraft.status}
+                >
+                  {ORDER_STATUSES.map((status) => (
+                    <option key={status} value={status}>{formatLabel(status)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm text-neutral-700">
+                Priority
+                <select
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
+                  onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, priority: event.target.value as DbPriority } : prev))}
+                  value={editingOrderDraft.priority}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </label>
+              <label className="text-sm text-neutral-700">
+                Date Placed
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, date_placed: event.target.value || null } : prev))}
+                  type="date"
+                  value={editingOrderDraft.date_placed ?? ''}
+                />
+              </label>
+              <label className="text-sm text-neutral-700">
+                Requested Pickup Date
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, requested_pickup_date: event.target.value || null } : prev))}
+                  type="date"
+                  value={editingOrderDraft.requested_pickup_date ?? ''}
+                />
+              </label>
+              <label className="text-sm text-neutral-700">
+                Expected Arrival
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, expected_arrival_date: event.target.value || null } : prev))}
+                  type="date"
+                  value={editingOrderDraft.expected_arrival_date ?? ''}
+                />
+              </label>
+              <label className="text-sm text-neutral-700 md:col-span-2">
+                Reason
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, reason: event.target.value } : prev))}
+                  type="text"
+                  value={editingOrderDraft.reason ?? ''}
+                />
+              </label>
+              <label className="text-sm text-neutral-700 md:col-span-2">
+                Notes
+                <textarea
+                  className="mt-1 min-h-[80px] w-full border border-neutral-300 px-2 py-2"
+                  onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, notes: event.target.value } : prev))}
+                  value={editingOrderDraft.notes ?? ''}
+                />
+              </label>
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
+              <button
+                className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={() => {
+                  setShowEditOrderModal(false);
+                  setEditingOrderDraft(null);
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                onClick={() => void saveEditOrderModal()}
+                type="button"
+              >
+                Save
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
+
+      {lineModalMode && lineModalDraft ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl border border-neutral-300 bg-white">
+            <header className="border-b border-neutral-300 px-4 py-3">
+              <h3 className="text-base font-semibold">{lineModalMode === 'add' ? 'Add Catalog Item' : 'Edit Line Item'}</h3>
+            </header>
+            <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-3">
+              <label className="text-sm text-neutral-700 md:col-span-3">
+                Product
+                <div className="relative mt-1" ref={lineProductDropdownRef}>
+                  <button
+                    className="flex min-h-[36px] w-full items-center justify-between border border-neutral-300 bg-white px-2 text-left"
+                    onClick={() => setLineProductDropdownOpen((prev) => !prev)}
+                    type="button"
+                  >
+                    <span className={lineModalDraft.product_id ? 'text-neutral-900' : 'text-neutral-500'}>
+                      {lineModalDraft.product_id ? productById.get(lineModalDraft.product_id)?.name ?? 'Selected product' : 'Select product'}
+                    </span>
+                    <span className={`text-xs text-neutral-600 transition-transform ${lineProductDropdownOpen ? 'rotate-180' : ''}`}>▼</span>
+                  </button>
+                  <div
+                    className={`absolute left-0 right-0 top-[calc(100%+4px)] z-20 border border-neutral-300 bg-white shadow transition-all duration-200 ${
+                      lineProductDropdownOpen
+                        ? 'pointer-events-auto translate-y-0 opacity-100'
+                        : 'pointer-events-none -translate-y-1 opacity-0'
+                    }`}
+                  >
+                    <div className="border-b border-neutral-200 p-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                        Search Product
+                        <input
+                          className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
+                          onChange={(event) => setLineProductQuery(event.target.value)}
+                          onFocus={() => setLineProductDropdownOpen(true)}
+                          value={lineProductQuery}
+                        />
+                      </label>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto">
+                      {filteredLineProductOptions.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-neutral-500">No products match this search.</p>
+                      ) : (
+                        filteredLineProductOptions.map((product) => (
+                          <button
+                            className="block w-full border-b border-neutral-100 px-3 py-2 text-left text-sm hover:bg-neutral-100"
+                            key={product.id}
+                            onClick={() => applyLineProductSelection(product)}
+                            type="button"
+                          >
+                            <p className="font-medium">{product.name}</p>
+                            <p className="text-xs text-neutral-500">
+                              {product.sku ? `SKU: ${product.sku}` : 'No SKU'}
+                              {product.default_unit_cost !== null ? ` • ${currency.format(product.default_unit_cost)}` : ''}
+                            </p>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {lineModalErrors.product_id ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.product_id}</p> : null}
+              </label>
+
+              <label className="text-sm text-neutral-700">
+                How Many Ordered
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  min={1}
+                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, quantity: Number(event.target.value) } : prev))}
+                  step={1}
+                  type="number"
+                  value={lineModalDraft.quantity}
+                />
+                {lineModalErrors.quantity ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.quantity}</p> : null}
+              </label>
+
+              <label className="text-sm text-neutral-700">
+                Cost Of 1 Ordered Item
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  min={0}
+                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, unit_price: Number(event.target.value) } : prev))}
+                  step="0.01"
+                  type="number"
+                  value={lineModalDraft.unit_price}
+                />
+                {lineModalErrors.unit_price ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.unit_price}</p> : null}
+              </label>
+
+              <label className="text-sm text-neutral-700">
+                Items Per Ordered Item
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  min={1}
+                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, units_per_purchase: Number(event.target.value) } : prev))}
+                  step={1}
+                  type="number"
+                  value={lineModalDraft.units_per_purchase}
+                />
+                {lineModalErrors.units_per_purchase ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.units_per_purchase}</p> : null}
+              </label>
+
+              <label className="text-sm text-neutral-700 md:col-span-2">
+                Link
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, product_link: event.target.value } : prev))}
+                  type="url"
+                  value={lineModalDraft.product_link}
+                />
+                {lineModalErrors.product_link ? <p className="mt-1 text-xs text-red-700">{lineModalErrors.product_link}</p> : null}
+              </label>
+
+              <label className="text-sm text-neutral-700 md:col-span-3">
+                Notes
+                <textarea
+                  className="mt-1 min-h-[86px] w-full border border-neutral-300 px-2 py-2"
+                  onChange={(event) => setLineModalDraft((prev) => (prev ? { ...prev, notes: event.target.value } : prev))}
+                  value={lineModalDraft.notes}
+                />
+              </label>
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
+              <button
+                className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={closeLineModal}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]"
+                onClick={() => void saveLineModal()}
+                type="button"
+              >
+                Save
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
+
+      {lineFilesModalLineId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl border border-neutral-300 bg-white">
+            <header className="border-b border-neutral-300 px-4 py-3">
+              <h3 className="text-base font-semibold">Line Item Files</h3>
+              <p className="mt-1 text-xs text-neutral-600">
+                {lineById.get(lineFilesModalLineId)?.product_id
+                  ? productById.get(lineById.get(lineFilesModalLineId)?.product_id ?? '')?.name ?? 'Selected product'
+                  : 'No product'}
+              </p>
+            </header>
+            <div className="grid grid-cols-1 gap-2 border-b border-neutral-300 px-4 py-4 md:grid-cols-[1fr_2fr_auto]">
+              <label className="text-sm text-neutral-700">
+                File
+                <input
+                  className="mt-1 block w-full border border-neutral-300 p-2 text-sm"
+                  onChange={(event) =>
+                    setLineAttachmentDrafts((prev) => ({
+                      ...prev,
+                      [lineFilesModalLineId]: {
+                        file: event.target.files?.[0] ?? null,
+                        description: prev[lineFilesModalLineId]?.description ?? ''
+                      }
+                    }))
+                  }
+                  type="file"
+                />
+              </label>
+              <label className="text-sm text-neutral-700">
+                File Description
+                <input
+                  className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
+                  onChange={(event) =>
+                    setLineAttachmentDrafts((prev) => ({
+                      ...prev,
+                      [lineFilesModalLineId]: {
+                        file: prev[lineFilesModalLineId]?.file ?? null,
+                        description: event.target.value
+                      }
+                    }))
+                  }
+                  value={lineAttachmentDrafts[lineFilesModalLineId]?.description ?? ''}
+                />
+              </label>
+              <div className="flex items-end">
+                <button
+                  className="min-h-[36px] w-full border border-neutral-700 bg-neutral-800 px-3 text-xs text-white hover:bg-neutral-900"
+                  disabled={lineAttachmentUploadingIds.includes(lineFilesModalLineId)}
+                  onClick={() => void uploadLineAttachment(lineFilesModalLineId)}
+                  type="button"
+                >
+                  {lineAttachmentUploadingIds.includes(lineFilesModalLineId) ? 'Uploading...' : 'Upload'}
+                </button>
+              </div>
+            </div>
+            <div className="max-h-[50vh] space-y-2 overflow-y-auto px-4 py-4">
+              {(lineAttachmentsByLine.get(lineFilesModalLineId) ?? []).map((entry) => {
+                const publicUrl = entry.attachment
+                  ? supabase.storage.from(entry.attachment.bucket).getPublicUrl(entry.attachment.storage_path).data.publicUrl
+                  : '';
+                return (
+                  <article className="flex items-center justify-between border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs" key={entry.id}>
+                    <div className="min-w-0">
+                      <p className="font-medium">{entry.attachment?.file_name ?? 'Attachment'}</p>
+                      <p className="text-neutral-600">{entry.description || 'No description'}</p>
+                    </div>
+                    {publicUrl ? (
+                      <div className="flex items-center gap-1">
+                        <a className="border border-neutral-400 px-2 py-1 hover:bg-white" href={publicUrl} rel="noreferrer" target="_blank">
+                          Open
+                        </a>
+                        <button
+                          className="border border-red-700 px-2 py-1 text-red-700 hover:bg-red-50"
+                          onClick={() => void removeLineAttachment(entry)}
+                          type="button"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="border border-red-700 px-2 py-1 text-red-700 hover:bg-red-50"
+                        onClick={() => void removeLineAttachment(entry)}
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </article>
+                );
+              })}
+              {(lineAttachmentsByLine.get(lineFilesModalLineId) ?? []).length === 0 ? (
+                <p className="text-sm text-neutral-600">No files uploaded for this line item yet.</p>
+              ) : null}
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-neutral-300 px-4 py-3">
+              <button
+                className="min-h-[34px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                onClick={() => setLineFilesModalLineId(null)}
+                type="button"
+              >
+                Close
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
 
       {promptConvertDraft ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
