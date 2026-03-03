@@ -1,23 +1,42 @@
 'use client';
 
 import {
+  Archive,
   BarChart3,
+  BellDot,
+  BookCheck,
   Boxes,
   Calendar,
+  CalendarClock,
+  ClipboardCheck,
   ClipboardList,
+  Contact,
+  FileScan,
   FileClock,
   FileSpreadsheet,
   FileText,
   FolderKanban,
+  HandCoins,
   Handshake,
+  HeartHandshake,
+  History,
+  ListChecks,
   LayoutDashboard,
   LineChart,
   Megaphone,
   Menu,
+  PackageCheck,
   Package,
+  ReceiptText,
+  ScanSearch,
+  Settings2,
+  ShieldCheck,
   ScanBarcode,
   Settings,
   ShoppingCart,
+  TimerReset,
+  UserRoundCog,
+  UsersRound,
   Users,
   UserCog
 } from 'lucide-react';
@@ -74,21 +93,21 @@ interface DepartmentShellProps {
 function resolveNavIcon(icon: DepartmentShellNavIcon | undefined) {
   switch (icon) {
     case 'schedule':
-      return Calendar;
+      return CalendarClock;
     case 'employees':
-      return Users;
+      return UsersRound;
     case 'meeting':
-      return Handshake;
+      return HeartHandshake;
     case 'shift':
-      return ClipboardList;
+      return ClipboardCheck;
     case 'requests':
-      return FileText;
+      return ReceiptText;
     case 'audit':
-      return FileClock;
+      return ShieldCheck;
     case 'daily_log':
-      return ClipboardList;
+      return BookCheck;
     case 'history':
-      return FileClock;
+      return History;
     case 'analysis':
       return BarChart3;
     case 'forecast':
@@ -98,35 +117,35 @@ function resolveNavIcon(icon: DepartmentShellNavIcon | undefined) {
     case 'orders':
       return ShoppingCart;
     case 'prompts':
-      return Megaphone;
+      return BellDot;
     case 'products':
       return Package;
     case 'vendors':
-      return Handshake;
+      return HandCoins;
     case 'designs':
       return FolderKanban;
     case 'wishlist':
-      return ClipboardList;
+      return Archive;
     case 'settings':
-      return Settings;
+      return Settings2;
     case 'calendar':
       return Calendar;
     case 'events':
       return Megaphone;
     case 'contacts':
-      return Users;
+      return Contact;
     case 'coordinators':
-      return UserCog;
+      return UserRoundCog;
     case 'reports':
       return FileSpreadsheet;
     case 'catalog':
       return Boxes;
     case 'sessions':
-      return LayoutDashboard;
+      return TimerReset;
     case 'count_view':
-      return ScanBarcode;
+      return ScanSearch;
     case 'finalize':
-      return FileText;
+      return PackageCheck;
     case 'dashboard':
     default:
       return LayoutDashboard;
