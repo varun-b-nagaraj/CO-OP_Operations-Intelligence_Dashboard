@@ -83,6 +83,7 @@ interface DepartmentShellProps {
   title: string;
   subtitle: string;
   departmentIcon?: DepartmentShellNavIcon;
+  contentHeading?: string;
   navAriaLabel: string;
   navItems: DepartmentShellNavItem[];
   activeNavId: string;
@@ -156,6 +157,7 @@ export function DepartmentShell({
   title,
   subtitle,
   departmentIcon = 'dashboard',
+  contentHeading,
   navAriaLabel,
   navItems,
   activeNavId,
@@ -246,7 +248,14 @@ export function DepartmentShell({
           </nav>
         </aside>
 
-        <section className="ui-fade-in min-w-0 w-full flex-1 overflow-x-hidden md:pl-16">{children}</section>
+        <section className="ui-fade-in min-w-0 w-full flex-1 overflow-x-hidden md:pl-16">
+          {contentHeading ? (
+            <header className="border-b border-neutral-300 bg-white px-4 py-4 md:px-6">
+              <h2 className="text-lg font-semibold">{contentHeading}</h2>
+            </header>
+          ) : null}
+          {children}
+        </section>
       </div>
     </main>
   );

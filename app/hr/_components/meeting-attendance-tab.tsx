@@ -80,9 +80,6 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
 
   return (
     <section className="space-y-4">
-      <p className="text-xs text-neutral-600">
-        Meeting attendance is separate from period 0 morning shift attendance.
-      </p>
       {status && <p className="text-sm text-brand-maroon">{status}</p>}
       {meetingQuery.isLoading && <p className="text-sm text-neutral-600">Loading meeting attendance...</p>}
       {meetingQuery.error && <p className="text-sm text-red-700">{(meetingQuery.error as Error).message}</p>}

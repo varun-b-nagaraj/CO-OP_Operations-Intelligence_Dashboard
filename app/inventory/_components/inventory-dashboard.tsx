@@ -74,6 +74,7 @@ function wait(ms: number): Promise<void> {
 
 export function InventoryDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('catalog');
+  const activeTabLabel = TABS.find((tab) => tab.id === activeTab)?.label ?? 'Overview';
 
   const [catalog, setCatalog] = useState<InventoryCatalogItem[]>([]);
   const [scanCatalog, setScanCatalog] = useState<InventoryCatalogItem[]>([]);
@@ -980,6 +981,7 @@ export function InventoryDashboard() {
   return (
     <DepartmentShell
       activeNavId={activeTab}
+      contentHeading={activeTabLabel}
       departmentIcon="catalog"
       navAriaLabel="Inventory navigation"
       navItems={TABS.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }))}

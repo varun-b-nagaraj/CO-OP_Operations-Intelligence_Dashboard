@@ -48,6 +48,7 @@ export function HRModule() {
 
   const visibleTabs = tabs.filter((tab) => hasPermission(tab.permission));
   const [globalDateRange, setGlobalDateRange] = useState(currentMonthRange());
+  const [openAddEmployeeSignal, setOpenAddEmployeeSignal] = useState(0);
 
   const requestedModule = searchParams.get('module');
   const resolvedModule: PrimaryModule = requestedModule === 'cfa' ? 'cfa' : 'hr';
@@ -103,10 +104,14 @@ export function HRModule() {
     resolvedModule === 'hr'
       ? visibleTabs.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }))
       : CFA_TABS.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }));
+  const activeNavLabel = navItems.find((item) => item.id === activeNavId)?.label ?? 'Overview';
+  const canEditHRSettings = hasPermission('hr.settings.edit');
+  const showHRDateRange = resolvedModule === 'hr' && resolvedHRTab !== 'schedule';
 
   return (
     <DepartmentShell
       activeNavId={activeNavId}
+      contentHeading={resolvedModule === 'cfa' ? activeNavLabel : undefined}
       departmentIcon={resolvedModule === 'hr' ? 'employees' : 'menu'}
       navAriaLabel={resolvedModule === 'hr' ? 'HR navigation' : 'Chick-fil-A navigation'}
       navItems={navItems}
@@ -121,33 +126,48 @@ export function HRModule() {
       title={resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
     >
       <section className="min-w-0 overflow-x-hidden border border-neutral-300 bg-white">
-        {resolvedModule === 'hr' && resolvedHRTab !== 'schedule' && (
-          <div className="border-b border-neutral-300 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs text-neutral-700">
-                From
-                <input
-                  className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
-                  onChange={(event) =>
-                    setGlobalDateRange((previous) => ({ ...previous, from: event.target.value }))
-                  }
-                  type="date"
-                  value={globalDateRange.from}
-                />
-              </label>
-              <label className="text-xs text-neutral-700">
-                To
-                <input
-                  className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
-                  onChange={(event) =>
-                    setGlobalDateRange((previous) => ({ ...previous, to: event.target.value }))
-                  }
-                  type="date"
-                  value={globalDateRange.to}
-                />
-              </label>
+        {resolvedModule === 'hr' && (
+          <header className="border-b border-neutral-300 bg-white px-4 py-4 md:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">{activeNavLabel}</h2>
+              {showHRDateRange ? (
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <label className="text-xs text-neutral-700">
+                    From
+                    <input
+                      className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) =>
+                        setGlobalDateRange((previous) => ({ ...previous, from: event.target.value }))
+                      }
+                      type="date"
+                      value={globalDateRange.from}
+                    />
+                  </label>
+                  <label className="text-xs text-neutral-700">
+                    To
+                    <input
+                      className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                      onChange={(event) =>
+                        setGlobalDateRange((previous) => ({ ...previous, to: event.target.value }))
+                      }
+                      type="date"
+                      value={globalDateRange.to}
+                    />
+                  </label>
+                  {resolvedHRTab === 'employees' ? (
+                    <button
+                      className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white hover:bg-[#6a0000] disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={!canEditHRSettings}
+                      onClick={() => setOpenAddEmployeeSignal((previous) => previous + 1)}
+                      type="button"
+                    >
+                      Add Employee
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-          </div>
+          </header>
         )}
 
         {resolvedModule === 'hr' ? (
@@ -158,7 +178,9 @@ export function HRModule() {
               role="tabpanel"
             >
               {resolvedHRTab === 'schedule' && <ScheduleTab />}
-              {resolvedHRTab === 'employees' && <EmployeesTab dateRange={globalDateRange} />}
+              {resolvedHRTab === 'employees' && (
+                <EmployeesTab dateRange={globalDateRange} openAddEmployeeSignal={openAddEmployeeSignal} />
+              )}
               {resolvedHRTab === 'meeting-attendance' && <MeetingAttendanceTab dateRange={globalDateRange} />}
               {resolvedHRTab === 'shift-attendance' && <ShiftAttendanceTab dateRange={globalDateRange} />}
               {resolvedHRTab === 'requests' && <RequestsTab />}

@@ -239,7 +239,7 @@ function FancyDropdown(props: {
   );
 }
 
-export function EmployeesTab(props: { dateRange: { from: string; to: string } }) {
+export function EmployeesTab(props: { dateRange: { from: string; to: string }; openAddEmployeeSignal?: number }) {
   const canViewAttendance = usePermission('hr.attendance.view');
   const canOverrideAttendance = usePermission('hr.attendance.override');
   const canEditSettings = usePermission('hr.settings.edit');
@@ -268,6 +268,11 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
   const [strikeScopeByEmployeeId, setStrikeScopeByEmployeeId] = useState<Record<string, 'active' | 'all'>>({});
   const [pointsDrafts, setPointsDrafts] = useState<Record<string, { points: string; type: string; note: string }>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!props.openAddEmployeeSignal) return;
+    setIsAddEmployeeModalOpen(true);
+  }, [props.openAddEmployeeSignal]);
 
   const studentsQuery = useQuery({
     queryKey: ['hr-students'],
@@ -1023,23 +1028,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string } })
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border border-neutral-300 bg-neutral-50 p-3">
-        <div>
-          <h3 className="text-sm font-semibold text-neutral-900">Employee Management</h3>
-          <p className="text-xs text-neutral-600">
-            Shift rates only include shifts on or before today.
-          </p>
-        </div>
-        <button
-          className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={!canEditSettings}
-          onClick={() => setIsAddEmployeeModalOpen(true)}
-          type="button"
-        >
-          Add Employee
-        </button>
-      </div>
-
       {statusMessage && <p className="text-sm text-brand-maroon">{statusMessage}</p>}
 
       <div className="overflow-x-auto border border-neutral-300">

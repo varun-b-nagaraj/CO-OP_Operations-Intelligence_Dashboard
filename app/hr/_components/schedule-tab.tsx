@@ -1778,7 +1778,7 @@ export function ScheduleTab() {
         <div className="space-y-4">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3 border border-neutral-300 bg-neutral-50 p-2">
-              <h3 className="text-sm font-semibold">Schedule — {monthTitle}</h3>
+              <h3 className="text-sm font-semibold">Month — {monthTitle}</h3>
               <div className="flex flex-wrap items-center gap-2">
                 {isManagerMode && (
                   <button

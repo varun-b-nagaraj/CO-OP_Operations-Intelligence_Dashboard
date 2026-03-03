@@ -270,6 +270,7 @@ export function MarketingDashboard() {
   );
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('calendar');
+  const activeTabLabel = TABS.find((tab) => tab.id === activeTab)?.label ?? 'Overview';
   const [searchQuery, setSearchQuery] = useState('');
 
   const [calendarView, setCalendarView] = useState<CalendarView>('month');
@@ -1349,7 +1350,8 @@ export function MarketingDashboard() {
         )}
 
         <header className="border-b border-neutral-300 bg-white px-4 py-4 md:px-6">
-          <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">{activeTabLabel}</h2>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 className="min-h-[38px] w-[240px] border border-neutral-300 bg-white px-3 text-sm"
