@@ -1333,6 +1333,7 @@ export function MarketingDashboard() {
   return (
     <DepartmentShell
       activeNavId={activeTab}
+      departmentIcon="events"
       navAriaLabel="Marketing navigation"
       navItems={TABS}
       onNavSelect={(id) => setActiveTab(id as DashboardTab)}

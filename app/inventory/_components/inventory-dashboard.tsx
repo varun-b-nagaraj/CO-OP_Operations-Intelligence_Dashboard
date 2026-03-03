@@ -980,6 +980,7 @@ export function InventoryDashboard() {
   return (
     <DepartmentShell
       activeNavId={activeTab}
+      departmentIcon="catalog"
       navAriaLabel="Inventory navigation"
       navItems={TABS.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }))}
       onNavSelect={(id) => setActiveTab(id as TabId)}

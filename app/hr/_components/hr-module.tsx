@@ -107,6 +107,7 @@ export function HRModule() {
   return (
     <DepartmentShell
       activeNavId={activeNavId}
+      departmentIcon={resolvedModule === 'hr' ? 'employees' : 'menu'}
       navAriaLabel={resolvedModule === 'hr' ? 'HR navigation' : 'Chick-fil-A navigation'}
       navItems={navItems}
       onNavSelect={(id) => {

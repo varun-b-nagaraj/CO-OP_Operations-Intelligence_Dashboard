@@ -1482,6 +1482,7 @@ export function ProductDashboard() {
   return (
     <DepartmentShell
       activeNavId={activeView}
+      departmentIcon="products"
       navAriaLabel="Product navigation"
       navItems={NAV_ITEMS.map((item) => ({
         ...item,

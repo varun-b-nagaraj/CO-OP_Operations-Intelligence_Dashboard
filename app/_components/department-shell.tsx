@@ -63,6 +63,7 @@ export type DepartmentShellNavIcon =
 interface DepartmentShellProps {
   title: string;
   subtitle: string;
+  departmentIcon?: DepartmentShellNavIcon;
   navAriaLabel: string;
   navItems: DepartmentShellNavItem[];
   activeNavId: string;
@@ -135,6 +136,7 @@ function resolveNavIcon(icon: DepartmentShellNavIcon | undefined) {
 export function DepartmentShell({
   title,
   subtitle,
+  departmentIcon = 'dashboard',
   navAriaLabel,
   navItems,
   activeNavId,
@@ -148,6 +150,7 @@ export function DepartmentShell({
     () => navItems.find((item) => item.id === activeNavId) ?? null,
     [activeNavId, navItems]
   );
+  const DepartmentIcon = resolveNavIcon(departmentIcon);
 
   useEffect(() => {
     const media = window.matchMedia('(min-width: 768px)');
@@ -162,22 +165,29 @@ export function DepartmentShell({
       <div className="relative min-h-screen w-full overflow-hidden border border-neutral-300 bg-white">
         <aside
           className={`z-30 w-full border-b border-neutral-300 bg-white transition-[width,box-shadow] duration-300 ease-out md:absolute md:inset-y-0 md:left-0 md:w-16 md:border-b-0 md:border-r ${
-            isCollapsed ? 'md:shadow-none' : 'md:w-60 md:shadow-[10px_0_28px_rgba(0,0,0,0.18)]'
+            isCollapsed ? 'md:shadow-none' : 'md:w-72 md:shadow-[10px_0_28px_rgba(0,0,0,0.18)]'
           }`}
           onFocusCapture={() => setIsHovered(true)}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
         >
-          <div className={`border-b border-neutral-300 ${isCollapsed ? 'px-2 py-3' : 'px-4 py-4'}`}>
-            <div className={`flex items-start ${isCollapsed ? 'justify-center' : 'justify-between gap-3'}`}>
-              {!isCollapsed ? (
-                <div className="min-w-0">
-                  <h1 className="truncate text-lg font-semibold">{title}</h1>
-                  <p className="mt-1 text-xs text-neutral-600">{subtitle}</p>
-                </div>
-              ) : (
-                <span className="sr-only">{title}</span>
-              )}
+          <div className="border-b border-neutral-300 py-3 md:min-h-[74px]">
+            <div className="grid h-12 grid-cols-[64px_minmax(0,1fr)] items-center">
+              <span className="flex items-center justify-center">
+                <span className="inline-flex h-9 w-9 items-center justify-center border border-neutral-300 bg-white">
+                  <DepartmentIcon className="h-4 w-4" />
+                </span>
+              </span>
+              <div
+                className={`pointer-events-none min-w-0 overflow-hidden transition-all duration-300 ease-out ${
+                  isCollapsed ? 'max-w-0 opacity-0' : 'max-w-[220px] opacity-100'
+                }`}
+              >
+                <h1 className="truncate text-base font-semibold">{title}</h1>
+                <p className="mt-0.5 max-h-[2.4em] overflow-hidden whitespace-normal break-words text-[11px] leading-tight text-neutral-600">
+                  {subtitle}
+                </p>
+              </div>
             </div>
           </div>
           <nav aria-label={navAriaLabel} className="p-0" role="tablist">
@@ -188,9 +198,7 @@ export function DepartmentShell({
                 <button
                   key={item.id}
                   aria-selected={isActive}
-                  className={`ui-click flex min-h-[44px] w-full items-center border-b border-neutral-300 py-3 text-left text-sm font-medium ${
-                    isCollapsed ? 'justify-center px-2' : 'justify-between px-4'
-                  } ${
+                  className={`ui-click relative flex min-h-[44px] w-full items-center border-b border-neutral-300 px-3 py-3 text-left text-sm font-medium ${
                     isActive ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-800 hover:bg-neutral-50'
                   }`}
                   onClick={() => onNavSelect(item.id)}
@@ -198,11 +206,25 @@ export function DepartmentShell({
                   title={item.label}
                   type="button"
                 >
-                  <span className={`flex min-w-0 items-center ${isCollapsed ? 'justify-center' : 'gap-2'}`}>
+                  <span className="absolute left-8 top-1/2 inline-flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center">
                     <Icon className="h-4 w-4 shrink-0" />
-                    {!isCollapsed ? <span className="truncate">{item.label}</span> : null}
                   </span>
-                  {!isCollapsed && item.badge ? <span className="text-xs tabular-nums">{item.badge}</span> : null}
+                  <span
+                    className={`pointer-events-none absolute left-14 top-1/2 -translate-y-1/2 truncate transition-all duration-200 ease-out ${
+                      isCollapsed ? 'max-w-0 opacity-0' : 'max-w-[190px] opacity-100'
+                    }`}
+                  >
+                    {item.label}
+                  </span>
+                  {item.badge ? (
+                    <span
+                      className={`pointer-events-none absolute right-3 text-xs tabular-nums transition-all duration-200 ease-out ${
+                        isCollapsed ? 'max-w-0 opacity-0' : 'max-w-[56px] opacity-100'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
