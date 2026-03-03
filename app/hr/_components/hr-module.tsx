@@ -112,7 +112,7 @@ export function HRModule() {
     <DepartmentShell
       activeNavId={activeNavId}
       contentHeading={resolvedModule === 'cfa' ? activeNavLabel : undefined}
-      departmentIcon={resolvedModule === 'hr' ? 'employees' : 'menu'}
+      departmentIcon={resolvedModule === 'hr' ? 'dashboard' : 'menu'}
       navAriaLabel={resolvedModule === 'hr' ? 'HR navigation' : 'Chick-fil-A navigation'}
       navItems={navItems}
       onNavSelect={(id) => {
