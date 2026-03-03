@@ -40,7 +40,7 @@ import {
   Users,
   UserCog
 } from 'lucide-react';
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 
 export interface DepartmentShellNavItem {
   id: string;
@@ -165,10 +165,6 @@ export function DepartmentShell({
   const [isDesktop, setIsDesktop] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const isCollapsed = isDesktop ? !isHovered : false;
-  const activeItem = useMemo(
-    () => navItems.find((item) => item.id === activeNavId) ?? null,
-    [activeNavId, navItems]
-  );
   const DepartmentIcon = resolveNavIcon(departmentIcon);
 
   useEffect(() => {
@@ -250,14 +246,7 @@ export function DepartmentShell({
           </nav>
         </aside>
 
-        <section className="ui-fade-in min-w-0 w-full flex-1 overflow-x-hidden md:pl-16">
-          <header className="border-b border-neutral-300 bg-white px-4 py-3">
-            <h2 className="text-sm font-semibold tracking-wide text-neutral-800 md:text-base">
-              {activeItem?.label ?? 'Overview'}
-            </h2>
-          </header>
-          {children}
-        </section>
+        <section className="ui-fade-in min-w-0 w-full flex-1 overflow-x-hidden md:pl-16">{children}</section>
       </div>
     </main>
   );
