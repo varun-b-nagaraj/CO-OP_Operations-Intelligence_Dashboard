@@ -20,7 +20,17 @@ export const ShiftSlotKeySchema = z.string().trim().min(1).max(200);
 
 export const StrikeSchema = z.object({
   employee_id: EmployeeIdSchema,
-  reason: z.string().trim().min(1).max(500)
+  reason: z.string().trim().min(1).max(500),
+  record_type: z.enum(['strike', 'warning']).default('strike'),
+  warning_description: z.string().trim().max(500).nullable().optional()
+}).superRefine((value, ctx) => {
+  if (value.record_type === 'warning' && !value.warning_description?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['warning_description'],
+      message: 'warning_description is required when record_type is warning'
+    });
+  }
 });
 
 export const AttendanceOverrideSchema = z

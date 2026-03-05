@@ -21,6 +21,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
   const supabase = useBrowserSupabase();
   const [employeeSNumber, setEmployeeSNumber] = useState('');
   const [periodFilter, setPeriodFilter] = useState('');
+  const [attendanceMode, setAttendanceMode] = useState<'morning' | 'off_period'>('morning');
   const range = props.dateRange;
 
   const attendanceQuery = useQuery({
@@ -96,7 +97,32 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
     }
   });
 
+  const settingsQuery = useQuery({
+    queryKey: ['hr-shift-attendance-settings'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('employee_settings').select('employee_s_number,off_periods');
+      if (error) throw new Error(error.message);
+      return (data ?? []) as Array<{ employee_s_number: string; off_periods: number[] | null }>;
+    }
+  });
+
   const byEmployee = useMemo(() => {
+    const offPeriodsBySNumber = new Map<string, number[]>();
+    for (const row of settingsQuery.data ?? []) {
+      const sNumber = String(row.employee_s_number ?? '').trim();
+      if (!sNumber) continue;
+      offPeriodsBySNumber.set(
+        sNumber,
+        Array.isArray(row.off_periods) && row.off_periods.length > 0 ? row.off_periods : [4, 8]
+      );
+    }
+
+    const isEligibleForMode = (sNumber: string, shiftPeriod: number): boolean => {
+      if (attendanceMode === 'morning') return shiftPeriod === 0;
+      const offPeriods = offPeriodsBySNumber.get(sNumber) ?? [4, 8];
+      return offPeriods.includes(shiftPeriod);
+    };
+
     const shiftOverridesBySNumber = new Map<string, AttendanceOverride[]>();
     for (const row of shiftOverridesQuery.data ?? []) {
       const sNumber = String(row.s_number ?? '');
@@ -109,6 +135,8 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
     const map = new Map<string, Array<Record<string, unknown>>>();
     for (const row of attendanceQuery.data ?? []) {
       const key = row.employee_s_number as string;
+      const shiftPeriod = Number(row.shift_period ?? -1);
+      if (!isEligibleForMode(key, shiftPeriod)) continue;
       const bucket = map.get(key) ?? [];
       bucket.push(row);
       map.set(key, bucket);
@@ -143,8 +171,8 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
         excused: counts.excused,
         shiftRate: rates.adjusted_rate ?? rates.raw_rate
       };
-    });
-  }, [attendanceQuery.data, shiftOverridesQuery.data, studentsQuery.data]);
+    }).sort((left, right) => left.name.localeCompare(right.name));
+  }, [attendanceMode, attendanceQuery.data, settingsQuery.data, shiftOverridesQuery.data, studentsQuery.data]);
 
   if (!canView) {
     return <p className="text-sm text-neutral-700">You do not have permission to view shift attendance.</p>;
@@ -153,10 +181,21 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
   return (
     <section className="space-y-4">
       <p className="text-xs text-neutral-600">
-        Shift attendance (periods 0-8) is tracked independently from meeting attendance.
+        Shift attendance is shown by mode. Choose morning shifts or each employee&apos;s configured off-period shifts.
       </p>
 
-      <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-5">
+      <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-6">
+        <label className="text-sm">
+          Attendance mode
+          <select
+            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+            onChange={(event) => setAttendanceMode(event.target.value as 'morning' | 'off_period')}
+            value={attendanceMode}
+          >
+            <option value="morning">Morning shift</option>
+            <option value="off_period">Off-period shifts</option>
+          </select>
+        </label>
         <label className="text-sm">
           Employee s_number
           <input
@@ -189,7 +228,9 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
               <th className="border-b border-neutral-300 p-2 text-left">Present</th>
               <th className="border-b border-neutral-300 p-2 text-left">Absent</th>
               <th className="border-b border-neutral-300 p-2 text-left">Excused</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Shift</th>
+              <th className="border-b border-neutral-300 p-2 text-left">
+                {attendanceMode === 'morning' ? 'Morning Shift' : 'Off-Period Shift'}
+              </th>
             </tr>
           </thead>
           <tbody>

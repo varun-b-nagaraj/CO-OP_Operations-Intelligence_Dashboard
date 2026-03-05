@@ -250,6 +250,8 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
   const [expandedEmployeeId, setExpandedEmployeeId] = useState<string | null>(null);
   const [offPeriodDrafts, setOffPeriodDrafts] = useState<Record<string, number[]>>({});
   const [strikeReasonDrafts, setStrikeReasonDrafts] = useState<Record<string, string>>({});
+  const [strikeTypeDrafts, setStrikeTypeDrafts] = useState<Record<string, 'strike' | 'warning'>>({});
+  const [warningDescriptionDrafts, setWarningDescriptionDrafts] = useState<Record<string, string>>({});
   const [meetingReasonDrafts, setMeetingReasonDrafts] = useState<Record<string, string>>({});
   const [meetingDateDrafts, setMeetingDateDrafts] = useState<Record<string, string>>({});
   const [shiftReasonDrafts, setShiftReasonDrafts] = useState<Record<string, string>>({});
@@ -402,14 +404,25 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
   });
 
   const addStrikeMutation = useMutation({
-    mutationFn: async (payload: { employeeId: string; reason: string }) => {
-      const result = await addStrike(payload.employeeId, payload.reason);
+    mutationFn: async (payload: {
+      employeeId: string;
+      reason: string;
+      recordType: 'strike' | 'warning';
+      warningDescription?: string;
+    }) => {
+      const result = await addStrike(
+        payload.employeeId,
+        payload.reason,
+        payload.recordType,
+        payload.warningDescription
+      );
       if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
       return result.data;
     },
     onSuccess: (_, payload) => {
       queryClient.invalidateQueries({ queryKey: ['hr-strikes-all'] });
       setStrikeReasonDrafts((previous) => ({ ...previous, [payload.employeeId]: '' }));
+      setWarningDescriptionDrafts((previous) => ({ ...previous, [payload.employeeId]: '' }));
       setStatusMessage(`Added strike for employee ${payload.employeeId}.`);
     },
     onError: (error) => {
@@ -876,8 +889,12 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
       const sNumber = getStudentSNumber(student);
       const shifts = shiftBySNumber.get(sNumber) ?? [];
       const offPeriods = settingsByEmployeeId.get(id) ?? settingsBySNumber.get(sNumber) ?? [4, 8];
+      const eligibleShifts = shifts.filter((item) => {
+        const shiftPeriod = toNumber(item.shift_period);
+        return shiftPeriod === 0 || offPeriods.includes(shiftPeriod);
+      });
       const shiftRates = calculateShiftAttendanceRate({
-        shiftAttendanceRecords: shifts.map((item) => ({
+        shiftAttendanceRecords: eligibleShifts.map((item) => ({
           status: item.status as 'expected' | 'present' | 'absent' | 'excused',
           rawStatus: (item.raw_status as 'expected' | 'present' | 'absent' | 'excused' | null) ?? null,
           date: String(item.shift_date ?? ''),
@@ -894,7 +911,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
       });
 
       const shiftCounts = summarizeShiftAttendanceCounts({
-        shiftAttendanceRecords: shifts.map((item) => ({
+        shiftAttendanceRecords: eligibleShifts.map((item) => ({
           status: item.status as 'expected' | 'present' | 'absent' | 'excused',
           date: String(item.shift_date ?? ''),
           shiftPeriod: toNumber(item.shift_period)
@@ -905,10 +922,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
       const shiftPresent = shiftCounts.present;
       const shiftAbsent = shiftCounts.absent;
       const shiftExcused = shiftCounts.excused;
-      const morningShifts = shifts.filter(
+      const morningShifts = eligibleShifts.filter(
         (item) => toNumber(item.shift_period) === 0 && item.status === 'present'
       ).length;
-      const offPeriodShifts = shifts.filter(
+      const offPeriodShifts = eligibleShifts.filter(
         (item) => offPeriods.includes(toNumber(item.shift_period)) && item.status === 'present'
       ).length;
 
@@ -924,7 +941,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
           ((student.assigned_periods as string | undefined) ?? String(student.Schedule ?? '')).trim(),
         offPeriods,
         strikesCount: (activeStrikesByEmployee.get(id) ?? []).length,
-        totalShifts: shifts.length,
+        totalShifts: eligibleShifts.length,
         morningShifts,
         offPeriodShifts,
         shiftExpected: shiftCounts.expected,
@@ -1048,6 +1065,8 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
               const isExpanded = expandedEmployeeId === employee.id;
               const draftOffPeriods = offPeriodDrafts[employee.id] ?? employee.offPeriods;
               const strikeReason = strikeReasonDrafts[employee.id] ?? '';
+              const strikeType = strikeTypeDrafts[employee.id] ?? 'strike';
+              const warningDescription = warningDescriptionDrafts[employee.id] ?? '';
               const meetingReason = meetingReasonDrafts[employee.id] ?? '';
               const meetingDate = meetingDateDrafts[employee.id] ?? '';
               const shiftReason = shiftReasonDrafts[employee.id] ?? '';
@@ -1581,6 +1600,22 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                   value={strikeScope}
                                 />
                                 <label className="block text-sm">
+                                  Type
+                                  <select
+                                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
+                                    onChange={(event) =>
+                                      setStrikeTypeDrafts((previous) => ({
+                                        ...previous,
+                                        [employee.id]: event.target.value === 'warning' ? 'warning' : 'strike'
+                                      }))
+                                    }
+                                    value={strikeType}
+                                  >
+                                    <option value="strike">Strike</option>
+                                    <option value="warning">Warning</option>
+                                  </select>
+                                </label>
+                                <label className="block text-sm">
                                   Reason
                                   <textarea
                                     className="mt-1 min-h-[72px] w-full border border-neutral-300 p-2"
@@ -1593,6 +1628,21 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                     value={strikeReason}
                                   />
                                 </label>
+                                {strikeType === 'warning' && (
+                                  <label className="block text-sm">
+                                    Warning Description
+                                    <textarea
+                                      className="mt-1 min-h-[72px] w-full border border-neutral-300 p-2"
+                                      onChange={(event) =>
+                                        setWarningDescriptionDrafts((previous) => ({
+                                          ...previous,
+                                          [employee.id]: event.target.value
+                                        }))
+                                      }
+                                      value={warningDescription}
+                                    />
+                                  </label>
+                                )}
                                 <button
                                   className="min-h-[38px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
                                   disabled={!canManageStrikes || addStrikeMutation.isPending}
@@ -1602,14 +1652,21 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                       setStatusMessage('Strike reason is required.');
                                       return;
                                     }
+                                    const warningDetails = warningDescription.trim();
+                                    if (strikeType === 'warning' && !warningDetails) {
+                                      setStatusMessage('Warning description is required.');
+                                      return;
+                                    }
                                     addStrikeMutation.mutate({
                                       employeeId: employee.id,
-                                      reason
+                                      reason,
+                                      recordType: strikeType,
+                                      warningDescription: warningDetails || undefined
                                     });
                                   }}
                                   type="button"
                                 >
-                                  Add Strike
+                                  Add {strikeType === 'warning' ? 'Warning' : 'Strike'}
                                 </button>
                                 <div className="space-y-2">
                                   {employeeStrikes.length === 0 && (
@@ -1619,7 +1676,15 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                   )}
                                   {employeeStrikes.map((strike) => (
                                     <div className="border border-neutral-300 p-2" key={String(strike.id)}>
+                                      <p className="text-xs uppercase tracking-wide text-neutral-500">
+                                        {String(strike.record_type ?? 'strike')}
+                                      </p>
                                       <p className="text-sm text-neutral-800">{String(strike.reason ?? 'No reason')}</p>
+                                      {String(strike.warning_description ?? '').trim() && (
+                                        <p className="mt-1 text-xs text-neutral-600">
+                                          {String(strike.warning_description)}
+                                        </p>
+                                      )}
                                       <div className="mt-2 flex items-center justify-between gap-2">
                                         <p className="text-xs text-neutral-600">
                                           {new Date(String(strike.issued_at ?? '')).toLocaleDateString()}

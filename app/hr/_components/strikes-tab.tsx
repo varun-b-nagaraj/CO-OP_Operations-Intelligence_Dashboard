@@ -12,7 +12,17 @@ import { getStudentDisplayName, getStudentId, getStudentSNumber, StudentRow, use
 
 const StrikeFormSchema = z.object({
   employee_id: z.string().trim().regex(/^\d+$/),
-  reason: z.string().trim().min(1).max(500)
+  reason: z.string().trim().min(1).max(500),
+  record_type: z.enum(['strike', 'warning']),
+  warning_description: z.string().trim().max(500).optional()
+}).superRefine((value, ctx) => {
+  if (value.record_type === 'warning' && !value.warning_description?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['warning_description'],
+      message: 'Warning description is required for warnings'
+    });
+  }
 });
 
 type StrikeFormValues = z.infer<typeof StrikeFormSchema>;
@@ -47,19 +57,31 @@ export function StrikesTab() {
     resolver: zodResolver(StrikeFormSchema),
     defaultValues: {
       employee_id: '',
-      reason: ''
+      reason: '',
+      record_type: 'strike',
+      warning_description: ''
     }
   });
 
   const addMutation = useMutation({
     mutationFn: async (values: StrikeFormValues) => {
-      const result = await addStrike(values.employee_id, values.reason);
+      const result = await addStrike(
+        values.employee_id,
+        values.reason,
+        values.record_type,
+        values.warning_description
+      );
       if (!result.ok) throw new Error(result.error.message);
       return result.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr-strikes-list'] });
-      form.reset({ employee_id: form.getValues('employee_id'), reason: '' });
+      form.reset({
+        employee_id: form.getValues('employee_id'),
+        reason: '',
+        record_type: form.getValues('record_type'),
+        warning_description: ''
+      });
     }
   });
 
@@ -94,11 +116,30 @@ export function StrikesTab() {
           </select>
         </label>
         <label className="block text-sm">
+          Type
+          <select
+            className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+            {...form.register('record_type')}
+          >
+            <option value="strike">Strike</option>
+            <option value="warning">Warning</option>
+          </select>
+        </label>
+        <label className="block text-sm">
           Reason
           <textarea className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2" {...form.register('reason')} />
         </label>
+        {form.watch('record_type') === 'warning' && (
+          <label className="block text-sm">
+            Warning Description
+            <textarea
+              className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+              {...form.register('warning_description')}
+            />
+          </label>
+        )}
         <button className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-white" type="submit">
-          Add Strike
+          Add {form.watch('record_type') === 'warning' ? 'Warning' : 'Strike'}
         </button>
       </form>
 
@@ -107,7 +148,9 @@ export function StrikesTab() {
           <thead className="bg-neutral-100">
             <tr>
               <th className="border-b border-neutral-300 p-2 text-left">Employee</th>
+              <th className="border-b border-neutral-300 p-2 text-left">Type</th>
               <th className="border-b border-neutral-300 p-2 text-left">Reason</th>
+              <th className="border-b border-neutral-300 p-2 text-left">Warning Description</th>
               <th className="border-b border-neutral-300 p-2 text-left">Issued At</th>
               <th className="border-b border-neutral-300 p-2 text-left">Issued By</th>
               <th className="border-b border-neutral-300 p-2 text-left">Status</th>
@@ -122,7 +165,9 @@ export function StrikesTab() {
               return (
                 <tr className="border-b border-neutral-200" key={strike.id}>
                   <td className="p-2">{employee ? getStudentDisplayName(employee) : strike.employee_id}</td>
+                  <td className="p-2 capitalize">{String(strike.record_type ?? 'strike')}</td>
                   <td className="p-2">{strike.reason}</td>
+                  <td className="p-2">{String(strike.warning_description ?? '-')}</td>
                   <td className="p-2">{new Date(strike.issued_at).toLocaleDateString()}</td>
                   <td className="p-2">{strike.issued_by ?? 'open_access'}</td>
                   <td className="p-2">{strike.active ? 'Active' : 'Inactive'}</td>

@@ -75,7 +75,9 @@ export interface Employee {
 export interface Strike {
   id: string;
   employee_id: string;
+  record_type?: 'strike' | 'warning';
   reason: string;
+  warning_description?: string | null;
   issued_by: string | null;
   issued_at: string;
   active: boolean;

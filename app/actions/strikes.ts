@@ -8,7 +8,12 @@ import { createServerClient } from '@/lib/supabase';
 import { errorResult, generateCorrelationId, Result, Strike, successResult } from '@/lib/types';
 import { StrikeSchema, zodFieldErrors } from '@/lib/validation';
 
-export async function addStrike(employeeId: string, reason: string): Promise<Result<Strike>> {
+export async function addStrike(
+  employeeId: string,
+  reason: string,
+  recordType: 'strike' | 'warning' = 'strike',
+  warningDescription?: string
+): Promise<Result<Strike>> {
   const correlationId = generateCorrelationId();
 
   try {
@@ -19,7 +24,9 @@ export async function addStrike(employeeId: string, reason: string): Promise<Res
 
     const parsed = StrikeSchema.safeParse({
       employee_id: employeeId,
-      reason
+      reason,
+      record_type: recordType,
+      warning_description: warningDescription ?? null
     });
 
     if (!parsed.success) {
@@ -44,6 +51,8 @@ export async function addStrike(employeeId: string, reason: string): Promise<Res
       .insert({
         employee_id: parsed.data.employee_id,
         reason: parsed.data.reason,
+        record_type: parsed.data.record_type,
+        warning_description: parsed.data.warning_description ?? null,
         issued_by: 'open_access',
         active: true
       })
