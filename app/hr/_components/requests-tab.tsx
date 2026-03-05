@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
@@ -417,7 +416,7 @@ export function RequestsTab() {
         </label>
         <label className="text-sm">
           Shift Period
-          <select
+          <Select
             className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
             {...form.register('shift_period', { valueAsNumber: true })}
           >
@@ -426,7 +425,7 @@ export function RequestsTab() {
                 Period {period}
               </option>
             ))}
-          </select>
+          </Select>
           <p className="mt-1 text-xs text-neutral-600">
             {selectedDayType === 'A'
               ? 'A-day selected: period options are 1-4.'
@@ -437,7 +436,7 @@ export function RequestsTab() {
         </label>
         <label className="text-sm">
           From s_number
-          <select
+          <Select
             className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
             disabled={fromOptions.length === 0}
             {...form.register('from_employee_s_number')}
@@ -451,11 +450,11 @@ export function RequestsTab() {
                 </option>
               ))
             )}
-          </select>
+          </Select>
         </label>
         <label className="text-sm">
           To s_number (eligible)
-          <select
+          <Select
             className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
             disabled={eligibleToOptions.length === 0}
             {...form.register('to_employee_s_number')}
@@ -469,7 +468,7 @@ export function RequestsTab() {
                 </option>
               ))
             )}
-          </select>
+          </Select>
         </label>
         <label className="text-sm md:col-span-2">
           Reason
@@ -498,7 +497,7 @@ export function RequestsTab() {
       <div className="flex flex-wrap items-center gap-2 border border-neutral-300 p-3">
         <label className="text-sm">
           Status filter
-          <select
+          <Select
             className="ml-2 min-h-[44px] border border-neutral-300 px-2"
             onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
             value={statusFilter}
@@ -507,7 +506,7 @@ export function RequestsTab() {
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="denied">Denied</option>
-          </select>
+          </Select>
         </label>
       </div>
 

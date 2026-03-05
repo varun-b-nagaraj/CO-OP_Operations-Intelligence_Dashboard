@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -1771,20 +1770,22 @@ export function ScheduleTab() {
   };
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-3">
       {message && <p className="text-sm text-brand-maroon">{message}</p>}
       {scheduleQuery.isLoading && <p className="text-sm text-neutral-600">Loading schedule...</p>}
       {scheduleQuery.error && <p className="text-sm text-red-700">{(scheduleQuery.error as Error).message}</p>}
 
       {schedule && (
-        <div className="space-y-4">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3 border border-neutral-300 bg-neutral-50 p-2">
-              <h3 className="text-sm font-semibold">Month — {monthTitle}</h3>
-              <div className="flex flex-wrap items-center gap-2">
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <div className="rounded-md border border-neutral-300 bg-neutral-50 p-2">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Month — {monthTitle}</h3>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
                 {isManagerMode && (
                   <button
-                    className={`min-h-[44px] border px-3 text-sm ${
+                    className={`h-8 rounded border px-2.5 text-xs ${
                       isSwapModeEnabled
                         ? 'border-brand-maroon bg-brand-maroon text-white'
                         : 'border-neutral-500 bg-white text-neutral-900'
@@ -1806,7 +1807,7 @@ export function ScheduleTab() {
                 )}
                 {canChangeAccessMode && (
                   <button
-                    className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-8 rounded border border-brand-maroon bg-brand-maroon px-2.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={!hasUnsavedChanges || isPersistingEdits}
                     onClick={() => {
                       void handleSaveChanges();
@@ -1825,21 +1826,21 @@ export function ScheduleTab() {
                 {canChangeAccessMode && (
                   <label className="text-xs text-neutral-700">
                     Access
-                    <select
-                      className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                    <Select
+                      className="ml-2 h-8 rounded border border-neutral-300 px-2 text-xs"
                       onChange={(event) => setScheduleAccessMode(event.target.value as AccessMode)}
                       value={scheduleAccessMode}
                     >
                       <option value="employee">Employee</option>
                       <option value="manager">Manager</option>
-                    </select>
+                    </Select>
                   </label>
                 )}
                 {!isManagerMode && (
                   <label className="text-xs text-neutral-700">
                     Acting employee
-                    <select
-                      className="ml-2 min-h-[36px] border border-neutral-300 px-2 text-sm"
+                    <Select
+                      className="ml-2 h-8 rounded border border-neutral-300 px-2 text-xs"
                       disabled={actingEmployeeOptions.length === 0}
                       onChange={(event) => setActingEmployeeSNumber(event.target.value)}
                       value={actingEmployeeSNumber}
@@ -1850,14 +1851,14 @@ export function ScheduleTab() {
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                 )}
                 <label className="text-xs text-neutral-700">
                   Open month
                   <span className="ml-2 inline-flex items-center gap-2">
                     <input
-                      className="min-h-[36px] w-24 border border-neutral-300 px-2 text-sm"
+                      className="h-8 w-24 rounded border border-neutral-300 px-2 text-xs"
                       max={2100}
                       min={2000}
                       onChange={(event) =>
@@ -1869,8 +1870,8 @@ export function ScheduleTab() {
                       type="number"
                       value={monthSelection.year}
                     />
-                    <select
-                      className="min-h-[36px] border border-neutral-300 px-2 text-sm"
+                    <Select
+                      className="h-8 rounded border border-neutral-300 px-2 text-xs"
                       onChange={(event) =>
                         setMonthSelection((previous) => ({
                           ...previous,
@@ -1884,9 +1885,9 @@ export function ScheduleTab() {
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                     <button
-                      className="min-h-[36px] border border-neutral-500 px-2 text-xs"
+                      className="h-8 rounded border border-neutral-500 px-2 text-xs"
                       onClick={handleApplyMonthSelection}
                       type="button"
                     >
@@ -1895,7 +1896,7 @@ export function ScheduleTab() {
                   </span>
                 </label>
                 <button
-                  className="min-h-[44px] border border-neutral-500 px-3 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-8 rounded border border-neutral-500 px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={activeWeekIndex <= 0}
                   onClick={() => setActiveWeekIndex((previous) => Math.max(0, previous - 1))}
                   type="button"
@@ -1903,17 +1904,17 @@ export function ScheduleTab() {
                   Previous Week
                 </button>
                 <button
-                  className="min-h-[44px] border border-neutral-500 px-3"
+                  className="h-8 rounded border border-neutral-500 px-2.5 text-xs"
                   onClick={handleJumpToToday}
                   type="button"
                 >
                   Today
                 </button>
-                <p className="text-sm text-neutral-700">
+                <p className="px-1 text-xs text-neutral-700">
                   Week {activeWeekIndex + 1} / {Math.max(calendarWeeks.length, 1)}
                 </p>
                 <button
-                  className="min-h-[44px] border border-neutral-500 px-3 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-8 rounded border border-neutral-500 px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={activeWeekIndex >= calendarWeeks.length - 1}
                   onClick={() => setActiveWeekIndex((previous) => Math.min(calendarWeeks.length - 1, previous + 1))}
                   type="button"
@@ -2013,7 +2014,7 @@ export function ScheduleTab() {
                           <td className={`border-b border-neutral-300 p-2 align-top ${baseCellTone}`} key={`${day.dateKey}-${periodBand.id}`}>
                             {!day.inCurrentMonth && <span className="text-[11px] text-neutral-400">—</span>}
                             {day.inCurrentMonth && assignments.length === 0 && isWeekend && (
-                              <p className="min-h-[44px] border border-dashed border-neutral-300 px-1 py-2 text-center text-[10px] text-neutral-500">
+                              <p className="h-8 border border-dashed border-neutral-300 px-1 py-1 text-center text-[10px] text-neutral-500">
                                 N/A
                               </p>
                             )}
@@ -2048,7 +2049,7 @@ export function ScheduleTab() {
 
                                   return (
                                     <div
-                                      className={`${isSwapModeEnabled && !isManualAssignment ? 'cursor-grab' : 'cursor-pointer'} flex min-h-[52px] flex-col justify-center border px-1 py-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
+                                      className={`${isSwapModeEnabled && !isManualAssignment ? 'cursor-grab' : 'cursor-pointer'} flex min-h-[40px] flex-col justify-center border px-1 py-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
                                         isDragTarget ? 'ring-2 ring-brand-maroon' : ''
                                       } ${dragSourceUid && !isValidDropTarget ? 'opacity-60' : ''}`}
                                       draggable={isSwapModeEnabled && !isManualAssignment}
@@ -2172,7 +2173,7 @@ export function ScheduleTab() {
                             )}
                             {canShowOpenSlotButton && (
                               <button
-                                className="mt-1 min-h-[44px] w-full border border-dashed border-brand-maroon px-2 py-2 text-left text-[11px] text-brand-maroon hover:bg-brand-maroon/5"
+                                className="mt-1 h-8 w-full rounded border border-dashed border-brand-maroon px-2 py-1 text-left text-[10px] text-brand-maroon hover:bg-brand-maroon/5"
                                 onClick={() => {
                                   setEmptySlotTarget({ date: day.dateKey, period: targetPeriod });
                                   setShiftActionModalUid(null);
@@ -2390,7 +2391,7 @@ export function ScheduleTab() {
           {canExpandScheduleOverview && (
             <div className="flex justify-end">
               <button
-                className="min-h-[44px] border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
+                className="h-9 border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
                 onClick={() => setIsRosterSummaryExpanded((previous) => !previous)}
                 type="button"
               >
@@ -2404,7 +2405,7 @@ export function ScheduleTab() {
               <label className="text-sm">
                 Year
                 <input
-                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  className="mt-1 h-9 w-full border border-neutral-300 px-2"
                   max={2100}
                   min={2000}
                   onChange={(event) =>
@@ -2419,8 +2420,8 @@ export function ScheduleTab() {
               </label>
               <label className="text-sm">
                 Month
-                <select
-                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                <Select
+                  className="mt-1 h-9 w-full border border-neutral-300 px-2"
                   onChange={(event) =>
                     handleGenerationMonthOrYearChange({
                       year: generationSelection.year,
@@ -2434,12 +2435,12 @@ export function ScheduleTab() {
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="text-sm">
                 Reference date
                 <input
-                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  className="mt-1 h-9 w-full border border-neutral-300 px-2"
                   onChange={(event) =>
                     setGenerationSelection((previous) => ({
                       ...previous,
@@ -2452,8 +2453,8 @@ export function ScheduleTab() {
               </label>
               <label className="text-sm">
                 Reference day
-                <select
-                  className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                <Select
+                  className="mt-1 h-9 w-full border border-neutral-300 px-2"
                   onChange={(event) =>
                     setGenerationSelection((previous) => ({
                       ...previous,
@@ -2464,11 +2465,11 @@ export function ScheduleTab() {
                 >
                   <option value="A">A Day</option>
                   <option value="B">B Day</option>
-                </select>
+                </Select>
               </label>
             </div>
             <button
-              className="min-h-[44px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-9 w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={manualRefresh.isPending}
               onClick={() => {
                 if (!confirmDiscardUnsavedChanges()) return;
@@ -2504,7 +2505,7 @@ export function ScheduleTab() {
                 </p>
               </div>
               <button
-                className="min-h-[36px] border border-neutral-500 px-2 text-sm"
+                className="h-8 border border-neutral-500 px-2 text-sm"
                 onClick={closeShiftActionModal}
                 type="button"
               >
@@ -2543,7 +2544,7 @@ export function ScheduleTab() {
                 <label className="block text-sm">
                   Search employee
                   <input
-                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                    className="mt-1 h-9 w-full border border-neutral-300 px-2"
                     onChange={(event) => setManagerAssigneeSearch(event.target.value)}
                     placeholder="Type name or s_number"
                     value={managerAssigneeSearch}
@@ -2551,8 +2552,8 @@ export function ScheduleTab() {
                 </label>
                 <label className="block text-sm">
                   Assign to employee
-                  <select
-                    className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                  <Select
+                    className="mt-1 h-9 w-full border border-neutral-300 px-2"
                     disabled={
                       selectedActionIsWeekend ||
                       filteredManagerAssignableOptions.length === 0 ||
@@ -2570,12 +2571,12 @@ export function ScheduleTab() {
                         {option.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <div className="flex justify-end gap-2">
                   {selectedShiftActionAssignment && (
                     <button
-                      className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                      className="h-9 border border-neutral-500 px-3 text-sm"
                       onClick={() => {
                         if (!selectedShiftActionAssignment) return;
                         if (isManualShiftSlotKey(selectedShiftActionAssignment.shiftSlotKey)) {
@@ -2618,14 +2619,14 @@ export function ScheduleTab() {
                     </button>
                   )}
                   <button
-                    className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                    className="h-9 border border-neutral-500 px-3 text-sm"
                     onClick={closeShiftActionModal}
                     type="button"
                   >
                     Cancel
                   </button>
                   <button
-                    className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
+                    className="h-9 border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                     disabled={
                       selectedActionIsWeekend ||
                       volunteerForShiftMutation.isPending ||
@@ -2651,8 +2652,8 @@ export function ScheduleTab() {
                   <>
                     <label className="block text-sm">
                       Action
-                      <select
-                        className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
+                      <Select
+                        className="mt-1 h-9 w-full border border-neutral-300 px-2"
                         onChange={(event) => setShiftActionChoice(event.target.value as ShiftActionChoice)}
                         value={shiftActionChoice}
                       >
@@ -2662,7 +2663,7 @@ export function ScheduleTab() {
                         <option disabled={!currentEmployeeCanRemoveSelfSelectedShift} value="remove">
                           Remove me from this shift
                         </option>
-                      </select>
+                      </Select>
                     </label>
                     {!currentEmployeeCanVolunteerSelectedShift && shiftActionChoice === 'volunteer' && (
                       <p className="text-sm text-neutral-700">
@@ -2676,14 +2677,14 @@ export function ScheduleTab() {
                     )}
                     <div className="flex justify-end gap-2">
                       <button
-                        className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                        className="h-9 border border-neutral-500 px-3 text-sm"
                         onClick={closeShiftActionModal}
                         type="button"
                       >
                         Cancel
                       </button>
                       <button
-                        className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
+                        className="h-9 border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                         disabled={
                           volunteerForShiftMutation.isPending ||
                           manualSlotMutation.isPending ||
@@ -2701,7 +2702,7 @@ export function ScheduleTab() {
                 {!actingEmployeeSNumber && (
                     <div className="flex justify-end">
                       <button
-                        className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                        className="h-9 border border-neutral-500 px-3 text-sm"
                         onClick={closeShiftActionModal}
                         type="button"
                       >
@@ -2732,7 +2733,7 @@ export function ScheduleTab() {
                     </label>
                     <div className="mt-3 grid grid-cols-3 gap-2">
                       <button
-                        className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                        className="h-9 border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={updateAttendanceMutation.isPending || !selectedShiftDayPassed}
                         onClick={() =>
                           updateAttendanceMutation.mutate({
@@ -2745,7 +2746,7 @@ export function ScheduleTab() {
                         Mark Present
                       </button>
                       <button
-                        className="min-h-[44px] border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                        className="h-9 border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={updateAttendanceMutation.isPending || !selectedShiftDayPassed}
                         onClick={() =>
                           updateAttendanceMutation.mutate({
@@ -2787,14 +2788,14 @@ export function ScheduleTab() {
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="min-h-[44px] border border-neutral-500 px-3 text-sm"
+                className="h-9 border border-neutral-500 px-3 text-sm"
                 onClick={() => setIsGenerateConfirmOpen(false)}
                 type="button"
               >
                 Cancel
               </button>
               <button
-                className="min-h-[44px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
+                className="h-9 border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                 disabled={manualRefresh.isPending}
                 onClick={() => {
                   if (!confirmDiscardUnsavedChanges()) return;

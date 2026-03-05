@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
@@ -202,7 +201,7 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
             <p className="mt-1 text-sm text-neutral-700">{meetingActionDraft.name}</p>
             <label className="mt-3 block text-sm">
               Meeting date
-              <select
+              <Select
                 className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
                 onChange={(event) =>
                   setMeetingActionDraft((previous) =>
@@ -216,7 +215,7 @@ export function MeetingAttendanceTab(props: { dateRange: { from: string; to: str
                     {date}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="mt-3 block text-sm">
               Reason

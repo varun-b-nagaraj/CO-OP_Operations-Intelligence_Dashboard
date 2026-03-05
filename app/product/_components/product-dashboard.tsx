@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 
@@ -1520,7 +1519,7 @@ export function ProductDashboard() {
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-6">
                   <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
                     Status
-                    <select
+                    <Select
                       className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2 text-sm"
                       onChange={(event) => setOrderFilters((prev) => ({ ...prev, status: event.target.value }))}
                       value={orderFilters.status}
@@ -1529,11 +1528,11 @@ export function ProductDashboard() {
                       {ORDER_STATUSES.map((status) => (
                         <option key={status} value={status}>{formatLabel(status)}</option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
                     Vendor
-                    <select
+                    <Select
                       className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2 text-sm"
                       onChange={(event) => setOrderFilters((prev) => ({ ...prev, vendor: event.target.value }))}
                       value={orderFilters.vendor}
@@ -1542,11 +1541,11 @@ export function ProductDashboard() {
                       {vendors.map((vendor) => (
                         <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
                     Priority
-                    <select
+                    <Select
                       className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2 text-sm"
                       onChange={(event) => setOrderFilters((prev) => ({ ...prev, priority: event.target.value }))}
                       value={orderFilters.priority}
@@ -1554,7 +1553,7 @@ export function ProductDashboard() {
                       <option value="all">All Priorities</option>
                       <option value="normal">Normal</option>
                       <option value="urgent">Urgent</option>
-                    </select>
+                    </Select>
                   </label>
                   <label className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
                     Date From
@@ -1832,7 +1831,7 @@ export function ProductDashboard() {
                             />
                           </td>
                           <td className="px-4 py-3">
-                            <select
+                            <Select
                               className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
                               onChange={(event) => {
                                 setPrompts((prev) =>
@@ -1851,7 +1850,7 @@ export function ProductDashboard() {
                                   {vendor.name}
                                 </option>
                               ))}
-                            </select>
+                            </Select>
                           </td>
                           <td className="px-4 py-3">
                             <input
@@ -1928,7 +1927,7 @@ export function ProductDashboard() {
 
               <section className="space-y-4 px-4 py-4 md:px-6">
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                  <select
+                  <Select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setProductFilters((prev) => ({ ...prev, category: event.target.value }))}
                     value={productFilters.category}
@@ -1939,7 +1938,7 @@ export function ProductDashboard() {
                         {category.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm"
                     onChange={(event) => setProductFilters((prev) => ({ ...prev, search: event.target.value }))}
@@ -2015,7 +2014,7 @@ export function ProductDashboard() {
                                       <p className="mt-1 text-xs text-neutral-600">Product Name</p>
                                     </div>
                                     <div>
-                                      <select
+                                      <Select
                                         className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
                                         onChange={(event) =>
                                           setProducts((prev) =>
@@ -2034,11 +2033,11 @@ export function ProductDashboard() {
                                             {category.name}
                                           </option>
                                         ))}
-                                      </select>
+                                      </Select>
                                       <p className="mt-1 text-xs text-neutral-600">Category</p>
                                     </div>
                                     <div>
-                                      <select
+                                      <Select
                                         className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
                                         onChange={(event) =>
                                           setProducts((prev) =>
@@ -2055,7 +2054,7 @@ export function ProductDashboard() {
                                             {vendor.name}
                                           </option>
                                         ))}
-                                      </select>
+                                      </Select>
                                       <p className="mt-1 text-xs text-neutral-600">Preferred Vendor</p>
                                     </div>
                                     <div>
@@ -2183,7 +2182,7 @@ export function ProductDashboard() {
                     placeholder="Vendor Name"
                     value={newVendor.name}
                   />
-                  <select
+                  <Select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setNewVendor((prev) => ({ ...prev, ordering_method: event.target.value as DbOrderingMethod }))}
                     value={newVendor.ordering_method}
@@ -2191,7 +2190,7 @@ export function ProductDashboard() {
                     {ORDERING_METHODS.map((method) => (
                       <option key={method} value={method}>{formatLabel(method)}</option>
                     ))}
-                  </select>
+                  </Select>
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm"
                     onChange={(event) => setNewVendor((prev) => ({ ...prev, default_link: event.target.value }))}
@@ -2238,7 +2237,7 @@ export function ProductDashboard() {
                           />
                         </td>
                         <td className="px-4 py-3">
-                          <select
+                          <Select
                             className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
                             onChange={(event) => {
                               setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, ordering_method: event.target.value as DbOrderingMethod } : entry));
@@ -2248,7 +2247,7 @@ export function ProductDashboard() {
                             {ORDERING_METHODS.map((method) => (
                               <option key={method} value={method}>{formatLabel(method)}</option>
                             ))}
-                          </select>
+                          </Select>
                         </td>
                         <td className="px-4 py-3">
                           <input
@@ -2307,7 +2306,7 @@ export function ProductDashboard() {
                     placeholder="Category"
                     value={newDesign.category}
                   />
-                  <select
+                  <Select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setNewDesign((prev) => ({ ...prev, preferred_vendor_id: event.target.value }))}
                     value={newDesign.preferred_vendor_id}
@@ -2316,9 +2315,9 @@ export function ProductDashboard() {
                     {vendors.map((vendor) => (
                       <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
                     ))}
-                  </select>
+                  </Select>
 
-                  <select
+                  <Select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setNewDesign((prev) => ({ ...prev, priority: event.target.value as DbDesignPriority }))}
                     value={newDesign.priority}
@@ -2326,8 +2325,8 @@ export function ProductDashboard() {
                     {PRIORITIES.map((priority) => (
                       <option key={priority} value={priority}>{formatLabel(priority)}</option>
                     ))}
-                  </select>
-                  <select
+                  </Select>
+                  <Select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setNewDesign((prev) => ({ ...prev, status: event.target.value as DbDesignStatus }))}
                     value={newDesign.status}
@@ -2335,7 +2334,7 @@ export function ProductDashboard() {
                     {DESIGN_STATUSES.map((status) => (
                       <option key={status} value={status}>{formatLabel(status)}</option>
                     ))}
-                  </select>
+                  </Select>
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm"
                     onChange={(event) => setNewDesign((prev) => ({ ...prev, estimated_cost: event.target.value }))}
@@ -2455,7 +2454,7 @@ export function ProductDashboard() {
                     placeholder="Category"
                     value={newWishlistItem.category}
                   />
-                  <select
+                  <Select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setNewWishlistItem((prev) => ({ ...prev, vendor_id: event.target.value }))}
                     value={newWishlistItem.vendor_id}
@@ -2464,7 +2463,7 @@ export function ProductDashboard() {
                     {vendors.map((vendor) => (
                       <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
                     ))}
-                  </select>
+                  </Select>
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm"
                     onChange={(event) => setNewWishlistItem((prev) => ({ ...prev, estimated_cost: event.target.value }))}
@@ -2472,7 +2471,7 @@ export function ProductDashboard() {
                     type="number"
                     value={newWishlistItem.estimated_cost}
                   />
-                  <select
+                  <Select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setNewWishlistItem((prev) => ({ ...prev, priority: event.target.value as DbDesignPriority }))}
                     value={newWishlistItem.priority}
@@ -2480,8 +2479,8 @@ export function ProductDashboard() {
                     {PRIORITIES.map((priority) => (
                       <option key={priority} value={priority}>{formatLabel(priority)}</option>
                     ))}
-                  </select>
-                  <select
+                  </Select>
+                  <Select
                     className="min-h-[36px] border border-neutral-300 bg-white px-2 text-sm"
                     onChange={(event) => setNewWishlistItem((prev) => ({ ...prev, status: event.target.value as DbWishlistStatus }))}
                     value={newWishlistItem.status}
@@ -2489,7 +2488,7 @@ export function ProductDashboard() {
                     {WISHLIST_STATUSES.map((status) => (
                       <option key={status} value={status}>{formatLabel(status)}</option>
                     ))}
-                  </select>
+                  </Select>
                   <input
                     className="min-h-[36px] border border-neutral-300 px-2 text-sm md:col-span-2"
                     onChange={(event) => setNewWishlistItem((prev) => ({ ...prev, notes: event.target.value }))}
@@ -2542,7 +2541,7 @@ export function ProductDashboard() {
                           />
                         </td>
                         <td className="px-4 py-3">
-                          <select
+                          <Select
                             className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
                             onChange={(event) => {
                               setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, vendor_id: event.target.value || null } : entry));
@@ -2553,7 +2552,7 @@ export function ProductDashboard() {
                             {vendors.map((vendor) => (
                               <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
                             ))}
-                          </select>
+                          </Select>
                         </td>
                         <td className="px-4 py-3">
                           <input
@@ -2569,7 +2568,7 @@ export function ProductDashboard() {
                           />
                         </td>
                         <td className="px-4 py-3">
-                          <select
+                          <Select
                             className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
                             onChange={(event) => {
                               setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, priority: event.target.value as DbDesignPriority } : entry));
@@ -2579,10 +2578,10 @@ export function ProductDashboard() {
                             {PRIORITIES.map((priority) => (
                               <option key={priority} value={priority}>{formatLabel(priority)}</option>
                             ))}
-                          </select>
+                          </Select>
                         </td>
                         <td className="px-4 py-3">
-                          <select
+                          <Select
                             className="min-h-[34px] w-full border border-neutral-300 bg-white px-2"
                             onChange={(event) => {
                               setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, status: event.target.value as DbWishlistStatus } : entry));
@@ -2592,7 +2591,7 @@ export function ProductDashboard() {
                             {WISHLIST_STATUSES.map((status) => (
                               <option key={status} value={status}>{formatLabel(status)}</option>
                             ))}
-                          </select>
+                          </Select>
                         </td>
                         <td className="px-4 py-3">
                           <input
@@ -2693,7 +2692,7 @@ export function ProductDashboard() {
                   </label>
                   <label className="text-sm text-neutral-700">
                     Category Color
-                    <select
+                    <Select
                       className="mt-1 min-h-[38px] w-full border border-neutral-300 bg-white px-2"
                       onChange={(event) => setNewCategoryDraft((prev) => ({ ...prev, color_key: event.target.value }))}
                       value={newCategoryDraft.color_key}
@@ -2701,7 +2700,7 @@ export function ProductDashboard() {
                       {CATEGORY_COLOR_OPTIONS.map((option) => (
                         <option key={option.key} value={option.key}>{option.label}</option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <button
                     className="min-h-[38px] border border-brand-maroon bg-brand-maroon px-4 text-sm text-white hover:bg-[#6a0000] md:self-end"
@@ -2778,7 +2777,7 @@ export function ProductDashboard() {
               </label>
               <label className="text-sm text-neutral-700">
                 Category
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
                   onChange={(event) => setNewProduct((prev) => ({ ...prev, category_id: event.target.value }))}
                   value={newProduct.category_id}
@@ -2789,11 +2788,11 @@ export function ProductDashboard() {
                       {category.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="text-sm text-neutral-700">
                 Vendor
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2 text-sm"
                   onChange={(event) => setNewProduct((prev) => ({ ...prev, preferred_vendor_id: event.target.value }))}
                   value={newProduct.preferred_vendor_id}
@@ -2802,7 +2801,7 @@ export function ProductDashboard() {
                   {vendors.map((vendor) => (
                     <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="text-sm text-neutral-700">
                 Cost Of 1 Ordered Item
@@ -2894,7 +2893,7 @@ export function ProductDashboard() {
               </label>
               <label className="text-sm text-neutral-700">
                 Category Color
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) =>
                     setEditingCategoryDraft((prev) => (prev ? { ...prev, color_key: event.target.value } : prev))
@@ -2904,7 +2903,7 @@ export function ProductDashboard() {
                   {CATEGORY_COLOR_OPTIONS.map((option) => (
                     <option key={option.key} value={option.key}>{option.label}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <div className="flex items-end">
                 <span
@@ -2976,7 +2975,7 @@ export function ProductDashboard() {
             <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-2">
               <label className="text-sm text-neutral-700">
                 Vendor
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, vendor_id: event.target.value }))}
                   value={newOrderDraft.vendor_id}
@@ -2987,18 +2986,18 @@ export function ProductDashboard() {
                       {vendor.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="text-sm text-neutral-700">
                 Priority
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) => setNewOrderDraft((prev) => ({ ...prev, priority: event.target.value as DbPriority }))}
                   value={newOrderDraft.priority}
                 >
                   <option value="normal">Normal</option>
                   <option value="urgent">Urgent</option>
-                </select>
+                </Select>
               </label>
               <label className="text-sm text-neutral-700">
                 ASAP
@@ -3086,7 +3085,7 @@ export function ProductDashboard() {
             <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-2">
               <label className="text-sm text-neutral-700">
                 Vendor
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, vendor_id: event.target.value } : prev))}
                   value={editingOrderDraft.vendor_id}
@@ -3094,11 +3093,11 @@ export function ProductDashboard() {
                   {vendors.map((vendor) => (
                     <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="text-sm text-neutral-700">
                 Status
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, status: event.target.value as DbOrderStatus } : prev))}
                   value={editingOrderDraft.status}
@@ -3106,18 +3105,18 @@ export function ProductDashboard() {
                   {ORDER_STATUSES.map((status) => (
                     <option key={status} value={status}>{formatLabel(status)}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="text-sm text-neutral-700">
                 Priority
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) => setEditingOrderDraft((prev) => (prev ? { ...prev, priority: event.target.value as DbPriority } : prev))}
                   value={editingOrderDraft.priority}
                 >
                   <option value="normal">Normal</option>
                   <option value="urgent">Urgent</option>
-                </select>
+                </Select>
               </label>
               <label className="text-sm text-neutral-700">
                 Date Placed
@@ -3474,7 +3473,7 @@ export function ProductDashboard() {
 
               <label className="text-sm text-neutral-700">
                 Vendor
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) =>
                     setPromptConvertDraft((prev) =>
@@ -3489,12 +3488,12 @@ export function ProductDashboard() {
                       {vendor.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
 
               <label className="text-sm text-neutral-700">
                 Priority
-                <select
+                <Select
                   className="mt-1 min-h-[36px] w-full border border-neutral-300 bg-white px-2"
                   onChange={(event) =>
                     setPromptConvertDraft((prev) =>
@@ -3505,7 +3504,7 @@ export function ProductDashboard() {
                 >
                   <option value="normal">Normal</option>
                   <option value="urgent">Urgent</option>
-                </select>
+                </Select>
               </label>
 
               <label className="text-sm text-neutral-700">

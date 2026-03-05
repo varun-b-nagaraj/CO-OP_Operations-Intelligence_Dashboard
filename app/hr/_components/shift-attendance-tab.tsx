@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
@@ -253,14 +252,14 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
       <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-6">
         <label className="text-sm">
           Attendance mode
-          <select
+          <Select
             className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2"
             onChange={(event) => setAttendanceMode(event.target.value as 'morning' | 'off_period')}
             value={attendanceMode}
           >
             <option value="morning">Morning shift</option>
             <option value="off_period">Off-period shifts</option>
-          </select>
+          </Select>
         </label>
         <label className="text-sm">
           Employee s_number

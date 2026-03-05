@@ -26,7 +26,7 @@ export async function addStrike(
       employee_id: employeeId,
       reason,
       record_type: recordType,
-      warning_description: warningDescription ?? null
+      warning_description: recordType === 'warning' ? reason : warningDescription ?? null
     });
 
     if (!parsed.success) {

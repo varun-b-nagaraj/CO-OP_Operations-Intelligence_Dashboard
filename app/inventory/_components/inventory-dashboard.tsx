@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import jsQR from 'jsqr';
 import Image from 'next/image';
 import QRCode from 'qrcode';
@@ -1339,14 +1338,14 @@ export function InventoryDashboard() {
                   placeholder="Session name"
                   value={sessionName}
                 />
-                <select
+                <Select
                   className="border border-neutral-300 px-2 py-2 text-sm"
                   onChange={(event) => setRole(event.target.value as 'host' | 'participant')}
                   value={role}
                 >
                   <option value="host">Host</option>
                   <option value="participant">Participant</option>
-                </select>
+                </Select>
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

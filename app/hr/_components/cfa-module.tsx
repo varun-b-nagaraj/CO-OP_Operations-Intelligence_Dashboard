@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -783,7 +782,7 @@ export function CFAModule({ activeTab }: CFAModuleProps) {
 
               <label className="text-sm font-medium text-neutral-800">
                 Day Type
-                <select
+                <Select
                   className="mt-1 w-full border border-neutral-300 bg-white px-3 py-2 text-sm disabled:bg-neutral-100"
                   disabled={dayTypeLocked}
                   onChange={(event) => setLogDayType(event.target.value as CFADayType)}
@@ -791,7 +790,7 @@ export function CFAModule({ activeTab }: CFAModuleProps) {
                 >
                   <option value="A">A</option>
                   <option value="B">B</option>
-                </select>
+                </Select>
                 {autoDayTypeQuery.data && !canOverrideDayType && (
                   <p className="mt-1 text-xs text-neutral-600">Day type auto-detected from schedule data.</p>
                 )}
@@ -959,7 +958,7 @@ export function CFAModule({ activeTab }: CFAModuleProps) {
 
               <label className="text-sm font-medium text-neutral-800">
                 Day Type
-                <select
+                <Select
                   className="mt-1 w-full border border-neutral-300 bg-white px-3 py-2 text-sm"
                   onChange={(event) => setHistoryDayType(event.target.value as HistoryDayTypeFilter)}
                   value={historyDayType}
@@ -967,12 +966,12 @@ export function CFAModule({ activeTab }: CFAModuleProps) {
                   <option value="all">All</option>
                   <option value="A">A</option>
                   <option value="B">B</option>
-                </select>
+                </Select>
               </label>
 
               <label className="text-sm font-medium text-neutral-800">
                 Item
-                <select
+                <Select
                   className="mt-1 w-full border border-neutral-300 bg-white px-3 py-2 text-sm"
                   onChange={(event) => setHistoryItemId(event.target.value)}
                   value={historyItemId}
@@ -983,7 +982,7 @@ export function CFAModule({ activeTab }: CFAModuleProps) {
                       {item.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
 
               <div className="flex items-end gap-2">

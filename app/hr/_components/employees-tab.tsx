@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 
@@ -251,7 +250,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
   const [offPeriodDrafts, setOffPeriodDrafts] = useState<Record<string, number[]>>({});
   const [strikeReasonDrafts, setStrikeReasonDrafts] = useState<Record<string, string>>({});
   const [strikeTypeDrafts, setStrikeTypeDrafts] = useState<Record<string, 'strike' | 'warning'>>({});
-  const [warningDescriptionDrafts, setWarningDescriptionDrafts] = useState<Record<string, string>>({});
   const [meetingReasonDrafts, setMeetingReasonDrafts] = useState<Record<string, string>>({});
   const [meetingDateDrafts, setMeetingDateDrafts] = useState<Record<string, string>>({});
   const [shiftReasonDrafts, setShiftReasonDrafts] = useState<Record<string, string>>({});
@@ -408,13 +406,11 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
       employeeId: string;
       reason: string;
       recordType: 'strike' | 'warning';
-      warningDescription?: string;
     }) => {
       const result = await addStrike(
         payload.employeeId,
         payload.reason,
-        payload.recordType,
-        payload.warningDescription
+        payload.recordType
       );
       if (!result.ok) throw new Error(`${result.error.message} (${result.correlationId})`);
       return result.data;
@@ -422,7 +418,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
     onSuccess: (_, payload) => {
       queryClient.invalidateQueries({ queryKey: ['hr-strikes-all'] });
       setStrikeReasonDrafts((previous) => ({ ...previous, [payload.employeeId]: '' }));
-      setWarningDescriptionDrafts((previous) => ({ ...previous, [payload.employeeId]: '' }));
       setStatusMessage(`Added strike for employee ${payload.employeeId}.`);
     },
     onError: (error) => {
@@ -1066,7 +1061,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
               const draftOffPeriods = offPeriodDrafts[employee.id] ?? employee.offPeriods;
               const strikeReason = strikeReasonDrafts[employee.id] ?? '';
               const strikeType = strikeTypeDrafts[employee.id] ?? 'strike';
-              const warningDescription = warningDescriptionDrafts[employee.id] ?? '';
               const meetingReason = meetingReasonDrafts[employee.id] ?? '';
               const meetingDate = meetingDateDrafts[employee.id] ?? '';
               const shiftReason = shiftReasonDrafts[employee.id] ?? '';
@@ -1601,7 +1595,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                 />
                                 <label className="block text-sm">
                                   Type
-                                  <select
+                                  <Select
                                     className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
                                     onChange={(event) =>
                                       setStrikeTypeDrafts((previous) => ({
@@ -1613,7 +1607,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                   >
                                     <option value="strike">Strike</option>
                                     <option value="warning">Warning</option>
-                                  </select>
+                                  </Select>
                                 </label>
                                 <label className="block text-sm">
                                   Reason
@@ -1628,21 +1622,6 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                     value={strikeReason}
                                   />
                                 </label>
-                                {strikeType === 'warning' && (
-                                  <label className="block text-sm">
-                                    Warning Description
-                                    <textarea
-                                      className="mt-1 min-h-[72px] w-full border border-neutral-300 p-2"
-                                      onChange={(event) =>
-                                        setWarningDescriptionDrafts((previous) => ({
-                                          ...previous,
-                                          [employee.id]: event.target.value
-                                        }))
-                                      }
-                                      value={warningDescription}
-                                    />
-                                  </label>
-                                )}
                                 <button
                                   className="min-h-[38px] w-full border border-brand-maroon bg-brand-maroon px-3 text-white disabled:cursor-not-allowed disabled:opacity-50"
                                   disabled={!canManageStrikes || addStrikeMutation.isPending}
@@ -1652,16 +1631,10 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                       setStatusMessage('Strike reason is required.');
                                       return;
                                     }
-                                    const warningDetails = warningDescription.trim();
-                                    if (strikeType === 'warning' && !warningDetails) {
-                                      setStatusMessage('Warning description is required.');
-                                      return;
-                                    }
                                     addStrikeMutation.mutate({
                                       employeeId: employee.id,
                                       reason,
-                                      recordType: strikeType,
-                                      warningDescription: warningDetails || undefined
+                                      recordType: strikeType
                                     });
                                   }}
                                   type="button"

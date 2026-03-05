@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
@@ -112,13 +111,13 @@ export function SettingsTab() {
       >
         <label className="block text-sm">
           Employee
-          <select className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2" {...form.register('employee_id')}>
+          <Select className="mt-1 min-h-[44px] w-full border border-neutral-300 px-2" {...form.register('employee_id')}>
             {(studentsQuery.data ?? []).map((student) => (
               <option key={getStudentId(student)} value={getStudentId(student)}>
                 {`${getStudentDisplayName(student)} (${getStudentSNumber(student) || 'N/A'})`}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
 
         <div>

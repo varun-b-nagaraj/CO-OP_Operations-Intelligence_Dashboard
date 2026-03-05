@@ -1,5 +1,4 @@
-'use client';
-
+import { Select } from '@/app/_components/ui/select';
 import { useEffect, useRef, useState } from 'react';
 import type { BrowserMultiFormatReader } from '@zxing/browser';
 
@@ -205,14 +204,14 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
       <div className="flex flex-wrap items-center gap-2">
         <label className="text-xs text-neutral-700">
           Scan Mode
-          <select
+          <Select
             className="ml-2 border border-neutral-300 px-2 py-1 text-xs"
             onChange={(event) => setScanMode(event.target.value as ScanMode)}
             value={scanMode}
           >
             <option value="multi">Multi Scan (+1 each shutter)</option>
             <option value="single">Single Scan (identify only)</option>
-          </select>
+          </Select>
         </label>
         <button
           className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
