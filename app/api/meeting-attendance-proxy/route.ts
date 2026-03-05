@@ -1,6 +1,13 @@
 import { NextRequest } from 'next/server';
 
-import { getCorrelationId, jsonResult, jsonValidationError, logError, logInfo } from '@/lib/server/common';
+import {
+  getCorrelationId,
+  jsonResult,
+  jsonValidationError,
+  logError,
+  logInfo,
+  resolvePreferredTable
+} from '@/lib/server/common';
 import { fetchMeetingAttendanceFromApi } from '@/lib/server/external-apis';
 import { AttendanceOverride, MeetingAttendanceResponse, errorResult, successResult } from '@/lib/types';
 import { MeetingAttendanceParamsSchema, zodFieldErrors } from '@/lib/validation';
@@ -155,6 +162,34 @@ export async function GET(request: NextRequest) {
 
     const meetingData = await fetchMeetingAttendanceFromApi(parsed.data, correlationId);
     const supabase = createServerClient();
+    let attendanceOverridesTable: string | null = null;
+    let meetingRecordsTable: string | null = null;
+    try {
+      attendanceOverridesTable = await resolvePreferredTable(
+        supabase,
+        'hr_attendance_overrides',
+        'attendance_overrides',
+        'id'
+      );
+    } catch (error) {
+      logError('meeting_overrides_table_resolution_failed', {
+        correlationId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+    try {
+      meetingRecordsTable = await resolvePreferredTable(
+        supabase,
+        'hr_meeting_attendance_records',
+        'meeting_attendance_records',
+        'id'
+      );
+    } catch (error) {
+      logError('meeting_records_table_resolution_failed', {
+        correlationId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
 
     const from = parsed.data.date ?? parsed.data.from;
     const to = parsed.data.date ?? parsed.data.to ?? parsed.data.from;
@@ -167,35 +202,51 @@ export async function GET(request: NextRequest) {
             s_number: student.s_number
           }));
 
-    let overridesQuery = supabase.from('hr_attendance_overrides').select('*').eq('scope', 'meeting');
-    if (from) overridesQuery = overridesQuery.gte('checkin_date', from);
-    if (to) overridesQuery = overridesQuery.lte('checkin_date', to);
-    const { data: overrides, error: overrideError } = await overridesQuery;
-    if (overrideError) {
-      return jsonResult(errorResult(correlationId, 'DB_ERROR', overrideError.message), 500);
+    let overrides: AttendanceOverride[] = [];
+    if (attendanceOverridesTable) {
+      let overridesQuery = supabase.from(attendanceOverridesTable).select('*').eq('scope', 'meeting');
+      if (from) overridesQuery = overridesQuery.gte('checkin_date', from);
+      if (to) overridesQuery = overridesQuery.lte('checkin_date', to);
+      const { data, error: overrideError } = await overridesQuery;
+      if (overrideError) {
+        logError('meeting_overrides_query_failed', {
+          correlationId,
+          error: overrideError.message
+        });
+      } else {
+        overrides = (data ?? []) as AttendanceOverride[];
+      }
     }
-    const overrideByKey = resolveOverrideLookup((overrides ?? []) as AttendanceOverride[]);
+    const overrideByKey = resolveOverrideLookup(overrides);
 
     const apiStatusByKey = new Map<string, ApiStatus>();
     for (const record of meetingData.records) {
       apiStatusByKey.set(`${record.s_number}|${record.date}`, record.status);
     }
 
-    let existingQuery = supabase.from('hr_meeting_attendance_records').select('*');
-    if (from) existingQuery = existingQuery.gte('checkin_date', from);
-    if (to) existingQuery = existingQuery.lte('checkin_date', to);
-    if (roster.length > 0) {
-      existingQuery = existingQuery.in(
-        's_number',
-        Array.from(new Set(roster.map((item) => item.s_number)))
-      );
-    }
-    const { data: existingRows, error: existingError } = await existingQuery;
-    if (existingError) {
-      return jsonResult(errorResult(correlationId, 'DB_ERROR', existingError.message), 500);
+    let existingRows: Array<Record<string, unknown>> = [];
+    if (meetingRecordsTable) {
+      let existingQuery = supabase.from(meetingRecordsTable).select('*');
+      if (from) existingQuery = existingQuery.gte('checkin_date', from);
+      if (to) existingQuery = existingQuery.lte('checkin_date', to);
+      if (roster.length > 0) {
+        existingQuery = existingQuery.in(
+          's_number',
+          Array.from(new Set(roster.map((item) => item.s_number)))
+        );
+      }
+      const { data, error: existingError } = await existingQuery;
+      if (existingError) {
+        logError('meeting_existing_records_query_failed', {
+          correlationId,
+          error: existingError.message
+        });
+      } else {
+        existingRows = (data ?? []) as Array<Record<string, unknown>>;
+      }
     }
     const existingByKey = new Map(
-      ((existingRows ?? []) as Array<Record<string, unknown>>).map((row) => [
+      existingRows.map((row) => [
         `${String(row.s_number ?? '')}|${String(row.checkin_date ?? '')}`,
         row
       ])
@@ -230,29 +281,55 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    if (rowsToUpsert.length > 0) {
-      const { error: upsertError } = await supabase.from('hr_meeting_attendance_records').upsert(rowsToUpsert, {
+    if (rowsToUpsert.length > 0 && meetingRecordsTable) {
+      const { error: upsertError } = await supabase.from(meetingRecordsTable).upsert(rowsToUpsert, {
         onConflict: 's_number,checkin_date'
       });
       if (upsertError) {
-        return jsonResult(errorResult(correlationId, 'DB_ERROR', upsertError.message), 500);
+        logError('meeting_records_upsert_failed', {
+          correlationId,
+          error: upsertError.message
+        });
       }
     }
 
-    let mergedRowsQuery = supabase
-      .from('hr_meeting_attendance_records')
-      .select('s_number, checkin_date, effective_status');
-    if (from) mergedRowsQuery = mergedRowsQuery.gte('checkin_date', from);
-    if (to) mergedRowsQuery = mergedRowsQuery.lte('checkin_date', to);
-    if (roster.length > 0) {
-      mergedRowsQuery = mergedRowsQuery.in(
-        's_number',
-        Array.from(new Set(roster.map((item) => item.s_number)))
-      );
+    let mergedRows: Array<{
+      s_number: string;
+      checkin_date: string;
+      effective_status: EffectiveStatus;
+    }> = [];
+    if (meetingRecordsTable) {
+      let mergedRowsQuery = supabase
+        .from(meetingRecordsTable)
+        .select('s_number, checkin_date, effective_status');
+      if (from) mergedRowsQuery = mergedRowsQuery.gte('checkin_date', from);
+      if (to) mergedRowsQuery = mergedRowsQuery.lte('checkin_date', to);
+      if (roster.length > 0) {
+        mergedRowsQuery = mergedRowsQuery.in(
+          's_number',
+          Array.from(new Set(roster.map((item) => item.s_number)))
+        );
+      }
+      const { data, error: mergedError } = await mergedRowsQuery;
+      if (mergedError) {
+        logError('meeting_records_merged_query_failed', {
+          correlationId,
+          error: mergedError.message
+        });
+      } else {
+        mergedRows = (data ?? []) as Array<{
+          s_number: string;
+          checkin_date: string;
+          effective_status: EffectiveStatus;
+        }>;
+      }
     }
-    const { data: mergedRows, error: mergedError } = await mergedRowsQuery;
-    if (mergedError) {
-      return jsonResult(errorResult(correlationId, 'DB_ERROR', mergedError.message), 500);
+    if (mergedRows.length === 0) {
+      mergedRows = rowsToUpsert.map((row) => ({
+        s_number: String(row.s_number),
+        checkin_date: String(row.checkin_date),
+        effective_status: row.effective_status as EffectiveStatus
+      }));
     }
 
     const response = buildMeetingView({
@@ -262,11 +339,7 @@ export async function GET(request: NextRequest) {
         meta: meetingData.meta,
         roster
       },
-      rows: (mergedRows ?? []) as Array<{
-        s_number: string;
-        checkin_date: string;
-        effective_status: EffectiveStatus;
-      }>
+      rows: mergedRows
     });
 
     logInfo('meeting_proxy_success', {
