@@ -114,6 +114,12 @@ function shiftRowKey(row: GenericRow): string {
   return `${String(row.shift_date ?? '')}|${String(row.shift_period ?? '')}|${String(row.shift_slot_key ?? '')}`;
 }
 
+function formatShiftPeriodLabel(period: unknown): string {
+  const parsed = Number(period);
+  if (Number.isFinite(parsed) && parsed === 0) return 'Morning Shift';
+  return `P${String(period)}`;
+}
+
 function getMeetingSessionVisual(status: 'present' | 'absent' | null, overrideType: string | null): {
   label: string;
   badgeClass: string;
@@ -1315,7 +1321,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
                                     const visual = getShiftStatusVisual(String(row.status ?? 'expected'));
                                     return {
                                       value: shiftRowKey(row),
-                                      label: `${String(row.shift_date)} P${String(row.shift_period)}`,
+                                      label: `${String(row.shift_date)} ${formatShiftPeriodLabel(row.shift_period)}`,
                                       meta: visual.label,
                                       metaClassName: visual.badgeClass
                                     };

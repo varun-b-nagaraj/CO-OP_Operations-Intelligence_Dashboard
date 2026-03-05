@@ -21,6 +21,10 @@ type GenerationSelection = {
   seed: number;
 };
 type AccessMode = 'employee' | 'manager';
+type ScheduleTabProps = {
+  forcedAccessMode?: AccessMode;
+  lockedEmployeeSNumber?: string | null;
+};
 type ShiftActionChoice = 'volunteer' | 'remove';
 type EmptySlotTarget = {
   date: string;
@@ -280,6 +284,10 @@ function attendanceStatusClasses(status: ShiftAttendanceStatus): string {
   return 'border-neutral-500 bg-white text-neutral-700';
 }
 
+function formatPeriodBadge(period: number): string {
+  return period === 0 ? 'Morning Shift' : `P${period}`;
+}
+
 function buildSummaryFromAssignments(
   assignments: EditableAssignment[],
   rosterNameBySNumber: Map<string, string>
@@ -331,9 +339,9 @@ function buildSummaryFromAssignments(
     }));
 }
 
-export function ScheduleTab() {
+export function ScheduleTab(props: ScheduleTabProps = {}) {
   const hasScheduleEditPermission = usePermission('hr.schedule.edit');
-  const canChangeAccessMode = hasScheduleEditPermission;
+  const canChangeAccessMode = hasScheduleEditPermission && !props.forcedAccessMode;
   const searchParams = useSearchParams();
   const defaultGenerationSelection = useMemo(() => getDefaultGenerationSelection(), []);
   const [generationSelection, setGenerationSelection] = useState<GenerationSelection>(defaultGenerationSelection);
@@ -368,6 +376,7 @@ export function ScheduleTab() {
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
   const isManagerMode = hasScheduleEditPermission && scheduleAccessMode === 'manager';
+  const canSelfAutoApproveShiftActions = hasScheduleEditPermission && canChangeAccessMode;
 
   const scheduleQuery = useQuery({
     queryKey: ['hr-schedule', params],
@@ -834,17 +843,28 @@ export function ScheduleTab() {
     () =>
       editableRoster
         .filter((employee) => employee.scheduleable && employee.s_number)
+        .filter((employee) => {
+          const lockedEmployeeSNumber = (props.lockedEmployeeSNumber ?? '').trim();
+          if (!lockedEmployeeSNumber) return true;
+          return employee.s_number === lockedEmployeeSNumber;
+        })
         .sort((left, right) => left.name.localeCompare(right.name))
         .map((employee) => ({
           value: employee.s_number,
           label: `${employee.name} (${employee.s_number})`
         })),
-    [editableRoster]
+    [editableRoster, props.lockedEmployeeSNumber]
   );
-  const requestedEmployeeSNumber = (searchParams.get('employee') ?? '').trim();
-  const requestedAccessMode = (searchParams.get('access') ?? '').trim().toLowerCase();
+  const requestedEmployeeSNumber =
+    (props.lockedEmployeeSNumber ?? '').trim() || (searchParams.get('employee') ?? '').trim();
+  const requestedAccessMode = (props.forcedAccessMode ?? searchParams.get('access') ?? '').trim().toLowerCase();
 
   useEffect(() => {
+    if (props.forcedAccessMode) {
+      if (scheduleAccessMode !== props.forcedAccessMode) setScheduleAccessMode(props.forcedAccessMode);
+      return;
+    }
+
     if (!canChangeAccessMode) {
       if (scheduleAccessMode !== 'employee') setScheduleAccessMode('employee');
       return;
@@ -854,7 +874,7 @@ export function ScheduleTab() {
       const nextMode = requestedAccessMode as AccessMode;
       if (scheduleAccessMode !== nextMode) setScheduleAccessMode(nextMode);
     }
-  }, [canChangeAccessMode, requestedAccessMode, scheduleAccessMode]);
+  }, [canChangeAccessMode, props.forcedAccessMode, requestedAccessMode, scheduleAccessMode]);
 
   useEffect(() => {
     if (isManagerMode || !isSwapModeEnabled) return;
@@ -1638,7 +1658,7 @@ export function ScheduleTab() {
             assignment: selectedShiftActionAssignment,
             targetSNumber: actingEmployeeSNumber,
             reason: 'Self-volunteered for shift',
-            autoApprove: hasScheduleEditPermission,
+            autoApprove: canSelfAutoApproveShiftActions,
             mode: 'volunteer'
           });
           return;
@@ -1693,7 +1713,7 @@ export function ScheduleTab() {
           assignment: selectedShiftActionAssignment,
           targetSNumber: selectedShiftActionAssignment.studentSNumber,
           reason: 'Self-removed from volunteered shift',
-          autoApprove: hasScheduleEditPermission,
+          autoApprove: canSelfAutoApproveShiftActions,
           mode: 'remove'
         });
       }
@@ -2130,7 +2150,9 @@ export function ScheduleTab() {
                                     >
                                       <div className="flex items-center gap-1">
                                         {periodBand.periods.length > 1 && (
-                                          <span className="shrink-0 text-[10px] text-neutral-500">P{assignment.period}</span>
+                                          <span className="shrink-0 text-[10px] text-neutral-500">
+                                            {formatPeriodBadge(assignment.period)}
+                                          </span>
                                         )}
                                         <span
                                           className="min-w-0 flex-1 truncate text-left font-medium leading-tight"
@@ -2501,7 +2523,8 @@ export function ScheduleTab() {
                     ? (rosterNameBySNumber.get(selectedShiftActionAssignment.effectiveWorkerSNumber) ??
                       selectedShiftActionAssignment.effectiveWorkerSNumber)
                     : 'Open slot'}{' '}
-                  • {selectedActionDate} {selectedActionPeriod !== null ? `• P${selectedActionPeriod}` : ''}
+                  • {selectedActionDate}{' '}
+                  {selectedActionPeriod !== null ? `• ${formatPeriodBadge(selectedActionPeriod)}` : ''}
                 </p>
               </div>
               <button

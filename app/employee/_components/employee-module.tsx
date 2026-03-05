@@ -8,12 +8,11 @@ import { Select } from '@/app/_components/ui/select';
 import { submitShiftExchange } from '@/app/actions/shift-requests';
 import { submitStrikeAppeal } from '@/app/actions/strike-appeals';
 import { fetchMeetingAttendance, fetchSchedule } from '@/lib/api-client';
+import { ScheduleTab } from '@/app/hr/_components/schedule-tab';
 
 import { getStudentDisplayName, getStudentSNumber, StudentRow, useBrowserSupabase } from '@/app/hr/_components/utils';
 
 type EmployeeTabId = 'schedule' | 'accountability' | 'requests';
-type ViewMode = 'calendar' | 'list';
-
 type ShiftRequestAssignment = {
   date: string;
   period: number;
@@ -61,6 +60,12 @@ function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
+function formatPeriodDisplay(period: unknown): string {
+  const parsed = Number(period);
+  if (Number.isFinite(parsed) && parsed === 0) return 'Morning Shift';
+  return `P${String(period)}`;
+}
+
 export function EmployeeModule() {
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
@@ -70,21 +75,18 @@ export function EmployeeModule() {
   const [sessionSNumber, setSessionSNumber] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('calendar');
 
   const [monthSelection, setMonthSelection] = useState(() => toMonthSelection(new Date()));
-  const [volunteerDate, setVolunteerDate] = useState(todayKey());
-  const [volunteerPeriod, setVolunteerPeriod] = useState(0);
   const [requestAssignmentKey, setRequestAssignmentKey] = useState('');
   const [requestToSNumber, setRequestToSNumber] = useState('');
   const [requestReason, setRequestReason] = useState('');
   const [appealStrikeId, setAppealStrikeId] = useState('');
   const [appealReason, setAppealReason] = useState('');
 
-  const [accountabilityRange, setAccountabilityRange] = useState(() => {
-    const current = toMonthSelection(new Date());
-    return dateRangeForMonth(current.year, current.month);
-  });
+  const [accountabilityRange, setAccountabilityRange] = useState(() => ({
+    from: `${new Date().getUTCFullYear()}-01-01`,
+    to: todayKey()
+  }));
 
   useEffect(() => {
     try {
@@ -97,10 +99,6 @@ export function EmployeeModule() {
       // no-op
     }
   }, []);
-
-  useEffect(() => {
-    setVolunteerDate(dateRangeForMonth(monthSelection.year, monthSelection.month).from);
-  }, [monthSelection.month, monthSelection.year]);
 
   const studentQuery = useQuery({
     queryKey: ['employee-student', sessionSNumber],
@@ -196,25 +194,6 @@ export function EmployeeModule() {
       });
       if (!result.ok) throw new Error(result.error.message);
       return result.data;
-    }
-  });
-
-  const volunteerRowsQuery = useQuery({
-    queryKey: ['employee-volunteer-rows', sessionSNumber, monthSelection.year, monthSelection.month],
-    enabled: Boolean(sessionSNumber),
-    queryFn: async () => {
-      const range = dateRangeForMonth(monthSelection.year, monthSelection.month);
-      const { data, error } = await supabase
-        .from('hr_shift_attendance')
-        .select('*')
-        .eq('employee_s_number', sessionSNumber)
-        .eq('source', 'manual')
-        .gte('shift_date', range.from)
-        .lte('shift_date', range.to)
-        .order('shift_date', { ascending: true })
-        .order('shift_period', { ascending: true });
-      if (error) throw new Error(error.message);
-      return (data ?? []) as Array<{ id: string; shift_date: string; shift_period: number; shift_slot_key: string }>;
     }
   });
 
@@ -449,63 +428,6 @@ export function EmployeeModule() {
     if (!exists) setAppealStrikeId(String(activeStrikeRows[0].id));
   }, [activeStrikeRows, appealStrikeId]);
 
-  const volunteerMutation = useMutation({
-    mutationFn: async (payload: { date: string; period: number }) => {
-      if (!(payload.period === 0 || offPeriods.includes(payload.period))) {
-        throw new Error('You can only volunteer for morning or your off-period shifts.');
-      }
-
-      const sNumber = sessionSNumber;
-      if (!sNumber) throw new Error('Not logged in.');
-
-      const shiftSlotKey = `manual|${payload.date}|${payload.period}|${sNumber}`;
-      const { error } = await supabase.from('hr_shift_attendance').upsert(
-        {
-          shift_date: payload.date,
-          shift_period: payload.period,
-          shift_slot_key: shiftSlotKey,
-          employee_s_number: sNumber,
-          status: 'expected',
-          raw_status: 'expected',
-          source: 'manual',
-          reason: 'employee volunteer',
-          marked_by: sNumber
-        },
-        {
-          onConflict: 'shift_date,shift_period,shift_slot_key,employee_s_number'
-        }
-      );
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      setMessage('Volunteer shift saved.');
-      queryClient.invalidateQueries({ queryKey: ['employee-volunteer-rows'] });
-      queryClient.invalidateQueries({ queryKey: ['employee-shift-attendance'] });
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : 'Unable to save volunteer shift.')
-  });
-
-  const removeVolunteerMutation = useMutation({
-    mutationFn: async (payload: { date: string; period: number }) => {
-      const sNumber = sessionSNumber;
-      if (!sNumber) throw new Error('Not logged in.');
-      const { error } = await supabase
-        .from('hr_shift_attendance')
-        .delete()
-        .eq('employee_s_number', sNumber)
-        .eq('shift_date', payload.date)
-        .eq('shift_period', payload.period)
-        .eq('source', 'manual');
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      setMessage('Volunteer shift removed.');
-      queryClient.invalidateQueries({ queryKey: ['employee-volunteer-rows'] });
-      queryClient.invalidateQueries({ queryKey: ['employee-shift-attendance'] });
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : 'Unable to remove volunteer shift.')
-  });
-
   const submitShiftRequestMutation = useMutation({
     mutationFn: async () => {
       const assignment = requestableAssignments.find((item) => item.shiftSlotKey === requestAssignmentKey);
@@ -559,9 +481,17 @@ export function EmployeeModule() {
   const accountabilityStats = useMemo(() => {
     const isPresentLike = (status: unknown) => status === 'present' || status === 'excused';
 
-    const morningRows = morningAttendanceQuery.data ?? [];
-    const offRows = offPeriodAttendanceQuery.data ?? [];
     const allShiftRows = shiftAttendanceQuery.data ?? [];
+    const morningRowsFromShift = allShiftRows.filter((row) => Number(row.shift_period) === 0);
+    const offRowsFromShift = allShiftRows.filter((row) => offPeriods.includes(Number(row.shift_period)));
+    const morningRows =
+      (morningAttendanceQuery.data ?? []).length > 0
+        ? (morningAttendanceQuery.data ?? [])
+        : morningRowsFromShift;
+    const offRows =
+      (offPeriodAttendanceQuery.data ?? []).length > 0
+        ? (offPeriodAttendanceQuery.data ?? [])
+        : offRowsFromShift;
 
     const morningPresent = morningRows.filter((row) => isPresentLike(row.status)).length;
     const offPresent = offRows.filter((row) => isPresentLike(row.status)).length;
@@ -593,6 +523,7 @@ export function EmployeeModule() {
     };
   }, [
     meetingAttendanceQuery.data?.analytics.students,
+    offPeriods,
     morningAttendanceQuery.data,
     offPeriodAttendanceQuery.data,
     sessionSNumber,
@@ -704,166 +635,8 @@ export function EmployeeModule() {
         {message ? <p className="border-b border-neutral-300 px-4 py-2 text-sm text-brand-maroon">{message}</p> : null}
 
         {activeTab === 'schedule' && (
-          <section className="space-y-4 p-4 md:p-6">
-            <div className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-4">
-              <label className="text-sm">
-                Year
-                <input
-                  className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                  onChange={(event) =>
-                    setMonthSelection((previous) => ({ ...previous, year: Number(event.target.value) || previous.year }))
-                  }
-                  type="number"
-                  value={monthSelection.year}
-                />
-              </label>
-              <label className="text-sm">
-                Month
-                <Select
-                  className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                  onChange={(event) =>
-                    setMonthSelection((previous) => ({ ...previous, month: Number(event.target.value) }))
-                  }
-                  value={String(monthSelection.month)}
-                >
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((month) => (
-                    <option key={month} value={month}>
-                      {month}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <label className="text-sm">
-                View mode
-                <Select
-                  className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                  onChange={(event) => setViewMode(event.target.value as ViewMode)}
-                  value={viewMode}
-                >
-                  <option value="calendar">Calendar</option>
-                  <option value="list">List</option>
-                </Select>
-              </label>
-              <div className="text-sm text-neutral-700">
-                <p className="font-medium">Allowed self-edits</p>
-                <p className="mt-1 text-xs">Morning (P0) and your off periods ({offPeriods.join(', ')}) only.</p>
-              </div>
-            </div>
-
-            <section className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-[1fr_auto]">
-              <div className="grid gap-2 md:grid-cols-2">
-                <label className="text-sm">
-                  Volunteer date
-                  <input
-                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                    onChange={(event) => setVolunteerDate(event.target.value)}
-                    type="date"
-                    value={volunteerDate}
-                  />
-                </label>
-                <label className="text-sm">
-                  Volunteer period
-                  <Select
-                    className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                    onChange={(event) => setVolunteerPeriod(Number(event.target.value))}
-                    value={String(volunteerPeriod)}
-                  >
-                    {[0, ...offPeriods].map((period) => (
-                      <option key={period} value={period}>
-                        Period {period}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-              </div>
-              <div className="flex items-end">
-                <button
-                  className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm text-white disabled:opacity-40"
-                  disabled={volunteerMutation.isPending || !volunteerDate}
-                  onClick={() => volunteerMutation.mutate({ date: volunteerDate, period: volunteerPeriod })}
-                  type="button"
-                >
-                  Volunteer
-                </button>
-              </div>
-            </section>
-
-            <section className="border border-neutral-300">
-              <header className="border-b border-neutral-300 bg-neutral-50 px-3 py-2 text-sm font-medium">
-                Your manual volunteer entries
-              </header>
-              <div className="divide-y divide-neutral-200">
-                {(volunteerRowsQuery.data ?? []).length === 0 ? (
-                  <p className="px-3 py-3 text-sm text-neutral-600">No volunteer rows for this month.</p>
-                ) : (
-                  (volunteerRowsQuery.data ?? []).map((row) => (
-                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm" key={row.id}>
-                      <span>
-                        {row.shift_date} - Period {row.shift_period}
-                      </span>
-                      <button
-                        className="min-h-[36px] border border-neutral-500 px-2 text-xs"
-                        onClick={() => removeVolunteerMutation.mutate({ date: row.shift_date, period: row.shift_period })}
-                        type="button"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-
-            {viewMode === 'list' ? (
-              <section className="overflow-x-auto border border-neutral-300">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-neutral-100">
-                    <tr>
-                      <th className="border-b border-neutral-300 p-2 text-left">Date</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Period</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Type</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Team on shift</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ownAssignments.map((assignment) => {
-                      const key = `${assignment.date}|${assignment.period}`;
-                      const coworkers = coworkersByDatePeriod.get(key) ?? [];
-                      return (
-                        <tr className="border-b border-neutral-200" key={`${assignment.date}|${assignment.period}|${assignment.shiftSlotKey}`}>
-                          <td className="p-2">{assignment.date}</td>
-                          <td className="p-2">{assignment.period}</td>
-                          <td className="p-2">{assignment.type}</td>
-                          <td className="p-2">{coworkers.join(', ')}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </section>
-            ) : (
-              <section className="space-y-2 border border-neutral-300 p-3">
-                {[...new Set(ownAssignments.map((assignment) => assignment.date))].map((date) => {
-                  const rows = ownAssignments.filter((assignment) => assignment.date === date);
-                  return (
-                    <article className="border border-neutral-200 p-2" key={date}>
-                      <h3 className="text-sm font-semibold">{date}</h3>
-                      <ul className="mt-2 space-y-1 text-sm">
-                        {rows.map((row) => {
-                          const coworkers = coworkersByDatePeriod.get(`${row.date}|${row.period}`) ?? [];
-                          return (
-                            <li key={`${row.shiftSlotKey}|${row.period}`}>
-                              P{row.period} - {row.type} - Team: {coworkers.join(', ')}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </article>
-                  );
-                })}
-                {ownAssignments.length === 0 ? <p className="text-sm text-neutral-600">No assignments for this month.</p> : null}
-              </section>
-            )}
+          <section className="p-4 md:p-6">
+            <ScheduleTab forcedAccessMode="employee" lockedEmployeeSNumber={sessionSNumber} />
           </section>
         )}
 
@@ -1072,7 +845,7 @@ export function EmployeeModule() {
                     <tr className="border-b border-neutral-200" key={String(row.id)}>
                       <td className="p-2">{new Date(String(row.requested_at)).toLocaleString()}</td>
                       <td className="p-2">
-                        {String(row.shift_date)} P{String(row.shift_period)} ({String(row.shift_slot_key)})
+                        {String(row.shift_date)} {formatPeriodDisplay(row.shift_period)} ({String(row.shift_slot_key)})
                       </td>
                       <td className="p-2">
                         {studentNameBySNumber.get(String(row.to_employee_s_number ?? '')) ??

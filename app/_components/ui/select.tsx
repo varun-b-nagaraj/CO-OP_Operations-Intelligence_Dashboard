@@ -121,13 +121,13 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       </select>
 
       <button
-        className={`flex w-full items-center justify-between rounded border border-neutral-300 bg-white px-2 text-left text-sm transition hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
+        className={`flex w-full items-center justify-between rounded border border-neutral-300 bg-white px-2 text-left text-sm text-neutral-900 transition hover:border-brand-maroon disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
         disabled={disabled}
         onClick={() => setOpen((prev) => !prev)}
         type="button"
       >
         <span className="truncate">{triggerLabel}</span>
-        <span className={`ml-2 text-xs text-neutral-500 transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+        <span className={`ml-2 text-xs text-brand-maroon transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
       </button>
 
       <div
@@ -140,7 +140,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
           return (
             <button
               className={`block w-full px-2 py-1.5 text-left text-sm ${
-                isSelected ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-800 hover:bg-neutral-100'
+                isSelected
+                  ? 'bg-brand-maroon text-white'
+                  : 'bg-white text-neutral-800 hover:bg-neutral-100'
               } ${option.disabled ? 'cursor-not-allowed opacity-50' : ''}`}
               disabled={option.disabled}
               key={option.value || `opt-${option.label}`}
