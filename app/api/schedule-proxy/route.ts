@@ -2,7 +2,14 @@ import { NextRequest } from 'next/server';
 
 import { buildExpectedShiftsInternal } from '@/lib/server/expected-shifts';
 import { fetchScheduleWithCache } from '@/lib/server/external-apis';
-import { getCorrelationId, jsonResult, jsonValidationError, logError, logInfo } from '@/lib/server/common';
+import {
+  getCorrelationId,
+  jsonResult,
+  jsonValidationError,
+  logError,
+  logInfo,
+  resolvePreferredTable
+} from '@/lib/server/common';
 import { applyApprovedShiftExchanges, monthWindow } from '@/lib/server/schedule';
 import { errorResult, ScheduleParams, ShiftChangeRequest, successResult } from '@/lib/types';
 import { ScheduleParamsSchema, zodFieldErrors } from '@/lib/validation';
@@ -49,12 +56,26 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = createServerClient();
+    let shiftChangeRequestTable: string | null = null;
+    try {
+      shiftChangeRequestTable = await resolvePreferredTable(
+        supabase,
+        'hr_shift_change_requests',
+        'shift_change_requests',
+        'id'
+      );
+    } catch (error) {
+      logError('schedule_shift_change_table_resolution_failed', {
+        correlationId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
     const scheduleResult = await fetchScheduleWithCache(supabase, parsed.data, correlationId);
     const window = monthWindow(parsed.data.year, parsed.data.month);
 
-    if (parsed.data.forceRefresh) {
+    if (parsed.data.forceRefresh && shiftChangeRequestTable) {
       const { error: clearManagerEditsError } = await supabase
-        .from('shift_change_requests')
+        .from(shiftChangeRequestTable)
         .delete()
         .eq('status', 'approved')
         .or(
@@ -77,24 +98,28 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const { data: approvedExchanges, error: exchangeError } = await supabase
-      .from('shift_change_requests')
-      .select('*')
-      .eq('status', 'approved')
-      .gte('shift_date', window.from)
-      .lte('shift_date', window.to);
+    let approvedExchanges: ShiftChangeRequest[] = [];
+    if (shiftChangeRequestTable) {
+      const { data, error: exchangeError } = await supabase
+        .from(shiftChangeRequestTable)
+        .select('*')
+        .eq('status', 'approved')
+        .gte('shift_date', window.from)
+        .lte('shift_date', window.to);
 
-    if (exchangeError) {
-      logError('schedule_exchange_overlay_failed', {
-        correlationId,
-        error: exchangeError.message
-      });
-      return jsonResult(errorResult(correlationId, 'DB_ERROR', exchangeError.message), 500);
+      if (exchangeError) {
+        logError('schedule_exchange_overlay_failed', {
+          correlationId,
+          error: exchangeError.message
+        });
+      } else {
+        approvedExchanges = (data ?? []) as ShiftChangeRequest[];
+      }
     }
 
     const scheduleWithExchanges = applyApprovedShiftExchanges(
       scheduleResult.schedule,
-      (approvedExchanges ?? []) as ShiftChangeRequest[]
+      approvedExchanges
     );
 
     const shouldForceRebuild =
@@ -119,7 +144,6 @@ export async function GET(request: NextRequest) {
           correlationId,
           error: buildResult.error.message
         });
-        return jsonResult(errorResult(correlationId, 'DB_ERROR', buildResult.error.message), 500);
       }
     }
 
@@ -133,12 +157,19 @@ export async function GET(request: NextRequest) {
 
     return jsonResult(successResult(scheduleWithExchanges, correlationId), 200);
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     logError('schedule_proxy_failed', {
       correlationId,
-      error: error instanceof Error ? error.message : String(error)
+      error: errorMessage
     });
     return jsonResult(
-      errorResult(correlationId, 'EXTERNAL_API_ERROR', 'Unable to fetch schedule data. Please try again.'),
+      errorResult(
+        correlationId,
+        'EXTERNAL_API_ERROR',
+        process.env.NODE_ENV === 'development'
+          ? `Unable to fetch schedule data: ${errorMessage}`
+          : 'Unable to fetch schedule data. Please try again.'
+      ),
       500
     );
   }

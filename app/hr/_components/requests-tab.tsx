@@ -99,7 +99,7 @@ export function RequestsTab() {
     queryFn: async () => {
       if (!selectedYearMonth) return null;
       const { data, error } = await supabase
-        .from('schedules')
+        .from('hr_schedules')
         .select('year, month, anchor_date, anchor_day, seed')
         .eq('year', selectedYearMonth.year)
         .eq('month', selectedYearMonth.month)
@@ -144,7 +144,7 @@ export function RequestsTab() {
     queryKey: ['hr-shift-requests', statusFilter],
     queryFn: async () => {
       let query = supabase
-        .from('shift_change_requests')
+        .from('hr_shift_change_requests')
         .select('*')
         .eq('request_source', 'employee_form')
         .order('requested_at', { ascending: false })

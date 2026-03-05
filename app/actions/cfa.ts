@@ -402,7 +402,7 @@ export async function getCFADayTypeForDate(logDate: string): Promise<Result<CFAD
 
     const supabase = createServerClient();
     const { data: scheduleRow, error } = await supabase
-      .from('schedules')
+      .from('hr_schedules')
       .select('schedule_data')
       .eq('year', year)
       .eq('month', month)

@@ -5,15 +5,19 @@ type BackendDepartment = 'hr' | 'marketing' | 'product' | 'inventory' | 'shared'
 
 const HR_TABLES = new Set([
   'students',
-  'employee_settings',
-  'shift_attendance',
-  'attendance_overrides',
-  'shift_change_requests',
-  'employee_login_credentials',
-  'schedules',
-  'strikes',
-  'points_ledger',
-  'meeting_attendance_records'
+  'hr_employee_settings',
+  'hr_shift_attendance',
+  'hr_morning_shift_attendance',
+  'hr_off_period_shift_attendance',
+  'hr_attendance_overrides',
+  'hr_shift_change_requests',
+  'hr_employee_login_credentials',
+  'hr_schedules',
+  'hr_strikes',
+  'hr_points_ledger',
+  'hr_meeting_attendance_records',
+  'hr_audit_log',
+  'hr_user_roles'
 ]);
 
 const MARKETING_TABLES = new Set([
@@ -41,6 +45,7 @@ function inferDepartmentFromRequestPath(pathname: string): BackendDepartment {
     if (table.startsWith('product_')) return 'product';
     if (table.startsWith('inventory_')) return 'inventory';
     if (table.startsWith('marketing_')) return 'marketing';
+    if (table.startsWith('hr_')) return 'hr';
     if (table.startsWith('cfa_')) return 'inventory';
     if (MARKETING_TABLES.has(table)) return 'marketing';
     if (HR_TABLES.has(table)) return 'hr';

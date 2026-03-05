@@ -45,7 +45,7 @@ export function StrikesTab() {
     queryKey: ['hr-strikes-list'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('strikes')
+        .from('hr_strikes')
         .select('*')
         .order('issued_at', { ascending: false });
       if (error) throw new Error(error.message);

@@ -47,7 +47,7 @@ export async function addStrike(
     }
 
     const { data, error } = await supabase
-      .from('strikes')
+      .from('hr_strikes')
       .insert({
         employee_id: parsed.data.employee_id,
         reason: parsed.data.reason,
@@ -67,7 +67,7 @@ export async function addStrike(
       supabase,
       {
         action: 'strike_added',
-        tableName: 'strikes',
+        tableName: 'hr_strikes',
         recordId: data.id,
         oldValue: null,
         newValue: data,
@@ -103,7 +103,7 @@ export async function removeStrike(strikeId: string): Promise<Result<Strike>> {
 
     const supabase = createServerClient();
     const { data: existing, error: existingError } = await supabase
-      .from('strikes')
+      .from('hr_strikes')
       .select('*')
       .eq('id', strikeId)
       .single();
@@ -113,7 +113,7 @@ export async function removeStrike(strikeId: string): Promise<Result<Strike>> {
     }
 
     const { data, error } = await supabase
-      .from('strikes')
+      .from('hr_strikes')
       .update({ active: false })
       .eq('id', strikeId)
       .select('*')
@@ -127,7 +127,7 @@ export async function removeStrike(strikeId: string): Promise<Result<Strike>> {
       supabase,
       {
         action: 'strike_removed',
-        tableName: 'strikes',
+        tableName: 'hr_strikes',
         recordId: strikeId,
         oldValue: existing,
         newValue: data,
@@ -162,7 +162,7 @@ export async function getActiveStrikes(employeeId: string): Promise<Result<Strik
 
     const supabase = createServerClient();
     const { data, error } = await supabase
-      .from('strikes')
+      .from('hr_strikes')
       .select('*')
       .eq('employee_id', employeeId)
       .eq('active', true)

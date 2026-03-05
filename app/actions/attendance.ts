@@ -23,7 +23,7 @@ async function upsertMeetingAttendanceSourceRecord(input: {
   updatedBy?: string | null;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   const { data: existing, error: existingError } = await input.supabase
-    .from('meeting_attendance_records')
+    .from('hr_meeting_attendance_records')
     .select('*')
     .eq('s_number', input.sNumber)
     .eq('checkin_date', input.checkinDate)
@@ -37,7 +37,7 @@ async function upsertMeetingAttendanceSourceRecord(input: {
     (existing?.api_status as 'present' | 'absent' | null | undefined) ?? 'absent';
   const effectiveStatus = input.manualStatus ?? apiStatus;
 
-  const { error: upsertError } = await input.supabase.from('meeting_attendance_records').upsert(
+  const { error: upsertError } = await input.supabase.from('hr_meeting_attendance_records').upsert(
     {
       s_number: input.sNumber,
       checkin_date: input.checkinDate,
@@ -104,7 +104,7 @@ async function upsertMeetingOverride(
     }
 
     const { data: existing } = await supabase
-      .from('attendance_overrides')
+      .from('hr_attendance_overrides')
       .select('*')
       .eq('s_number', parsed.data.s_number)
       .eq('checkin_date', parsed.data.checkin_date)
@@ -119,7 +119,7 @@ async function upsertMeetingOverride(
 
     if (existingRows.length > 0) {
       const { data: updatedRows, error: updateError } = await supabase
-        .from('attendance_overrides')
+        .from('hr_attendance_overrides')
         .update(
           {
             override_type: parsed.data.override_type,
@@ -138,7 +138,7 @@ async function upsertMeetingOverride(
       error = updateError ? { message: updateError.message } : null;
     } else {
       const { data: insertedRow, error: insertError } = await supabase
-        .from('attendance_overrides')
+        .from('hr_attendance_overrides')
         .insert(
           {
             s_number: parsed.data.s_number,
@@ -180,7 +180,7 @@ async function upsertMeetingOverride(
           parsed.data.override_type === 'excused'
             ? 'meeting_absence_pardoned'
             : 'meeting_attendance_overridden',
-        tableName: 'attendance_overrides',
+        tableName: 'hr_attendance_overrides',
         recordId: String(data.id ?? ''),
         oldValue: existingRow ?? null,
         newValue: data,
@@ -242,7 +242,7 @@ export async function clearMeetingOverride(
 
     const supabase = createServerClient();
     const { data: existingRows, error: existingError } = await supabase
-      .from('attendance_overrides')
+      .from('hr_attendance_overrides')
       .select('*')
       .eq('s_number', sNumber)
       .eq('checkin_date', date)
@@ -258,7 +258,7 @@ export async function clearMeetingOverride(
     }
 
     const ids = rows.map((row) => row.id);
-    const { error: deleteError } = await supabase.from('attendance_overrides').delete().in('id', ids);
+    const { error: deleteError } = await supabase.from('hr_attendance_overrides').delete().in('id', ids);
     if (deleteError) {
       return errorResult(correlationId, 'DB_ERROR', deleteError.message);
     }
@@ -279,7 +279,7 @@ export async function clearMeetingOverride(
       supabase,
       {
         action: 'meeting_override_cleared',
-        tableName: 'attendance_overrides',
+        tableName: 'hr_attendance_overrides',
         recordId: `${sNumber}:${date}`,
         oldValue: rows,
         newValue: null,
@@ -399,7 +399,7 @@ export async function markMeetingAbsent(
     }
 
     const { error: clearOverridesError } = await supabase
-      .from('attendance_overrides')
+      .from('hr_attendance_overrides')
       .delete()
       .eq('s_number', parsed.data.s_number)
       .eq('checkin_date', parsed.data.checkin_date)
@@ -464,7 +464,7 @@ export async function getAttendanceOverrides(
 
     const supabase = createServerClient();
     const { data, error } = await supabase
-      .from('attendance_overrides')
+      .from('hr_attendance_overrides')
       .select('*')
       .eq('s_number', sNumber)
       .eq('scope', scope)

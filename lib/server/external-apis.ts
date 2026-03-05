@@ -1,7 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 
 import { extractMeetingAttendanceRecords } from '@/lib/server/attendance';
-import { logInfo, retryWithBackoff } from '@/lib/server/common';
+import { logError, logInfo, resolvePreferredTable, retryWithBackoff } from '@/lib/server/common';
 import { normalizeScheduleResponse } from '@/lib/server/schedule';
 import {
   MeetingAttendanceResponse,
@@ -33,9 +33,19 @@ export async function fetchScheduleWithCache(
   params: ScheduleParams,
   correlationId: string
 ): Promise<{ schedule: NormalizedScheduleResponse; fromCache: boolean; generatedAt: string }> {
-  if (!params.forceRefresh) {
+  let scheduleTable: string | null = null;
+  try {
+    scheduleTable = await resolvePreferredTable(supabase, 'hr_schedules', 'schedules', 'year');
+  } catch (error) {
+    logError('schedule_table_resolution_failed', {
+      correlationId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  if (!params.forceRefresh && scheduleTable) {
     const { data: cached } = await supabase
-      .from('schedules')
+      .from(scheduleTable)
       .select('schedule_data, generated_at')
       .eq('year', params.year)
       .eq('month', params.month)
@@ -90,25 +100,36 @@ export async function fetchScheduleWithCache(
     generated_at: generatedAt
   };
 
-  // Canonical behavior: one stored schedule row per month; regenerate rewrites it.
-  const { error: upsertYearMonthError } = await supabase.from('schedules').upsert(payload, {
-    onConflict: 'year,month'
-  });
+  if (scheduleTable) {
+    // Canonical behavior: one stored schedule row per month; regenerate rewrites it.
+    const { error: upsertYearMonthError } = await supabase.from(scheduleTable).upsert(payload, {
+      onConflict: 'year,month'
+    });
 
-  if (upsertYearMonthError) {
-    // Back-compat fallback for databases that have not yet applied year/month uniqueness.
-    const { error: deleteMonthError } = await supabase
-      .from('schedules')
-      .delete()
-      .eq('year', params.year)
-      .eq('month', params.month);
-    if (deleteMonthError) {
-      throw new Error(deleteMonthError.message);
-    }
+    if (upsertYearMonthError) {
+      // Back-compat fallback for databases that have not yet applied year/month uniqueness.
+      const { error: deleteMonthError } = await supabase
+        .from(scheduleTable)
+        .delete()
+        .eq('year', params.year)
+        .eq('month', params.month);
 
-    const { error: insertError } = await supabase.from('schedules').insert(payload);
-    if (insertError) {
-      throw new Error(insertError.message);
+      if (!deleteMonthError) {
+        const { error: insertError } = await supabase.from(scheduleTable).insert(payload);
+        if (insertError) {
+          logError('schedule_cache_insert_failed', {
+            correlationId,
+            table: scheduleTable,
+            error: insertError.message
+          });
+        }
+      } else {
+        logError('schedule_cache_rewrite_failed', {
+          correlationId,
+          table: scheduleTable,
+          error: deleteMonthError.message
+        });
+      }
     }
   }
 

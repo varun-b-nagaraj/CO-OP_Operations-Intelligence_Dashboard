@@ -55,7 +55,7 @@ export function HRModule() {
 
   const requestedTabRaw = searchParams.get('tab');
   const requestedTab =
-    requestedTabRaw === 'settings' || requestedTabRaw === 'strikes'
+    requestedTabRaw === 'settings' || requestedTabRaw === 'hr_strikes'
       ? 'employees'
       : requestedTabRaw;
 

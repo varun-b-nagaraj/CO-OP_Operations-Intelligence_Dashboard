@@ -90,7 +90,7 @@ export async function getAuditLog(
     const supabase = createServerClient();
     const limit = parsed.data.limit ?? 50;
     let query = supabase
-      .from('audit_log')
+      .from('hr_audit_log')
       .select('*')
       .order('timestamp', { ascending: false })
       .order('id', { ascending: false })

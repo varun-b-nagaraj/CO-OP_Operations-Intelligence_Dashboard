@@ -41,7 +41,7 @@ async function maybeAwardShiftPoints(
   if (!student) return;
 
   if (params.shiftPeriod === 0) {
-    await supabase.from('points_ledger').insert({
+    await supabase.from('hr_points_ledger').insert({
       employee_id: student.id,
       point_type: 'morning_shift',
       points: 1,
@@ -52,14 +52,14 @@ async function maybeAwardShiftPoints(
   }
 
   const { data: settings } = await supabase
-    .from('employee_settings')
+    .from('hr_employee_settings')
     .select('off_periods')
     .eq('employee_s_number', params.employeeSNumber)
     .maybeSingle();
 
   const offPeriods = (settings?.off_periods as number[] | undefined) ?? [4, 8];
   if (offPeriods.includes(params.shiftPeriod)) {
-    await supabase.from('points_ledger').insert({
+    await supabase.from('hr_points_ledger').insert({
       employee_id: student.id,
       point_type: 'off_period_shift',
       points: 1,
@@ -105,7 +105,7 @@ async function upsertShiftAttendanceStatus(input: {
     }
 
     const { data: existing } = await supabase
-      .from('shift_attendance')
+      .from('hr_shift_attendance')
       .select('*')
       .eq('shift_date', input.date)
       .eq('shift_period', input.period)
@@ -131,7 +131,7 @@ async function upsertShiftAttendanceStatus(input: {
     }
 
     const { data, error } = await supabase
-      .from('shift_attendance')
+      .from('hr_shift_attendance')
       .upsert(
         {
           shift_date: input.date,
@@ -169,7 +169,7 @@ async function upsertShiftAttendanceStatus(input: {
       supabase,
       {
         action: `shift_marked_${input.status}`,
-        tableName: 'shift_attendance',
+        tableName: 'hr_shift_attendance',
         recordId: data.id,
         oldValue: existing ?? null,
         newValue: data,
@@ -299,7 +299,7 @@ export async function getShiftAttendance(
 
     const supabase = createServerClient();
     let query = supabase
-      .from('shift_attendance')
+      .from('hr_shift_attendance')
       .select('*')
       .order('shift_date', { ascending: false })
       .order('shift_period', { ascending: true });

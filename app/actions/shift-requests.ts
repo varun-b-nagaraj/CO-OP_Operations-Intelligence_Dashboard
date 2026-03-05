@@ -44,7 +44,7 @@ async function findScheduleAssignment(input: {
   const month = date.getUTCMonth() + 1;
 
   const { data: scheduleRow } = await supabase
-    .from('schedules')
+    .from('hr_schedules')
     .select('schedule_data')
     .eq('year', year)
     .eq('month', month)
@@ -81,7 +81,7 @@ async function resolveExpectedWorkerForSlot(input: {
 }) {
   const supabase = createServerClient();
   const { data: approved } = await supabase
-    .from('shift_change_requests')
+    .from('hr_shift_change_requests')
     .select('from_employee_s_number, to_employee_s_number, requested_at')
     .eq('status', 'approved')
     .eq('shift_date', input.shiftDate)
@@ -175,12 +175,12 @@ export async function submitShiftExchange(
     const toClassPeriod = toValidNumber((toStudentRow as Record<string, unknown>).Schedule);
     const [{ data: toSettingsRow }, { data: fromSettingsRow }] = await Promise.all([
       supabase
-        .from('employee_settings')
+        .from('hr_employee_settings')
         .select('off_periods')
         .eq('employee_s_number', parsed.data.to_employee_s_number)
         .maybeSingle(),
       supabase
-        .from('employee_settings')
+        .from('hr_employee_settings')
         .select('off_periods')
         .eq('employee_s_number', parsed.data.from_employee_s_number)
         .maybeSingle()
@@ -240,7 +240,7 @@ export async function submitShiftExchange(
     }
 
     const { data: existingPending } = await supabase
-      .from('shift_change_requests')
+      .from('hr_shift_change_requests')
       .select('*')
       .eq('shift_date', parsed.data.shift_date)
       .eq('shift_period', parsed.data.shift_period)
@@ -257,7 +257,7 @@ export async function submitShiftExchange(
 
     if (existingPending) {
       const { data: updatedRows, error: updateError } = await supabase
-        .from('shift_change_requests')
+        .from('hr_shift_change_requests')
         .update({
           to_employee_s_number: parsed.data.to_employee_s_number,
           reason: parsed.data.reason,
@@ -273,7 +273,7 @@ export async function submitShiftExchange(
       error = updateError ? { message: updateError.message } : null;
     } else {
       const { data: insertedRow, error: insertError } = await supabase
-        .from('shift_change_requests')
+        .from('hr_shift_change_requests')
         .insert({
           shift_date: parsed.data.shift_date,
           shift_period: parsed.data.shift_period,
@@ -298,7 +298,7 @@ export async function submitShiftExchange(
       supabase,
       {
         action: existingPending ? 'shift_exchange_pending_updated' : 'shift_exchange_submitted',
-        tableName: 'shift_change_requests',
+        tableName: 'hr_shift_change_requests',
         recordId: String(data.id ?? ''),
         oldValue: existingPending ?? null,
         newValue: data,
@@ -343,7 +343,7 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
 
     const supabase = createServerClient();
     const { data: request, error: requestError } = await supabase
-      .from('shift_change_requests')
+      .from('hr_shift_change_requests')
       .select('*')
       .eq('id', requestId)
       .single();
@@ -357,7 +357,7 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
     }
 
     const { data: fromAttendance } = await supabase
-      .from('shift_attendance')
+      .from('hr_shift_attendance')
       .select('*')
       .eq('shift_date', request.shift_date)
       .eq('shift_period', request.shift_period)
@@ -377,7 +377,7 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
     }
 
     const { data: toAttendance } = await supabase
-      .from('shift_attendance')
+      .from('hr_shift_attendance')
       .select('*')
       .eq('shift_date', request.shift_date)
       .eq('shift_period', request.shift_period)
@@ -394,7 +394,7 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
     }
 
     const { data: existingApproved } = await supabase
-      .from('shift_change_requests')
+      .from('hr_shift_change_requests')
       .select('id')
       .eq('status', 'approved')
       .eq('shift_date', request.shift_date)
@@ -413,14 +413,14 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
     }
 
     await supabase
-      .from('shift_attendance')
+      .from('hr_shift_attendance')
       .delete()
       .eq('shift_date', request.shift_date)
       .eq('shift_period', request.shift_period)
       .eq('shift_slot_key', request.shift_slot_key)
       .eq('employee_s_number', request.from_employee_s_number);
 
-    await supabase.from('shift_attendance').upsert(
+    await supabase.from('hr_shift_attendance').upsert(
       {
         shift_date: request.shift_date,
         shift_period: request.shift_period,
@@ -438,7 +438,7 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
     );
 
     const { data: updated, error: updateError } = await supabase
-      .from('shift_change_requests')
+      .from('hr_shift_change_requests')
       .update({
         status: 'approved',
         reviewed_by: 'open_access',
@@ -456,7 +456,7 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
       supabase,
       {
         action: 'shift_exchange_approved',
-        tableName: 'shift_change_requests',
+        tableName: 'hr_shift_change_requests',
         recordId: request.id,
         oldValue: request,
         newValue: updated,
@@ -501,7 +501,7 @@ export async function denyShiftExchange(requestId: string): Promise<Result<Shift
 
     const supabase = createServerClient();
     const { data: existing, error: existingError } = await supabase
-      .from('shift_change_requests')
+      .from('hr_shift_change_requests')
       .select('*')
       .eq('id', requestId)
       .single();
@@ -511,7 +511,7 @@ export async function denyShiftExchange(requestId: string): Promise<Result<Shift
     }
 
     const { data, error } = await supabase
-      .from('shift_change_requests')
+      .from('hr_shift_change_requests')
       .update({
         status: 'denied',
         reviewed_by: 'open_access',
@@ -529,7 +529,7 @@ export async function denyShiftExchange(requestId: string): Promise<Result<Shift
       supabase,
       {
         action: 'shift_exchange_denied',
-        tableName: 'shift_change_requests',
+        tableName: 'hr_shift_change_requests',
         recordId: requestId,
         oldValue: existing,
         newValue: data,
@@ -586,7 +586,7 @@ export async function getShiftExchangeRequests(
     const effectiveLimit = parsed.data.limit ?? 50;
 
     let query = supabase
-      .from('shift_change_requests')
+      .from('hr_shift_change_requests')
       .select('*')
       .order('requested_at', { ascending: false })
       .order('id', { ascending: false })

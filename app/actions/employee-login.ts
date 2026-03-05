@@ -63,13 +63,13 @@ export async function updateEmployeeLoginCredentials(
     }
 
     const { data: existing } = await supabase
-      .from('employee_login_credentials')
+      .from('hr_employee_login_credentials')
       .select('employee_id, username, password_updated_at')
       .eq('employee_id', parsed.data.employee_id)
       .maybeSingle();
 
     const { data, error } = await supabase
-      .from('employee_login_credentials')
+      .from('hr_employee_login_credentials')
       .upsert(
         {
           employee_id: parsed.data.employee_id,
@@ -96,7 +96,7 @@ export async function updateEmployeeLoginCredentials(
       supabase,
       {
         action: 'employee_login_credentials_updated',
-        tableName: 'employee_login_credentials',
+        tableName: 'hr_employee_login_credentials',
         recordId: String(parsed.data.employee_id),
         oldValue: existing ?? null,
         newValue: {
@@ -140,7 +140,7 @@ export async function getEmployeeLoginProfiles(): Promise<Result<EmployeeLoginPr
 
     const supabase = createServerClient();
     const { data, error } = await supabase
-      .from('employee_login_credentials')
+      .from('hr_employee_login_credentials')
       .select('employee_id, username, password_updated_at')
       .order('username', { ascending: true });
 

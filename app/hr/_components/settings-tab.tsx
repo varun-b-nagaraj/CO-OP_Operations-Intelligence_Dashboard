@@ -42,7 +42,7 @@ export function SettingsTab() {
   const settingsQuery = useQuery({
     queryKey: ['hr-settings-all'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('employee_settings').select('*');
+      const { data, error } = await supabase.from('hr_employee_settings').select('*');
       if (error) throw new Error(error.message);
       return data ?? [];
     }

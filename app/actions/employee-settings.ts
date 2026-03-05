@@ -54,13 +54,13 @@ export async function updateEmployeeOffPeriods(
     }
 
     const { data: existing } = await supabase
-      .from('employee_settings')
+      .from('hr_employee_settings')
       .select('*')
       .eq('employee_id', employeeId)
       .maybeSingle();
 
     const { data, error } = await supabase
-      .from('employee_settings')
+      .from('hr_employee_settings')
       .upsert(
         {
           employee_id: parsed.data.employee_id,
@@ -82,7 +82,7 @@ export async function updateEmployeeOffPeriods(
       supabase,
       {
         action: 'employee_off_periods_updated',
-        tableName: 'employee_settings',
+        tableName: 'hr_employee_settings',
         recordId: data.id,
         oldValue: existing ?? null,
         newValue: data,
@@ -113,7 +113,7 @@ export async function getEmployeeSettings(employeeId: string): Promise<Result<Em
   try {
     const supabase = createServerClient();
     const { data, error } = await supabase
-      .from('employee_settings')
+      .from('hr_employee_settings')
       .select('*')
       .eq('employee_id', employeeId)
       .maybeSingle();
@@ -129,7 +129,7 @@ export async function getEmployeeSettings(employeeId: string): Promise<Result<Em
       }
 
       const { data: created, error: createError } = await supabase
-        .from('employee_settings')
+        .from('hr_employee_settings')
         .insert({
           employee_id: employeeId,
           employee_s_number: student.s_number,
@@ -170,7 +170,7 @@ export async function getAllEmployeeSettings(): Promise<Result<EmployeeSettings[
 
   try {
     const supabase = createServerClient();
-    const { data, error } = await supabase.from('employee_settings').select('*');
+    const { data, error } = await supabase.from('hr_employee_settings').select('*');
     if (error) {
       return errorResult(correlationId, 'DB_ERROR', error.message);
     }

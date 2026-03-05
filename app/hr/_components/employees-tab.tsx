@@ -302,7 +302,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
   const strikesQuery = useQuery({
     queryKey: ['hr-strikes-all'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('strikes').select('*');
+      const { data, error } = await supabase.from('hr_strikes').select('*');
       if (error) throw new Error(error.message);
       return (data ?? []) as GenericRow[];
     }
@@ -312,7 +312,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
     queryKey: ['hr-shift-attendance-for-employees', range],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('shift_attendance')
+        .from('hr_shift_attendance')
         .select('*')
         .gte('shift_date', range.from)
         .lte('shift_date', range.to);
@@ -324,7 +324,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
   const pointsQuery = useQuery({
     queryKey: ['hr-points-ledger'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('points_ledger').select('*');
+      const { data, error } = await supabase.from('hr_points_ledger').select('*');
       if (error) throw new Error(error.message);
       return (data ?? []) as GenericRow[];
     }
@@ -333,7 +333,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
   const settingsQuery = useQuery({
     queryKey: ['hr-settings-employee-overview'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('employee_settings').select('*');
+      const { data, error } = await supabase.from('hr_employee_settings').select('*');
       if (error) throw new Error(error.message);
       return (data ?? []) as GenericRow[];
     }
@@ -343,7 +343,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
     queryKey: ['hr-meeting-overrides', range],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('attendance_overrides')
+        .from('hr_attendance_overrides')
         .select('*')
         .eq('scope', 'meeting')
         .gte('checkin_date', range.from)
@@ -357,7 +357,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
     queryKey: ['hr-shift-overrides', range],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('attendance_overrides')
+        .from('hr_attendance_overrides')
         .select('*')
         .eq('scope', 'shift')
         .gte('checkin_date', range.from)
@@ -509,22 +509,22 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
 
       if (previousSNumber && normalizedSNumber && previousSNumber !== normalizedSNumber) {
         await supabase
-          .from('employee_settings')
+          .from('hr_employee_settings')
           .update({ employee_s_number: normalizedSNumber })
           .eq('employee_id', employeeId);
-        await supabase.from('shift_attendance').update({ employee_s_number: normalizedSNumber }).eq(
+        await supabase.from('hr_shift_attendance').update({ employee_s_number: normalizedSNumber }).eq(
           'employee_s_number',
           previousSNumber
         );
-        await supabase.from('attendance_overrides').update({ s_number: normalizedSNumber }).eq(
+        await supabase.from('hr_attendance_overrides').update({ s_number: normalizedSNumber }).eq(
           's_number',
           previousSNumber
         );
-        await supabase.from('shift_change_requests').update({ from_employee_s_number: normalizedSNumber }).eq(
+        await supabase.from('hr_shift_change_requests').update({ from_employee_s_number: normalizedSNumber }).eq(
           'from_employee_s_number',
           previousSNumber
         );
-        await supabase.from('shift_change_requests').update({ to_employee_s_number: normalizedSNumber }).eq(
+        await supabase.from('hr_shift_change_requests').update({ to_employee_s_number: normalizedSNumber }).eq(
           'to_employee_s_number',
           previousSNumber
         );
@@ -569,7 +569,7 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
       const employeeId = getStudentId(insertedRow);
       const employeeSNumber = getStudentSNumber(insertedRow) || normalizedSNumber;
       if (employeeId && employeeSNumber) {
-        await supabase.from('employee_settings').upsert(
+        await supabase.from('hr_employee_settings').upsert(
           {
             employee_id: employeeId,
             employee_s_number: employeeSNumber,
@@ -605,15 +605,15 @@ export function EmployeesTab(props: { dateRange: { from: string; to: string }; o
       }
       const employeeSNumber = getStudentSNumber(sourceRow);
 
-      await supabase.from('employee_login_credentials').delete().eq('employee_id', employeeId);
-      await supabase.from('employee_settings').delete().eq('employee_id', employeeId);
-      await supabase.from('strikes').delete().eq('employee_id', employeeId);
-      await supabase.from('points_ledger').delete().eq('employee_id', employeeId);
+      await supabase.from('hr_employee_login_credentials').delete().eq('employee_id', employeeId);
+      await supabase.from('hr_employee_settings').delete().eq('employee_id', employeeId);
+      await supabase.from('hr_strikes').delete().eq('employee_id', employeeId);
+      await supabase.from('hr_points_ledger').delete().eq('employee_id', employeeId);
       if (employeeSNumber) {
-        await supabase.from('shift_attendance').delete().eq('employee_s_number', employeeSNumber);
-        await supabase.from('attendance_overrides').delete().eq('s_number', employeeSNumber);
-        await supabase.from('shift_change_requests').delete().eq('from_employee_s_number', employeeSNumber);
-        await supabase.from('shift_change_requests').delete().eq('to_employee_s_number', employeeSNumber);
+        await supabase.from('hr_shift_attendance').delete().eq('employee_s_number', employeeSNumber);
+        await supabase.from('hr_attendance_overrides').delete().eq('s_number', employeeSNumber);
+        await supabase.from('hr_shift_change_requests').delete().eq('from_employee_s_number', employeeSNumber);
+        await supabase.from('hr_shift_change_requests').delete().eq('to_employee_s_number', employeeSNumber);
       }
 
       const { error: deleteError } = await supabase.from('students').delete().eq('id', employeeId);

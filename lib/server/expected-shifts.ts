@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 
+import { resolvePreferredTable } from '@/lib/server/common';
 import { applyApprovedShiftExchanges, monthWindow } from '@/lib/server/schedule';
 import { errorResult, Result, ShiftChangeRequest, successResult } from '@/lib/types';
 import { fetchScheduleWithCache } from './external-apis';
@@ -29,9 +30,15 @@ export async function monthHasShiftAttendance(
   year: number,
   month: number
 ): Promise<boolean> {
+  const shiftAttendanceTable = await resolvePreferredTable(
+    supabase,
+    'hr_shift_attendance',
+    'shift_attendance',
+    'id'
+  );
   const window = monthWindow(year, month);
   const { count } = await supabase
-    .from('shift_attendance')
+    .from(shiftAttendanceTable)
     .select('id', { count: 'exact', head: true })
     .gte('shift_date', window.from)
     .lte('shift_date', window.to);
@@ -41,7 +48,7 @@ export async function monthHasShiftAttendance(
 
 async function syncAttendanceTable(
   supabase: SupabaseClient,
-  tableName: 'shift_attendance' | 'morning_shift_attendance' | 'off_period_shift_attendance',
+  tableName: string,
   assignments: ScheduleAssignment[],
   window: { from: string; to: string },
   forceRebuild: boolean
@@ -187,8 +194,39 @@ export async function buildExpectedShiftsInternal(
     );
 
     const window = monthWindow(params.year, params.month);
+    const shiftChangeRequestTable = await resolvePreferredTable(
+      supabase,
+      'hr_shift_change_requests',
+      'shift_change_requests',
+      'id'
+    );
+    const employeeSettingsTable = await resolvePreferredTable(
+      supabase,
+      'hr_employee_settings',
+      'employee_settings',
+      'employee_id'
+    );
+    const shiftAttendanceTable = await resolvePreferredTable(
+      supabase,
+      'hr_shift_attendance',
+      'shift_attendance',
+      'id'
+    );
+    const morningShiftAttendanceTable = await resolvePreferredTable(
+      supabase,
+      'hr_morning_shift_attendance',
+      'morning_shift_attendance',
+      'id'
+    );
+    const offPeriodShiftAttendanceTable = await resolvePreferredTable(
+      supabase,
+      'hr_off_period_shift_attendance',
+      'off_period_shift_attendance',
+      'id'
+    );
+
     const { data: approvedExchanges, error: exchangeError } = await supabase
-      .from('shift_change_requests')
+      .from(shiftChangeRequestTable)
       .select('*')
       .eq('status', 'approved')
       .gte('shift_date', window.from)
@@ -204,7 +242,7 @@ export async function buildExpectedShiftsInternal(
     );
 
     const { data: employeeSettings, error: settingsError } = await supabase
-      .from('employee_settings')
+      .from(employeeSettingsTable)
       .select('employee_s_number,off_periods');
 
     if (settingsError) {
@@ -232,7 +270,7 @@ export async function buildExpectedShiftsInternal(
 
     const regularResult = await syncAttendanceTable(
       supabase,
-      'shift_attendance',
+      shiftAttendanceTable,
       allAssignments,
       window,
       params.forceRebuild === true
@@ -243,7 +281,7 @@ export async function buildExpectedShiftsInternal(
 
     const morningResult = await syncAttendanceTable(
       supabase,
-      'morning_shift_attendance',
+      morningShiftAttendanceTable,
       morningAssignments,
       window,
       params.forceRebuild === true
@@ -254,7 +292,7 @@ export async function buildExpectedShiftsInternal(
 
     const offPeriodResult = await syncAttendanceTable(
       supabase,
-      'off_period_shift_attendance',
+      offPeriodShiftAttendanceTable,
       offPeriodAssignments,
       window,
       params.forceRebuild === true

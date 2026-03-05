@@ -80,7 +80,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
     }
   });
 
-  const attendanceTable = attendanceMode === 'morning' ? 'morning_shift_attendance' : 'off_period_shift_attendance';
+  const attendanceTable = attendanceMode === 'morning' ? 'hr_morning_shift_attendance' : 'hr_off_period_shift_attendance';
 
   const attendanceQuery = useQuery({
     queryKey: [
@@ -116,7 +116,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
     queryKey: ['hr-shift-attendance-overrides', range, employeeSNumber, periodFilter],
     queryFn: async () => {
       let query = supabase
-        .from('attendance_overrides')
+        .from('hr_attendance_overrides')
         .select('*')
         .eq('scope', 'shift')
         .gte('checkin_date', range.from)
@@ -135,7 +135,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
     queryKey: ['hr-shift-attendance-request-log', range, employeeSNumber, periodFilter],
     queryFn: async () => {
       let query = supabase
-        .from('shift_change_requests')
+        .from('hr_shift_change_requests')
         .select('*')
         .eq('request_source', 'employee_form')
         .eq('status', 'approved')

@@ -386,7 +386,7 @@ export function ScheduleTab() {
     queryKey: ['employee-settings-for-schedule'],
     staleTime: 30 * 1000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('employee_settings').select('employee_s_number, off_periods');
+      const { data, error } = await supabase.from('hr_employee_settings').select('employee_s_number, off_periods');
       if (error) throw new Error(error.message);
       return data ?? [];
     }
@@ -410,7 +410,7 @@ export function ScheduleTab() {
     staleTime: 60 * 1000,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('schedules')
+        .from('hr_schedules')
         .select('year, month, anchor_date, anchor_day, seed, generated_at')
         .order('generated_at', { ascending: false });
       if (error) throw new Error(error.message);
@@ -425,7 +425,7 @@ export function ScheduleTab() {
     staleTime: 60 * 1000,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('shift_attendance')
+        .from('hr_shift_attendance')
         .select('*')
         .gte('shift_date', selectedMonthRange.from)
         .lte('shift_date', selectedMonthRange.to);
@@ -573,7 +573,7 @@ export function ScheduleTab() {
             throw new Error('shiftSlotKey and previousEmployeeSNumber are required when reassigning a manual slot');
           }
           const { error: deleteError } = await supabase
-            .from('shift_attendance')
+            .from('hr_shift_attendance')
             .delete()
             .eq('shift_date', payload.date)
             .eq('shift_period', payload.period)
@@ -588,7 +588,7 @@ export function ScheduleTab() {
           payload.employeeSNumber,
           payload.asAlternate === true
         );
-        const { error } = await supabase.from('shift_attendance').upsert(
+        const { error } = await supabase.from('hr_shift_attendance').upsert(
           {
             shift_date: payload.date,
             shift_period: payload.period,
@@ -612,7 +612,7 @@ export function ScheduleTab() {
       if (!payload.shiftSlotKey) throw new Error('shiftSlotKey is required when removing a manual slot');
 
       const { error } = await supabase
-        .from('shift_attendance')
+        .from('hr_shift_attendance')
         .delete()
         .eq('shift_date', payload.date)
         .eq('shift_period', payload.period)
@@ -1373,7 +1373,7 @@ export function ScheduleTab() {
             edit.employeeSNumber,
             edit.asAlternate
           );
-          const { error } = await supabase.from('shift_attendance').upsert(
+          const { error } = await supabase.from('hr_shift_attendance').upsert(
             {
               shift_date: edit.date,
               shift_period: edit.period,
@@ -1396,7 +1396,7 @@ export function ScheduleTab() {
         }
 
         const { error } = await supabase
-          .from('shift_attendance')
+          .from('hr_shift_attendance')
           .delete()
           .eq('shift_date', edit.date)
           .eq('shift_period', edit.period)

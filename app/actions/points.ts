@@ -55,7 +55,7 @@ export async function awardPoints(
     }
 
     const { data, error } = await supabase
-      .from('points_ledger')
+      .from('hr_points_ledger')
       .insert({
         employee_id: parsed.data.employee_id,
         point_type: parsed.data.point_type,
@@ -74,7 +74,7 @@ export async function awardPoints(
       supabase,
       {
         action: 'points_awarded',
-        tableName: 'points_ledger',
+        tableName: 'hr_points_ledger',
         recordId: data.id,
         oldValue: null,
         newValue: data,
@@ -106,7 +106,7 @@ export async function getPointsBreakdown(employeeId: string): Promise<Result<Poi
   try {
     const supabase = createServerClient();
     const { data, error } = await supabase
-      .from('points_ledger')
+      .from('hr_points_ledger')
       .select('*')
       .eq('employee_id', employeeId);
 

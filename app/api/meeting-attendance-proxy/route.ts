@@ -167,7 +167,7 @@ export async function GET(request: NextRequest) {
             s_number: student.s_number
           }));
 
-    let overridesQuery = supabase.from('attendance_overrides').select('*').eq('scope', 'meeting');
+    let overridesQuery = supabase.from('hr_attendance_overrides').select('*').eq('scope', 'meeting');
     if (from) overridesQuery = overridesQuery.gte('checkin_date', from);
     if (to) overridesQuery = overridesQuery.lte('checkin_date', to);
     const { data: overrides, error: overrideError } = await overridesQuery;
@@ -181,7 +181,7 @@ export async function GET(request: NextRequest) {
       apiStatusByKey.set(`${record.s_number}|${record.date}`, record.status);
     }
 
-    let existingQuery = supabase.from('meeting_attendance_records').select('*');
+    let existingQuery = supabase.from('hr_meeting_attendance_records').select('*');
     if (from) existingQuery = existingQuery.gte('checkin_date', from);
     if (to) existingQuery = existingQuery.lte('checkin_date', to);
     if (roster.length > 0) {
@@ -231,7 +231,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (rowsToUpsert.length > 0) {
-      const { error: upsertError } = await supabase.from('meeting_attendance_records').upsert(rowsToUpsert, {
+      const { error: upsertError } = await supabase.from('hr_meeting_attendance_records').upsert(rowsToUpsert, {
         onConflict: 's_number,checkin_date'
       });
       if (upsertError) {
@@ -240,7 +240,7 @@ export async function GET(request: NextRequest) {
     }
 
     let mergedRowsQuery = supabase
-      .from('meeting_attendance_records')
+      .from('hr_meeting_attendance_records')
       .select('s_number, checkin_date, effective_status');
     if (from) mergedRowsQuery = mergedRowsQuery.gte('checkin_date', from);
     if (to) mergedRowsQuery = mergedRowsQuery.lte('checkin_date', to);
@@ -277,15 +277,18 @@ export async function GET(request: NextRequest) {
 
     return jsonResult(successResult(response, correlationId), 200);
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     logError('meeting_proxy_failed', {
       correlationId,
-      error: error instanceof Error ? error.message : String(error)
+      error: errorMessage
     });
     return jsonResult(
       errorResult(
         correlationId,
         'EXTERNAL_API_ERROR',
-        'Unable to fetch meeting attendance data. Please try again.'
+        process.env.NODE_ENV === 'development'
+          ? `Unable to fetch meeting attendance data: ${errorMessage}`
+          : 'Unable to fetch meeting attendance data. Please try again.'
       ),
       500
     );

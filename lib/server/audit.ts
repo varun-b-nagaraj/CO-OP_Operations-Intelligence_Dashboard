@@ -16,7 +16,7 @@ export async function insertAuditEntry(
   },
   correlationId: string
 ): Promise<void> {
-  const { error } = await supabase.from('audit_log').insert({
+  const { error } = await supabase.from('hr_audit_log').insert({
     user_id: input.userId ?? DEFAULT_USER_ID,
     action: input.action,
     table_name: input.tableName,

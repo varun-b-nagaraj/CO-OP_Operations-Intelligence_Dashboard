@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 import { errorResult, generateCorrelationId, Result } from '@/lib/types';
 
@@ -12,6 +13,39 @@ export function logInfo(message: string, details: Record<string, unknown>): void
 
 export function logError(message: string, details: Record<string, unknown>): void {
   console.error(JSON.stringify({ level: 'error', message, ...details }));
+}
+
+function isMissingRelationError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybeError = error as { code?: string; message?: string };
+  return maybeError.code === '42P01' || /does not exist/i.test(maybeError.message ?? '');
+}
+
+export async function resolvePreferredTable(
+  supabase: SupabaseClient,
+  preferredTable: string,
+  fallbackTable: string,
+  probeColumn = 'id'
+): Promise<string> {
+  const preferredProbe = await supabase
+    .from(preferredTable)
+    .select(probeColumn, { head: true, count: 'exact' })
+    .limit(1);
+  if (!preferredProbe.error) {
+    return preferredTable;
+  }
+  if (!isMissingRelationError(preferredProbe.error)) {
+    throw new Error(preferredProbe.error.message);
+  }
+
+  const fallbackProbe = await supabase
+    .from(fallbackTable)
+    .select(probeColumn, { head: true, count: 'exact' })
+    .limit(1);
+  if (!fallbackProbe.error) {
+    return fallbackTable;
+  }
+  throw new Error(fallbackProbe.error.message);
 }
 
 export function jsonResult<T>(result: Result<T>, status = 200): NextResponse<Result<T>> {
