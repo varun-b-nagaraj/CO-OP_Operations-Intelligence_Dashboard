@@ -85,6 +85,17 @@ export function RequestsTab() {
     }
   });
 
+  const settingsQuery = useQuery({
+    queryKey: ['hr-requests-employee-settings'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('hr_employee_settings')
+        .select('employee_s_number, off_periods');
+      if (error) throw new Error(error.message);
+      return (data ?? []) as Array<{ employee_s_number: string; off_periods: number[] | null }>;
+    }
+  });
+
   const selectedYearMonth = useMemo(() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedShiftDate ?? '')) return null;
     return {
@@ -180,6 +191,20 @@ export function RequestsTab() {
     return map;
   }, [studentsQuery.data]);
 
+  const offPeriodsBySNumber = useMemo(() => {
+    const map = new Map<string, number[]>();
+    for (const row of settingsQuery.data ?? []) {
+      const sNumber = String(row.employee_s_number ?? '').trim();
+      if (!sNumber) continue;
+      const offPeriods =
+        Array.isArray(row.off_periods) && row.off_periods.length > 0
+          ? row.off_periods.filter((value) => Number.isInteger(value) && value >= 1 && value <= 8)
+          : [4, 8];
+      map.set(sNumber, offPeriods);
+    }
+    return map;
+  }, [settingsQuery.data]);
+
   const scheduleAssignmentsForSelection = useMemo(() => {
     const allRows = scheduleMonthQuery.data?.schedule ?? [];
     return allRows.filter(
@@ -223,19 +248,12 @@ export function RequestsTab() {
 
   const eligibleToOptions = useMemo(() => {
     const options: Array<{ value: string; label: string }> = [];
-    const acceptableClassPeriods = new Set<number>([selectedShiftPeriod]);
-    if (selectedShiftPeriod >= 1 && selectedShiftPeriod <= 4) {
-      acceptableClassPeriods.add(selectedShiftPeriod + 4);
-    }
-    if (selectedShiftPeriod >= 5 && selectedShiftPeriod <= 8) {
-      acceptableClassPeriods.add(selectedShiftPeriod - 4);
-    }
 
     const canWorkSelectedPeriod = (sNumber: string): boolean => {
       const eligibility = studentEligibilityBySNumber.get(sNumber);
       if (!eligibility || !eligibility.scheduleable) return false;
-      if (eligibility.classPeriod === null) return false;
-      return acceptableClassPeriods.has(eligibility.classPeriod);
+      const offPeriods = offPeriodsBySNumber.get(sNumber) ?? [4, 8];
+      return eligibility.classPeriod === selectedShiftPeriod || offPeriods.includes(selectedShiftPeriod);
     };
 
     for (const student of studentsQuery.data ?? []) {
@@ -252,6 +270,7 @@ export function RequestsTab() {
     options.sort((left, right) => left.label.localeCompare(right.label));
     return options;
   }, [
+    offPeriodsBySNumber,
     selectedFromSNumber,
     selectedShiftPeriod,
     studentEligibilityBySNumber,
