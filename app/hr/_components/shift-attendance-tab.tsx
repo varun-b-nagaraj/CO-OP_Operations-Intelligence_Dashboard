@@ -15,6 +15,21 @@ import {
   useBrowserSupabase
 } from './utils';
 
+function listMonthsInRange(from: string, to: string): Array<{ year: number; month: number }> {
+  const months: Array<{ year: number; month: number }> = [];
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return months;
+
+  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  const endMonth = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+  while (cursor <= endMonth) {
+    months.push({ year: cursor.getUTCFullYear(), month: cursor.getUTCMonth() + 1 });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return months;
+}
+
 export function ShiftAttendanceTab(props: { dateRange: { from: string; to: string } }) {
   const canView = usePermission('hr.attendance.view');
   const canOverride = usePermission('hr.attendance.override');
@@ -23,12 +38,65 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
   const [periodFilter, setPeriodFilter] = useState('');
   const [attendanceMode, setAttendanceMode] = useState<'morning' | 'off_period'>('morning');
   const range = props.dateRange;
+  const monthsInRange = useMemo(() => listMonthsInRange(range.from, range.to), [range.from, range.to]);
+
+  const syncScheduleQuery = useQuery({
+    queryKey: ['hr-shift-attendance-sync', monthsInRange],
+    queryFn: async () => {
+      await Promise.all(
+        monthsInRange.map(async ({ year, month }) => {
+          const params = new URLSearchParams({
+            year: String(year),
+            month: String(month)
+          });
+          const response = await fetch(`/api/schedule-proxy?${params.toString()}`, { method: 'GET' });
+          if (!response.ok) {
+            throw new Error(`Failed to sync schedule for ${year}-${String(month).padStart(2, '0')}`);
+          }
+        })
+      );
+      return true;
+    }
+  });
+
+  const forceRebuildSplitQuery = useQuery({
+    queryKey: ['hr-shift-attendance-force-rebuild', monthsInRange, attendanceMode, syncScheduleQuery.data],
+    enabled: syncScheduleQuery.isSuccess,
+    queryFn: async () => {
+      await Promise.all(
+        monthsInRange.map(async ({ year, month }) => {
+          const params = new URLSearchParams({
+            year: String(year),
+            month: String(month),
+            forceRebuildExpectedShifts: '1'
+          });
+          const response = await fetch(`/api/schedule-proxy?${params.toString()}`, { method: 'GET' });
+          if (!response.ok) {
+            throw new Error(`Failed to rebuild schedule for ${year}-${String(month).padStart(2, '0')}`);
+          }
+        })
+      );
+      return true;
+    }
+  });
+
+  const attendanceTable = attendanceMode === 'morning' ? 'morning_shift_attendance' : 'off_period_shift_attendance';
 
   const attendanceQuery = useQuery({
-    queryKey: ['hr-shift-attendance', range, employeeSNumber, periodFilter, canOverride],
+    queryKey: [
+      'hr-shift-attendance',
+      attendanceTable,
+      range,
+      employeeSNumber,
+      periodFilter,
+      canOverride,
+      syncScheduleQuery.data,
+      forceRebuildSplitQuery.data
+    ],
+    enabled: syncScheduleQuery.isSuccess && forceRebuildSplitQuery.isSuccess,
     queryFn: async () => {
       let query = supabase
-        .from('shift_attendance')
+        .from(attendanceTable)
         .select('*')
         .gte('shift_date', range.from)
         .lte('shift_date', range.to)
@@ -97,32 +165,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
     }
   });
 
-  const settingsQuery = useQuery({
-    queryKey: ['hr-shift-attendance-settings'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('employee_settings').select('employee_s_number,off_periods');
-      if (error) throw new Error(error.message);
-      return (data ?? []) as Array<{ employee_s_number: string; off_periods: number[] | null }>;
-    }
-  });
-
   const byEmployee = useMemo(() => {
-    const offPeriodsBySNumber = new Map<string, number[]>();
-    for (const row of settingsQuery.data ?? []) {
-      const sNumber = String(row.employee_s_number ?? '').trim();
-      if (!sNumber) continue;
-      offPeriodsBySNumber.set(
-        sNumber,
-        Array.isArray(row.off_periods) && row.off_periods.length > 0 ? row.off_periods : [4, 8]
-      );
-    }
-
-    const isEligibleForMode = (sNumber: string, shiftPeriod: number): boolean => {
-      if (attendanceMode === 'morning') return shiftPeriod === 0;
-      const offPeriods = offPeriodsBySNumber.get(sNumber) ?? [4, 8];
-      return offPeriods.includes(shiftPeriod);
-    };
-
     const shiftOverridesBySNumber = new Map<string, AttendanceOverride[]>();
     for (const row of shiftOverridesQuery.data ?? []) {
       const sNumber = String(row.s_number ?? '');
@@ -135,8 +178,6 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
     const map = new Map<string, Array<Record<string, unknown>>>();
     for (const row of attendanceQuery.data ?? []) {
       const key = row.employee_s_number as string;
-      const shiftPeriod = Number(row.shift_period ?? -1);
-      if (!isEligibleForMode(key, shiftPeriod)) continue;
       const bucket = map.get(key) ?? [];
       bucket.push(row);
       map.set(key, bucket);
@@ -172,10 +213,26 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
         shiftRate: rates.adjusted_rate ?? rates.raw_rate
       };
     }).sort((left, right) => left.name.localeCompare(right.name));
-  }, [attendanceMode, attendanceQuery.data, settingsQuery.data, shiftOverridesQuery.data, studentsQuery.data]);
+  }, [attendanceQuery.data, shiftOverridesQuery.data, studentsQuery.data]);
 
   if (!canView) {
     return <p className="text-sm text-neutral-700">You do not have permission to view shift attendance.</p>;
+  }
+
+  if (syncScheduleQuery.isPending) {
+    return <p className="text-sm text-neutral-700">Syncing schedule attendance rows...</p>;
+  }
+
+  if (syncScheduleQuery.isError) {
+    return <p className="text-sm text-red-700">Unable to sync shifts for this date range.</p>;
+  }
+
+  if (forceRebuildSplitQuery.isPending) {
+    return <p className="text-sm text-neutral-700">Rebuilding shift attendance tables...</p>;
+  }
+
+  if (forceRebuildSplitQuery.isError) {
+    return <p className="text-sm text-red-700">Unable to rebuild split shift attendance tables.</p>;
   }
 
   return (

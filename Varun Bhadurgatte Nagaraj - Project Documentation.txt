@@ -33,6 +33,21 @@ Since we support almost a 100 members within the organization, we cannot give ac
 
 Hosting & Deployment:
 The website will be deployed and hosted on Vercel which is unblocked on school Wi-Fi and the code will have control on GitHub. If the project becomes more successful then we can have district hosting as well in the future. The code documentation will also be hosted on GitHub so after graduation new members can still understand and modify code if necessary.
+General Employee
+General Employee Dashboard
+
+
+I brainstormed some features/access that general employees will need access to and have listed them below. 
+
+
+Scheduling/HR:
+They will be able to see the days they have been scheduled either on calendar view or on list view. They will also be able to tell if they are an alternate and everyone else working with them. They will have access to the shift exchange form but cannot approve their own shifts, they have to get it approved by HR. Copy this logic from the existing HR dashboard logic so that it asks for reasoning and everything, use the same DB schema as well.
+
+
+Accountability:
+To keep members accountable they will be able to view their off-period shift attendance, their strikes, the amount of warning they have, morning shift attendance, and meeting attendance.
+* Shift Attendance: We can track their morning and off-period shift attendance to gain a universal overview of how many shifts each employee has worked, how many off-period shifts they have worked and they can see a percentage value of their attendance.
+* Strikes/Warnings: 
 Executive Dashboard
 Executive Dashboard
 
@@ -184,6 +199,575 @@ Example API Response:
   ]
 }
 
+Chick-fil-A
+Chick-fil-A Dashboard
+
+
+I worked with Anishka Vasanthu on different Chick-fil-A operations I would need to include. Some basic features would include order quantity, left-over quantity, request quantity(how many people asked for CFA after it sold out), the amount of sales generated from Chick-fil-A as well as revenue generated to estimate net-profit/loss.
+
+
+Initial Menu of Products:
+CFA Strip Sliders: Buy for 2.45 and sell for 4.00
+CFA Half Grilled Cool Wrap: Buy for 3:49 and sell for 5:00
+
+
+UI (for approved roles only):
+Inventory -> Chick-fil-A -> Menu
+Actions Allowed:
+* View items (all users with CFA access)
+* Edit buy cost / sell price (approved roles)
+* Add new item (approved roles)
+* Disable/remove item (approved roles)
+Fields (per CFA item):
+* itemId (string, unique)
+* name (string)
+* buyCostCents (int)
+* sellPriceCents (int)
+* active (boolean)
+
+
+Daily Selling Log (form)
+Meta:
+* date (YYYY-MM-DD)
+* dayType (A or B) (auto-detected, but editable with permission)
+* period (A→2, B→6) (auto)
+Per item (for each active CFA item):
+* receivedQty (int) — how many you start with
+* leftoverQty (int) — how many remain at end
+* missedDemandQty (int) — # people who asked after sell-out (0 if none)
+
+
+Auto-calculations (computed on save)
+
+
+For each item:
+* soldQty = receivedQty - leftoverQty
+* trueDemandQty = soldQty + missedDemandQty
+* revenueCents = soldQty * sellPriceCents
+* cogsCents = soldQty * buyCostCents
+* profitCents = revenueCents - cogsCents
+* marginPct = profitCents / revenueCents (if revenueCents > 0)
+Daily totals:
+* totalRevenueCents = Σ(revenueCents)
+* totalCogsCents = Σ(cogsCents)
+* totalProfitCents = Σ(profitCents)
+* stockoutFlag = (missedDemandQty > 0 for any item)
+
+
+History + Analytics Views: 
+
+
+1) Day-by-day history
+
+
+Shows each date with:
+* dayType, period
+* soldQty, missedDemandQty, trueDemandQty per item
+* totalRevenue, totalProfit
+Filters:
+* Date range
+* A vs B vs All
+* Item
+Export: CSV export for regression / reporting
+
+
+2) A-day vs B-day comparison
+
+
+Charts + tables:
+* Avg soldQty per item on A vs B
+* Avg trueDemandQty per item on A vs B
+* Stockout frequency on A vs B
+* Profit/day on A vs B
+
+
+3) Forecasting (regression-ready)
+
+
+Goal: predict trueDemandQty separately for A and B.
+
+
+Model plan: Since sales change based on day, there will be different predictive models for A-day and B-day.
+* A-day model per item
+* B-day model per item
+
+
+Features stored/derived (minimum):
+* dayType (A/B)
+* weekday
+* month
+* trueDemandQty (target)
+* rolling averages (e.g., last 3 same-dayType sales)
+
+
+Output:
+* Recommended stock quantity for next A-day / next B-day
+* Expected profit estimate using menu prices/costs
+
+
+Permissions / Roles (required)
+CFA Staff: submit Daily Log, view history
+CFA Admin / Exec / Finance: edit menu items (cost/price), edit dayType override, export data
+
+
+Notes (important):
+The system doesn’t use lightspeed sales data but rather tracks it independently using form inputs.
+Inventory
+Inventory Dashboard
+
+
+I worked with Akshainie on different Inventory operations I would need to include. Some basic features would include inventory count tracking, checking to see if inventory counts match previous volumes, automatic uploads to Lightspeed Backend, inventory check attendance, and others.
+
+
+Current inventory will be made available first through a database upload and then can be manually edited via the application or a new spreadsheet can also be uploaded. I have attached database SQL below:
+
+
+
+create table public."Inventory" (
+  "System ID" bigint null,
+  "UPC" bigint null,
+  "EAN" text null,
+  "Custom SKU" text null,
+  "Manufact. SKU" text null,
+  "Item" text null,
+  "Vendor ID" text null,
+  "Qty." text null,
+  "Price" text null,
+  "Tax" text null,
+  "Brand" text null,
+  "Publish to eCom" text null,
+  "Season" text null,
+  "Department" text null,
+  "MSRP" text null,
+  "Tax Class" text null,
+  "Default Cost" double precision null,
+  "Vendor" text null,
+  "Category" text null,
+  "Subcategory 1" text null,
+  "Subcategory 2" text null,
+  "Subcategory 3" text null,
+  "Subcategory 4" text null,
+  "Subcategory 5" text null,
+  "Subcategory 6" text null,
+  "Subcategory 7" text null,
+  "Subcategory 8" text null,
+  "Subcategory 9" text null
+) TABLESPACE pg_default;
+
+
+
+
+
+Automatic Inventory Counter:
+After taking the information from the database to create an iOS-only offline inventory sync system using Multipeer Connectivity (Bluetooth + peer-to-peer Wi-Fi transport) where a privileged host advertises a session with a short join code, accepts authenticated peers, and maintains authoritative state while clients submit scan events (SKU/UPC deltas) that are deduplicated and broadcast for real-time consistency. When the session ends, peers disconnect and the host exports the finalized dataset (CSV/JSON) for upload.
+
+
+Automatic Inventory Uploads:
+
+
+The website will allow us to automatically upload inventory counts to lightspeed backend and it also zeros out any items that weren’t counted. This is a 2 step process.
+
+
+1) Inventory Upload API URL: https://inventory-upload.vercel.app
+Endpoint: /api/oauth/start
+Params: No Params
+
+
+Example API Request: 
+curl "https://inventory-upload.vercel.app/api/oauth/start"
+
+Example API Response:
+{"ok": true, "mode": "oauth_start", "authorize_url": "https://us.merchantos.com/oauth/authorize.php?response_type=code&client_id=b042210281ea8ea63ab361cbb0e7af0b0d163a0843c1f0b1fd56dbe2349d4fa4&redirect_uri=https%3A%2F%2Finventory-upload.vercel.app%2Fapi%2Foauth%2Fcallback&state=eyJ0cyI6MTc3MjM0MTEzNywibm9uY2UiOiJ3NEhZaDgzdGFDSnNZTTVyUzJBVHJnIiwicmVkaXJlY3RfdXJpIjoiaHR0cHM6Ly9pbnZlbnRvcnktdXBsb2FkLnZlcmNlbC5hcHAvYXBpL29hdXRoL2NhbGxiYWNrIn0.RiYrqBYAoTsEwm3ddBp7MKCjvl0dQQqQJ5Sn0RjQe7s&scope=employee%3Aall+systemuserid%3A1598238", "state": "eyJ0cyI6MTc3MjM0MTEzNywibm9uY2UiOiJ3NEhZaDgzdGFDSnNZTTVyUzJBVHJnIiwicmVkaXJlY3RfdXJpIjoiaHR0cHM6Ly9pbnZlbnRvcnktdXBsb2FkLnZlcmNlbC5hcHAvYXBpL29hdXRoL2NhbGxiYWNrIn0.RiYrqBYAoTsEwm3ddBp7MKCjvl0dQQqQJ5Sn0RjQe7s", "redirect_uri": "https://inventory-upload.vercel.app/api/oauth/callback", "scope": "employee:all systemuserid:1598238", "instructions": "Open authorize_url in browser. Complete Lightspeed login + 2FA. Lightspeed will redirect to oauth_callback with code."}
+
+2) Inventory Upload API URL: https://inventory-upload.vercel.app
+Endpoint: POST api/
+Params: 
+* count_name — string | default: API Inventory Upload <timestamp> | label for this upload batch
+* shop_id — string | default: "1" | Lightspeed shop ID
+* employee_id — string | default: "1" | Lightspeed employee ID
+* reconcile — boolean | default: true | whether to reconcile after count items are created
+* rps — number | range: 0.05–1.0 (capped at 1.0) | request pacing to avoid rate limit
+* items — array (required) | list of items to set count
+* items[].system_id — string (or systemSku/system_sku/sku) | Lightspeed System ID
+* items[].qty — integer (or quantity/count) | absolute target quantity (QOH)
+Example API Request: 
+curl -X POST "https://inventory-upload.vercel.app/api" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      { "system_id": "210000000624", "qty": 1 }
+    ],
+    "reconcile": true
+  }'
+
+Example API Response:
+{"ok": true, "inventory_count_id": "36", "inventory_count_name": "API Inventory Upload 2026-03-01 04:59:19", "shop_id": "1", "employee_id": "1", "request_rate_limit": {"configured_rps": 1.0, "min_interval_seconds": 1.0, "estimated_processing_seconds": 4}, "summary": {"total_rows": 1, "created": 1, "not_found": 0, "failed": 0, "invalid": 0}, "reconcile": {"attempted": true, "ok": true, "message": "OK", "response": {"@attributes": {"next": "", "previous": ""}, "InventoryCountReconcile": {"inventoryCountReconcileID": "142", "costChange": "0", "costChangeAvgCost": "0", "qohChange": "0", "createTime": "2026-03-01T04:59:22+00:00", "inventoryCountID": "36", "itemID": "0"}}}, "results": [{"row": 1, "system_id": "210000000624", "item_id": "617", "description": "test", "qty": 1, "status": "created", "inventory_count_item_id": "525"}]}
+
+Product
+Product Dashboard
+
+
+I worked with Arjun on different Product operations I would need to include. Some basic features would include product orders, order completion, product designs, a wish-list, and order scheduling based on inventory checks.
+
+
+Product Orders:
+There will be a section on the website where all new orders can be placed and the following information will be collected: Item, Qty, Price per Unit, Total price (calculated), Reason, Link, extra information(file uploads), if we have received the product or not(can be archived after this for potential access) etc etc. We can also list a requested pickup date (or as soon as possible). A date of when the order was placed.
+
+
+At the top include the requester name as Eric Chaverria, Activity account as Round Rock CO-OP (School Store) and the account number as 498-36-001-99-8468-6399. 
+
+
+Here is a list of registered vendors:
+* Coca-Cola
+* Sam’s Club
+* HEB
+* Amazon
+* Hobby Lobby
+* Home Depot
+* Target
+* Party City
+All of the above information can be edited via the UI as well as the database.
+
+
+Product Design:
+A different section of the website can exist where product designs for t-shirts, hoodies, merchandise, or miscellaneous can exist. A picture of the front, back, and other relevant information can be found and you can mark designs as higher priority or mark it for future order etc etc. The information calls are all stored here. A wish-list is also possible for all the new items we want to try to order.
+
+
+Order Prompting:
+After an inventory check is completed and uploaded but there are items which were ordered recently that are either 0 or low on stock (<5) then it will prompt you to place the order with all relevant information already accessible like link, provider, and everything else so you just click a button and the order is immediately added.
+Marketing
+Marketing Dashboard
+
+
+I worked with Rishi on different Marketing operations I would need to include. Some basic features would include a marketing calendar that will show previous events as well as new ones (a toggle to switch between all events and recent events), previous event information, notes on previous events, as well as extra event statistics with possible integration with Instagram to receive updates that way as well.
+
+
+Table SQL below:
+
+
+The SQL dictates how data is stored and modified.
+
+
+BEGIN;
+
+
+-- Extensions
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+
+-- updated_at trigger helper
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- =========================
+-- Core tables
+-- =========================
+
+
+CREATE TABLE IF NOT EXISTS public.marketing_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL CHECK (btrim(title) <> ''),
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'scheduled', 'completed', 'cancelled')),
+  category TEXT,
+  starts_at TIMESTAMPTZ NOT NULL,
+  ends_at TIMESTAMPTZ,
+  location TEXT,
+  description TEXT,
+  goals TEXT,
+  target_audience TEXT,
+  budget_planned NUMERIC(12,2) CHECK (budget_planned IS NULL OR budget_planned >= 0),
+  budget_actual NUMERIC(12,2) CHECK (budget_actual IS NULL OR budget_actual >= 0),
+  supplies_needed TEXT,
+  links JSONB NOT NULL DEFAULT '[]'::jsonb,
+  cover_asset_id UUID,
+  outcome_summary TEXT,
+  what_worked TEXT,
+  what_didnt TEXT,
+  recommendations TEXT,
+  estimated_interactions INTEGER CHECK (estimated_interactions IS NULL OR estimated_interactions >= 0),
+  units_sold INTEGER CHECK (units_sold IS NULL OR units_sold >= 0),
+  revenue_impact NUMERIC(12,2) CHECK (revenue_impact IS NULL OR revenue_impact >= 0),
+  engagement_notes TEXT,
+  cost_roi_notes TEXT,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (ends_at IS NULL OR ends_at >= starts_at)
+);
+
+
+CREATE TABLE IF NOT EXISTS public.external_contacts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization TEXT NOT NULL CHECK (btrim(organization) <> ''),
+  person_name TEXT NOT NULL CHECK (btrim(person_name) <> ''),
+  role_title TEXT,
+  email TEXT,
+  phone TEXT,
+  notes TEXT,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+CREATE TABLE IF NOT EXISTS public.event_contacts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES public.marketing_events(id) ON DELETE CASCADE,
+  contact_id UUID REFERENCES public.external_contacts(id) ON DELETE CASCADE,
+  is_internal BOOLEAN NOT NULL DEFAULT FALSE,
+  coordinator_name TEXT,
+  coordinator_role TEXT,
+  coordinator_contact TEXT,
+  coordinator_notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    (is_internal = TRUE AND btrim(coalesce(coordinator_name, '')) <> '')
+    OR
+    (is_internal = FALSE AND contact_id IS NOT NULL)
+  )
+);
+
+
+CREATE TABLE IF NOT EXISTS public.event_assets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES public.marketing_events(id) ON DELETE CASCADE,
+  bucket TEXT NOT NULL DEFAULT 'marketing-files',
+  storage_path TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  mime_type TEXT,
+  size_bytes BIGINT CHECK (size_bytes IS NULL OR size_bytes >= 0),
+  asset_type TEXT NOT NULL DEFAULT 'other'
+    CHECK (asset_type IN ('flyer', 'photo', 'mockup', 'schedule', 'other')),
+  caption TEXT,
+  is_cover BOOLEAN NOT NULL DEFAULT FALSE,
+  uploaded_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+CREATE TABLE IF NOT EXISTS public.event_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES public.marketing_events(id) ON DELETE CASCADE,
+  note TEXT NOT NULL CHECK (btrim(note) <> ''),
+  author TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+CREATE TABLE IF NOT EXISTS public.coordination_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES public.marketing_events(id) ON DELETE CASCADE,
+  contacted_party TEXT NOT NULL CHECK (btrim(contacted_party) <> ''),
+  method TEXT NOT NULL DEFAULT 'email'
+    CHECK (method IN ('email', 'call', 'in_person', 'text', 'other')),
+  summary TEXT NOT NULL CHECK (btrim(summary) <> ''),
+  next_steps TEXT,
+  next_steps_due_at DATE,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- =========================
+-- FKs / constraints that reference later tables
+-- =========================
+
+
+ALTER TABLE public.marketing_events
+  DROP CONSTRAINT IF EXISTS marketing_events_cover_asset_fkey;
+
+
+ALTER TABLE public.marketing_events
+  ADD CONSTRAINT marketing_events_cover_asset_fkey
+  FOREIGN KEY (cover_asset_id)
+  REFERENCES public.event_assets(id)
+  ON DELETE SET NULL;
+
+
+-- =========================
+-- Indexes
+-- =========================
+
+
+CREATE INDEX IF NOT EXISTS idx_marketing_events_starts_at
+  ON public.marketing_events(starts_at DESC);
+CREATE INDEX IF NOT EXISTS idx_marketing_events_status
+  ON public.marketing_events(status);
+CREATE INDEX IF NOT EXISTS idx_marketing_events_category
+  ON public.marketing_events(category);
+
+
+CREATE INDEX IF NOT EXISTS idx_external_contacts_organization
+  ON public.external_contacts(organization);
+CREATE INDEX IF NOT EXISTS idx_external_contacts_person_name
+  ON public.external_contacts(person_name);
+
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_contacts_unique_external
+  ON public.event_contacts(event_id, contact_id)
+  WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_event_contacts_event
+  ON public.event_contacts(event_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_event_assets_event
+  ON public.event_assets(event_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_assets_single_cover
+  ON public.event_assets(event_id)
+  WHERE is_cover = TRUE;
+
+
+CREATE INDEX IF NOT EXISTS idx_event_notes_event
+  ON public.event_notes(event_id, created_at DESC);
+
+
+CREATE INDEX IF NOT EXISTS idx_coordination_logs_event
+  ON public.coordination_logs(event_id, created_at DESC);
+
+
+-- =========================
+-- Triggers
+-- =========================
+
+
+DROP TRIGGER IF EXISTS update_marketing_events_updated_at ON public.marketing_events;
+CREATE TRIGGER update_marketing_events_updated_at
+BEFORE UPDATE ON public.marketing_events
+FOR EACH ROW
+EXECUTE FUNCTION public.update_updated_at_column();
+
+
+DROP TRIGGER IF EXISTS update_external_contacts_updated_at ON public.external_contacts;
+CREATE TRIGGER update_external_contacts_updated_at
+BEFORE UPDATE ON public.external_contacts
+FOR EACH ROW
+EXECUTE FUNCTION public.update_updated_at_column();
+
+
+-- =========================
+-- Storage bucket
+-- =========================
+
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('marketing-files', 'marketing-files', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+
+-- =========================
+-- RLS + policies (open-access v1)
+-- =========================
+
+
+ALTER TABLE public.marketing_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.external_contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.event_contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.event_assets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.event_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.coordination_logs ENABLE ROW LEVEL SECURITY;
+
+
+DROP POLICY IF EXISTS marketing_events_all ON public.marketing_events;
+CREATE POLICY marketing_events_all
+ON public.marketing_events
+FOR ALL TO public
+USING (TRUE) WITH CHECK (TRUE);
+
+
+DROP POLICY IF EXISTS external_contacts_all ON public.external_contacts;
+CREATE POLICY external_contacts_all
+ON public.external_contacts
+FOR ALL TO public
+USING (TRUE) WITH CHECK (TRUE);
+
+
+DROP POLICY IF EXISTS event_contacts_all ON public.event_contacts;
+CREATE POLICY event_contacts_all
+ON public.event_contacts
+FOR ALL TO public
+USING (TRUE) WITH CHECK (TRUE);
+
+
+DROP POLICY IF EXISTS event_assets_all ON public.event_assets;
+CREATE POLICY event_assets_all
+ON public.event_assets
+FOR ALL TO public
+USING (TRUE) WITH CHECK (TRUE);
+
+
+DROP POLICY IF EXISTS event_notes_all ON public.event_notes;
+CREATE POLICY event_notes_all
+ON public.event_notes
+FOR ALL TO public
+USING (TRUE) WITH CHECK (TRUE);
+
+
+DROP POLICY IF EXISTS coordination_logs_all ON public.coordination_logs;
+CREATE POLICY coordination_logs_all
+ON public.coordination_logs
+FOR ALL TO public
+USING (TRUE) WITH CHECK (TRUE);
+
+
+-- Storage policies for bucket
+DROP POLICY IF EXISTS marketing_files_public_read ON storage.objects;
+CREATE POLICY marketing_files_public_read
+ON storage.objects
+FOR SELECT TO public
+USING (bucket_id = 'marketing-files');
+
+
+DROP POLICY IF EXISTS marketing_files_public_write ON storage.objects;
+CREATE POLICY marketing_files_public_write
+ON storage.objects
+FOR INSERT TO public
+WITH CHECK (bucket_id = 'marketing-files');
+
+
+DROP POLICY IF EXISTS marketing_files_public_update ON storage.objects;
+CREATE POLICY marketing_files_public_update
+ON storage.objects
+FOR UPDATE TO public
+USING (bucket_id = 'marketing-files')
+WITH CHECK (bucket_id = 'marketing-files');
+
+
+DROP POLICY IF EXISTS marketing_files_public_delete ON storage.objects;
+CREATE POLICY marketing_files_public_delete
+ON storage.objects
+FOR DELETE TO public
+USING (bucket_id = 'marketing-files');
+
+
+COMMIT;
+
+
+
+Lightspeed
+Lightspeed Dashboard
+
+
+The Lightspeed Dashboard will be a place to view debug logs, code documentation, project overviews, and common fixes for things when things break within the store.
+
+
+Inventory Photo app:
+
+
+
+
+Inventory automatic R-series update
+
+
+Technical Overview
 Technical Overview
 
 

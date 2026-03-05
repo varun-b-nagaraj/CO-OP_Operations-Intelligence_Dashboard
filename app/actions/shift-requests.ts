@@ -367,7 +367,7 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
 
     if (
       fromAttendance &&
-      ['present', 'absent', 'excused'].includes(fromAttendance.status as string)
+      ['absent', 'excused'].includes(fromAttendance.status as string)
     ) {
       return errorResult(
         correlationId,
@@ -385,7 +385,7 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
       .eq('employee_s_number', request.to_employee_s_number)
       .maybeSingle();
 
-    if (toAttendance && ['present', 'absent', 'excused'].includes(toAttendance.status as string)) {
+    if (toAttendance && ['absent', 'excused'].includes(toAttendance.status as string)) {
       return errorResult(
         correlationId,
         'CONFLICT',
@@ -426,10 +426,11 @@ export async function approveShiftExchange(requestId: string): Promise<Result<Sh
         shift_period: request.shift_period,
         shift_slot_key: request.shift_slot_key,
         employee_s_number: request.to_employee_s_number,
-        status: 'expected',
+        status: 'present',
+        raw_status: 'present',
         source: 'shift_exchange',
         reason: null,
-        marked_by: 'open_access'
+        marked_by: null
       },
       {
         onConflict: 'shift_date,shift_period,shift_slot_key,employee_s_number'

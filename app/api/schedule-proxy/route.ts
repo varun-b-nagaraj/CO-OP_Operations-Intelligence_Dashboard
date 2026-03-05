@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 
-import { buildExpectedShiftsInternal, monthHasShiftAttendance } from '@/lib/server/expected-shifts';
+import { buildExpectedShiftsInternal } from '@/lib/server/expected-shifts';
 import { fetchScheduleWithCache } from '@/lib/server/external-apis';
 import { getCorrelationId, jsonResult, jsonValidationError, logError, logInfo } from '@/lib/server/common';
 import { applyApprovedShiftExchanges, monthWindow } from '@/lib/server/schedule';
@@ -99,16 +99,7 @@ export async function GET(request: NextRequest) {
 
     const shouldForceRebuild =
       parsed.data.forceRebuildExpectedShifts === true || parsed.data.forceRefresh === true;
-    let shouldBuildExpectedShifts = shouldForceRebuild;
-    if (!shouldBuildExpectedShifts) {
-      shouldBuildExpectedShifts = !(await monthHasShiftAttendance(
-        supabase,
-        parsed.data.year,
-        parsed.data.month
-      ));
-    }
-
-    if (shouldBuildExpectedShifts) {
+    {
       const buildResult = await buildExpectedShiftsInternal(
         supabase,
         {
@@ -128,6 +119,7 @@ export async function GET(request: NextRequest) {
           correlationId,
           error: buildResult.error.message
         });
+        return jsonResult(errorResult(correlationId, 'DB_ERROR', buildResult.error.message), 500);
       }
     }
 

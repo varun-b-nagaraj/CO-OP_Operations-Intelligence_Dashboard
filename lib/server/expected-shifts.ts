@@ -14,6 +14,16 @@ type BuildParams = {
   forceRebuild?: boolean;
 };
 
+type ScheduleAssignment = {
+  date: string;
+  period: number;
+  shiftSlotKey: string;
+  studentSNumber: string;
+  effectiveWorkerSNumber: string;
+};
+
+const DEFAULT_OFF_PERIODS = [4, 8] as const;
+
 export async function monthHasShiftAttendance(
   supabase: SupabaseClient,
   year: number,
@@ -27,6 +37,134 @@ export async function monthHasShiftAttendance(
     .lte('shift_date', window.to);
 
   return (count ?? 0) > 0;
+}
+
+async function syncAttendanceTable(
+  supabase: SupabaseClient,
+  tableName: 'shift_attendance' | 'morning_shift_attendance' | 'off_period_shift_attendance',
+  assignments: ScheduleAssignment[],
+  window: { from: string; to: string },
+  forceRebuild: boolean
+): Promise<Result<{ created: number; updated: number }>> {
+  if (forceRebuild) {
+    const { error: clearError } = await supabase
+      .from(tableName)
+      .delete()
+      .gte('shift_date', window.from)
+      .lte('shift_date', window.to)
+      .is('marked_by', null)
+      .in('source', ['scheduler', 'shift_exchange']);
+
+    if (clearError) {
+      return errorResult('shift-sync', 'DB_ERROR', clearError.message);
+    }
+  }
+
+  const { data: existingRows, error: existingRowsError } = await supabase
+    .from(tableName)
+    .select('id, shift_date, shift_period, shift_slot_key, employee_s_number, source, marked_by')
+    .gte('shift_date', window.from)
+    .lte('shift_date', window.to);
+
+  if (existingRowsError) {
+    return errorResult('shift-sync', 'DB_ERROR', existingRowsError.message);
+  }
+
+  const existingByKey = new Map<
+    string,
+    {
+      id: string | number;
+      source: 'scheduler' | 'manual' | 'shift_exchange' | 'rebuild';
+      marked_by: string | null;
+    }
+  >();
+
+  for (const row of existingRows ?? []) {
+    const key = [row.shift_date, row.shift_period, row.shift_slot_key, row.employee_s_number].join('|');
+    existingByKey.set(key, {
+      id: row.id,
+      source: row.source,
+      marked_by: row.marked_by
+    });
+  }
+
+  const rowsToUpsert: Array<{
+    shift_date: string;
+    shift_period: number;
+    shift_slot_key: string;
+    employee_s_number: string;
+    status: 'present';
+    raw_status: 'present';
+    source: 'scheduler' | 'shift_exchange';
+    reason: null;
+    marked_by: null;
+  }> = [];
+
+  let created = 0;
+  let updated = 0;
+  const desiredKeys = new Set<string>();
+
+  for (const assignment of assignments) {
+    const row = {
+      shift_date: assignment.date,
+      shift_period: assignment.period,
+      shift_slot_key: assignment.shiftSlotKey,
+      employee_s_number: assignment.effectiveWorkerSNumber,
+      status: 'present' as const,
+      raw_status: 'present' as const,
+      source:
+        assignment.effectiveWorkerSNumber === assignment.studentSNumber
+          ? ('scheduler' as const)
+          : ('shift_exchange' as const),
+      reason: null,
+      marked_by: null
+    };
+
+    const key = [row.shift_date, row.shift_period, row.shift_slot_key, row.employee_s_number].join('|');
+    desiredKeys.add(key);
+
+    const existing = existingByKey.get(key);
+    if (!existing) {
+      created += 1;
+      rowsToUpsert.push(row);
+      continue;
+    }
+
+    const isSystemSeeded =
+      existing.marked_by === null && (existing.source === 'scheduler' || existing.source === 'shift_exchange');
+    if (isSystemSeeded) {
+      updated += 1;
+      rowsToUpsert.push(row);
+    }
+  }
+
+  const staleSystemSeededIds: Array<string | number> = [];
+  for (const row of existingRows ?? []) {
+    const key = [row.shift_date, row.shift_period, row.shift_slot_key, row.employee_s_number].join('|');
+    const isSystemSeeded =
+      row.marked_by === null && (row.source === 'scheduler' || row.source === 'shift_exchange');
+    if (isSystemSeeded && !desiredKeys.has(key)) {
+      staleSystemSeededIds.push(row.id);
+    }
+  }
+
+  if (rowsToUpsert.length > 0) {
+    const { error: upsertError } = await supabase.from(tableName).upsert(rowsToUpsert, {
+      onConflict: 'shift_date,shift_period,shift_slot_key,employee_s_number'
+    });
+    if (upsertError) {
+      return errorResult('shift-sync', 'DB_ERROR', upsertError.message);
+    }
+  }
+
+  if (staleSystemSeededIds.length > 0) {
+    const { error: deleteError } = await supabase.from(tableName).delete().in('id', staleSystemSeededIds);
+    if (deleteError) {
+      return errorResult('shift-sync', 'DB_ERROR', deleteError.message);
+    }
+  }
+
+  return successResult({ created, updated }, 'shift-sync');
 }
 
 export async function buildExpectedShiftsInternal(
@@ -65,121 +203,73 @@ export async function buildExpectedShiftsInternal(
       (approvedExchanges ?? []) as ShiftChangeRequest[]
     );
 
-    if (params.forceRebuild) {
-      await supabase
-        .from('shift_attendance')
-        .delete()
-        .gte('shift_date', window.from)
-        .lte('shift_date', window.to)
-        .eq('status', 'expected');
+    const { data: employeeSettings, error: settingsError } = await supabase
+      .from('employee_settings')
+      .select('employee_s_number,off_periods');
+
+    if (settingsError) {
+      return errorResult(correlationId, 'DB_ERROR', settingsError.message);
     }
 
-    const { data: existingRows, error: existingRowsError } = await supabase
-      .from('shift_attendance')
-      .select('id, shift_date, shift_period, shift_slot_key, employee_s_number, status')
-      .gte('shift_date', window.from)
-      .lte('shift_date', window.to);
-
-    if (existingRowsError) {
-      return errorResult(correlationId, 'DB_ERROR', existingRowsError.message);
+    const offPeriodsBySNumber = new Map<string, number[]>();
+    for (const row of employeeSettings ?? []) {
+      const sNumber = String(row.employee_s_number ?? '').trim();
+      if (!sNumber) continue;
+      offPeriodsBySNumber.set(
+        sNumber,
+        Array.isArray(row.off_periods) && row.off_periods.length > 0
+          ? (row.off_periods as number[])
+          : [...DEFAULT_OFF_PERIODS]
+      );
     }
 
-    const existingByKey = new Map<
-      string,
+    const allAssignments = effectiveSchedule.schedule;
+    const morningAssignments = allAssignments.filter((assignment) => assignment.period === 0);
+    const offPeriodAssignments = allAssignments.filter((assignment) => {
+      const offPeriods = offPeriodsBySNumber.get(assignment.effectiveWorkerSNumber) ?? [...DEFAULT_OFF_PERIODS];
+      return offPeriods.includes(assignment.period);
+    });
+
+    const regularResult = await syncAttendanceTable(
+      supabase,
+      'shift_attendance',
+      allAssignments,
+      window,
+      params.forceRebuild === true
+    );
+    if (!regularResult.ok) {
+      return errorResult(correlationId, 'DB_ERROR', regularResult.error.message);
+    }
+
+    const morningResult = await syncAttendanceTable(
+      supabase,
+      'morning_shift_attendance',
+      morningAssignments,
+      window,
+      params.forceRebuild === true
+    );
+    if (!morningResult.ok) {
+      return errorResult(correlationId, 'DB_ERROR', morningResult.error.message);
+    }
+
+    const offPeriodResult = await syncAttendanceTable(
+      supabase,
+      'off_period_shift_attendance',
+      offPeriodAssignments,
+      window,
+      params.forceRebuild === true
+    );
+    if (!offPeriodResult.ok) {
+      return errorResult(correlationId, 'DB_ERROR', offPeriodResult.error.message);
+    }
+
+    return successResult(
       {
-        id: string | number;
-        status: 'expected' | 'present' | 'absent' | 'excused';
-      }
-    >();
-
-    for (const row of existingRows ?? []) {
-      const key = [row.shift_date, row.shift_period, row.shift_slot_key, row.employee_s_number].join(
-        '|'
-      );
-      existingByKey.set(key, {
-        id: row.id,
-        status: row.status
-      });
-    }
-
-    const rowsToUpsert: Array<{
-      shift_date: string;
-      shift_period: number;
-      shift_slot_key: string;
-      employee_s_number: string;
-      status: 'expected';
-      source: 'scheduler' | 'shift_exchange';
-      reason: null;
-      marked_by: null;
-    }> = [];
-
-    let created = 0;
-    let updated = 0;
-    const desiredKeys = new Set<string>();
-
-    for (const assignment of effectiveSchedule.schedule) {
-      const row = {
-        shift_date: assignment.date,
-        shift_period: assignment.period,
-        shift_slot_key: assignment.shiftSlotKey,
-        employee_s_number: assignment.effectiveWorkerSNumber,
-        status: 'expected' as const,
-        source:
-          assignment.effectiveWorkerSNumber === assignment.studentSNumber
-            ? ('scheduler' as const)
-            : ('shift_exchange' as const),
-        reason: null,
-        marked_by: null
-      };
-
-      const key = [row.shift_date, row.shift_period, row.shift_slot_key, row.employee_s_number].join(
-        '|'
-      );
-      desiredKeys.add(key);
-      const existing = existingByKey.get(key);
-      if (!existing) {
-        created += 1;
-        rowsToUpsert.push(row);
-        continue;
-      }
-
-      if (existing.status === 'expected') {
-        updated += 1;
-        rowsToUpsert.push(row);
-      }
-    }
-
-    const staleExpectedIds: Array<string | number> = [];
-    for (const row of existingRows ?? []) {
-      const key = [row.shift_date, row.shift_period, row.shift_slot_key, row.employee_s_number].join(
-        '|'
-      );
-      if (row.status === 'expected' && !desiredKeys.has(key)) {
-        staleExpectedIds.push(row.id);
-      }
-    }
-
-    if (rowsToUpsert.length > 0) {
-      const { error: upsertError } = await supabase.from('shift_attendance').upsert(rowsToUpsert, {
-        onConflict: 'shift_date,shift_period,shift_slot_key,employee_s_number'
-      });
-      if (upsertError) {
-        return errorResult(correlationId, 'DB_ERROR', upsertError.message);
-      }
-    }
-
-    if (staleExpectedIds.length > 0) {
-      const { error: deleteError } = await supabase
-        .from('shift_attendance')
-        .delete()
-        .in('id', staleExpectedIds)
-        .eq('status', 'expected');
-      if (deleteError) {
-        return errorResult(correlationId, 'DB_ERROR', deleteError.message);
-      }
-    }
-
-    return successResult({ created, updated }, correlationId);
+        created: regularResult.data.created + morningResult.data.created + offPeriodResult.data.created,
+        updated: regularResult.data.updated + morningResult.data.updated + offPeriodResult.data.updated
+      },
+      correlationId
+    );
   } catch (error) {
     return errorResult(
       correlationId,
