@@ -76,6 +76,18 @@ export const ShiftExchangeReviewSchema = z.object({
   request_id: z.string().uuid()
 });
 
+export const StrikeAppealRequestSchema = z.object({
+  strike_id: z.string().uuid(),
+  employee_id: EmployeeIdSchema,
+  employee_s_number: SNumberSchema,
+  reason: z.string().trim().min(1).max(500)
+});
+
+export const StrikeAppealReviewSchema = z.object({
+  appeal_id: z.string().uuid(),
+  review_notes: z.string().trim().max(500).optional()
+});
+
 export const PointsEntrySchema = z.object({
   employee_id: EmployeeIdSchema,
   point_type: z.enum(['meeting', 'morning_shift', 'off_period_shift', 'project', 'manual']),

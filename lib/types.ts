@@ -99,6 +99,7 @@ export interface AttendanceOverride {
 
 export type ShiftRequestStatus = 'pending' | 'approved' | 'denied';
 export type ShiftRequestSource = 'employee_form' | 'manager_schedule' | 'system';
+export type StrikeAppealStatus = 'pending' | 'approved' | 'denied';
 
 export interface ShiftChangeRequest {
   id: string;
@@ -113,6 +114,21 @@ export interface ShiftChangeRequest {
   requested_at: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
+}
+
+export interface StrikeAppeal {
+  id: string;
+  strike_id: string;
+  employee_id: string;
+  employee_s_number: string;
+  reason: string;
+  status: StrikeAppealStatus;
+  requested_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  review_notes: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type PointType = 'meeting' | 'morning_shift' | 'off_period_shift' | 'project' | 'manual';

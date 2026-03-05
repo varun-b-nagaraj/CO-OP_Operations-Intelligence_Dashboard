@@ -1,3 +1,5 @@
+'use client';
+
 import { Select } from '@/app/_components/ui/select';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';

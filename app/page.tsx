@@ -23,6 +23,12 @@ export default function HomePage() {
           </Link>
           <Link
             className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center border border-brand-maroon bg-brand-maroon px-4 py-2 text-sm font-medium text-white hover:bg-[#6a0000] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-maroon"
+            href="/employee"
+          >
+            Open Employee
+          </Link>
+          <Link
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center border border-brand-maroon bg-brand-maroon px-4 py-2 text-sm font-medium text-white hover:bg-[#6a0000] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-maroon"
             href="/hr?module=cfa&tab=daily-log"
           >
             Open Chick-fil-A

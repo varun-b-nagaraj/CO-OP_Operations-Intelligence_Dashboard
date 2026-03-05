@@ -47,7 +47,8 @@ BEGIN
         ('morning_shift_attendance', 'hr_morning_shift_attendance', 'id'),
         ('off_period_shift_attendance', 'hr_off_period_shift_attendance', 'id'),
         ('meeting_attendance_records', 'hr_meeting_attendance_records', 'id'),
-        ('employee_login_credentials', 'hr_employee_login_credentials', 'id')
+        ('employee_login_credentials', 'hr_employee_login_credentials', 'id'),
+        ('strike_appeals', 'hr_strike_appeals', 'id')
     ) AS t(src, dst, key_col)
   LOOP
     IF to_regclass(format('public.%I', rec.src)) IS NULL THEN

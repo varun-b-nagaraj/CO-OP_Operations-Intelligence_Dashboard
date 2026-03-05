@@ -1,3 +1,5 @@
+'use client';
+
 import { Select } from '@/app/_components/ui/select';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +12,10 @@ import {
   denyShiftExchange,
   submitShiftExchange
 } from '@/app/actions/shift-requests';
+import {
+  approveStrikeAppeal,
+  denyStrikeAppeal
+} from '@/app/actions/strike-appeals';
 import { fetchSchedule } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
 
@@ -25,6 +31,7 @@ const ShiftRequestFormSchema = z.object({
 
 type ShiftRequestFormValues = z.infer<typeof ShiftRequestFormSchema>;
 type StatusFilter = 'all' | 'pending' | 'approved' | 'denied';
+type RequestTypeFilter = 'all' | 'shift_exchange' | 'strike_appeal';
 type StoredScheduleConfigRow = {
   year: number | null;
   month: number | null;
@@ -54,9 +61,11 @@ function readBooleanField(row: StudentRow, keys: string[], fallback: boolean): b
 export function RequestsTab() {
   const canView = usePermission('hr.requests.view');
   const canApprove = usePermission('hr.schedule.edit');
+  const canReviewAppeals = usePermission('hr.strikes.manage');
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [requestTypeFilter, setRequestTypeFilter] = useState<RequestTypeFilter>('all');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const form = useForm<ShiftRequestFormValues>({
@@ -167,12 +176,38 @@ export function RequestsTab() {
     }
   });
 
+  const strikeAppealsQuery = useQuery({
+    queryKey: ['hr-strike-appeals', statusFilter],
+    queryFn: async () => {
+      let query = supabase
+        .from('hr_strike_appeals')
+        .select('*')
+        .order('requested_at', { ascending: false })
+        .limit(500);
+
+      if (statusFilter !== 'all') query = query.eq('status', statusFilter);
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }
+  });
+
   const studentNameBySNumber = useMemo(() => {
     const map = new Map<string, string>();
     for (const student of studentsQuery.data ?? []) {
       const sNumber = getStudentSNumber(student);
       if (!sNumber) continue;
       map.set(sNumber, getStudentDisplayName(student));
+    }
+    return map;
+  }, [studentsQuery.data]);
+
+  const studentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const student of studentsQuery.data ?? []) {
+      const id = String(student.id ?? '').trim();
+      if (!id) continue;
+      map.set(id, getStudentDisplayName(student));
     }
     return map;
   }, [studentsQuery.data]);
@@ -387,6 +422,35 @@ export function RequestsTab() {
       setStatusMessage(error instanceof Error ? error.message : 'Unable to deny request.')
   });
 
+  const approveAppealMutation = useMutation({
+    mutationFn: async (appealId: string) => {
+      const result = await approveStrikeAppeal(appealId);
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
+    onSuccess: () => {
+      setStatusMessage('Strike appeal approved and strike deactivated.');
+      queryClient.invalidateQueries({ queryKey: ['hr-strike-appeals'] });
+      queryClient.invalidateQueries({ queryKey: ['hr-strikes-all'] });
+    },
+    onError: (error) =>
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to approve strike appeal.')
+  });
+
+  const denyAppealMutation = useMutation({
+    mutationFn: async (appealId: string) => {
+      const result = await denyStrikeAppeal(appealId);
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
+    onSuccess: () => {
+      setStatusMessage('Strike appeal denied.');
+      queryClient.invalidateQueries({ queryKey: ['hr-strike-appeals'] });
+    },
+    onError: (error) =>
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to deny strike appeal.')
+  });
+
   if (!canView) {
     return <p className="text-sm text-neutral-700">You do not have permission to view shift requests.</p>;
   }
@@ -508,67 +572,132 @@ export function RequestsTab() {
             <option value="denied">Denied</option>
           </Select>
         </label>
+        <label className="text-sm">
+          Request type
+          <Select
+            className="ml-2 min-h-[44px] border border-neutral-300 px-2"
+            onChange={(event) => setRequestTypeFilter(event.target.value as RequestTypeFilter)}
+            value={requestTypeFilter}
+          >
+            <option value="all">All</option>
+            <option value="shift_exchange">Shift exchanges</option>
+            <option value="strike_appeal">Strike appeals</option>
+          </Select>
+        </label>
       </div>
 
       {statusMessage && <p className="text-sm text-brand-maroon">{statusMessage}</p>}
 
-      <div className="overflow-x-auto border border-neutral-300">
-        <table className="min-w-full text-sm">
-          <thead className="bg-neutral-100">
-            <tr>
-              <th className="border-b border-neutral-300 p-2 text-left">Requested</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Shift</th>
-              <th className="border-b border-neutral-300 p-2 text-left">From</th>
-              <th className="border-b border-neutral-300 p-2 text-left">To</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Reason</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Status</th>
-              <th className="border-b border-neutral-300 p-2 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(requestsQuery.data ?? []).map((request) => (
-              <tr className="border-b border-neutral-200" key={request.id as string}>
-                <td className="p-2">{new Date(request.requested_at as string).toLocaleString()}</td>
-                <td className="p-2">
-                  {(request.shift_date as string) +
-                    ` P${request.shift_period as number}` +
-                    ` (${request.shift_slot_key as string})`}
-                </td>
-                <td className="p-2">
-                  {studentNameBySNumber.get(request.from_employee_s_number as string) ??
-                    (request.from_employee_s_number as string)}
-                </td>
-                <td className="p-2">
-                  {studentNameBySNumber.get(request.to_employee_s_number as string) ??
-                    (request.to_employee_s_number as string)}
-                </td>
-                <td className="p-2">{request.reason as string}</td>
-                <td className="p-2">{request.status as string}</td>
-                <td className="p-2">
-                  {canApprove && request.status === 'pending' && (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        className="min-h-[44px] border border-neutral-500 px-2 text-xs"
-                        onClick={() => approveMutation.mutate(request.id as string)}
-                        type="button"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        className="min-h-[44px] border border-neutral-500 px-2 text-xs"
-                        onClick={() => denyMutation.mutate(request.id as string)}
-                        type="button"
-                      >
-                        Deny
-                      </button>
-                    </div>
-                  )}
-                </td>
+      {(requestTypeFilter === 'all' || requestTypeFilter === 'shift_exchange') && (
+        <div className="overflow-x-auto border border-neutral-300">
+          <table className="min-w-full text-sm">
+            <thead className="bg-neutral-100">
+              <tr>
+                <th className="border-b border-neutral-300 p-2 text-left">Requested</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Shift</th>
+                <th className="border-b border-neutral-300 p-2 text-left">From</th>
+                <th className="border-b border-neutral-300 p-2 text-left">To</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Reason</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Status</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {(requestsQuery.data ?? []).map((request) => (
+                <tr className="border-b border-neutral-200" key={request.id as string}>
+                  <td className="p-2">{new Date(request.requested_at as string).toLocaleString()}</td>
+                  <td className="p-2">
+                    {(request.shift_date as string) +
+                      ` P${request.shift_period as number}` +
+                      ` (${request.shift_slot_key as string})`}
+                  </td>
+                  <td className="p-2">
+                    {studentNameBySNumber.get(request.from_employee_s_number as string) ??
+                      (request.from_employee_s_number as string)}
+                  </td>
+                  <td className="p-2">
+                    {studentNameBySNumber.get(request.to_employee_s_number as string) ??
+                      (request.to_employee_s_number as string)}
+                  </td>
+                  <td className="p-2">{request.reason as string}</td>
+                  <td className="p-2">{request.status as string}</td>
+                  <td className="p-2">
+                    {canApprove && request.status === 'pending' && (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className="min-h-[44px] border border-neutral-500 px-2 text-xs"
+                          onClick={() => approveMutation.mutate(request.id as string)}
+                          type="button"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="min-h-[44px] border border-neutral-500 px-2 text-xs"
+                          onClick={() => denyMutation.mutate(request.id as string)}
+                          type="button"
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(requestTypeFilter === 'all' || requestTypeFilter === 'strike_appeal') && (
+        <div className="overflow-x-auto border border-neutral-300">
+          <table className="min-w-full text-sm">
+            <thead className="bg-neutral-100">
+              <tr>
+                <th className="border-b border-neutral-300 p-2 text-left">Requested</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Employee</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Strike</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Appeal reason</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Status</th>
+                <th className="border-b border-neutral-300 p-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(strikeAppealsQuery.data ?? []).map((appeal) => (
+                <tr className="border-b border-neutral-200" key={appeal.id as string}>
+                  <td className="p-2">{new Date(appeal.requested_at as string).toLocaleString()}</td>
+                  <td className="p-2">
+                    {studentNameById.get(String(appeal.employee_id ?? '')) ??
+                      (appeal.employee_s_number as string)}
+                  </td>
+                  <td className="p-2">{appeal.strike_id as string}</td>
+                  <td className="p-2">{appeal.reason as string}</td>
+                  <td className="p-2">{appeal.status as string}</td>
+                  <td className="p-2">
+                    {canReviewAppeals && appeal.status === 'pending' && (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className="min-h-[44px] border border-neutral-500 px-2 text-xs"
+                          onClick={() => approveAppealMutation.mutate(appeal.id as string)}
+                          type="button"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="min-h-[44px] border border-neutral-500 px-2 text-xs"
+                          onClick={() => denyAppealMutation.mutate(appeal.id as string)}
+                          type="button"
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
     </section>
   );

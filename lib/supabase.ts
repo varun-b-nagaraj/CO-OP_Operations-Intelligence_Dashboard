@@ -16,6 +16,7 @@ const HR_TABLES = new Set([
   'hr_strikes',
   'hr_points_ledger',
   'hr_meeting_attendance_records',
+  'hr_strike_appeals',
   'hr_audit_log',
   'hr_user_roles'
 ]);
