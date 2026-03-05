@@ -175,14 +175,24 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
       shiftOverridesBySNumber.set(sNumber, bucket);
     }
 
-    const map = new Map<string, Array<Record<string, unknown>>>();
+    const attendanceRowsBySNumber = new Map<string, Array<Record<string, unknown>>>();
     for (const row of attendanceQuery.data ?? []) {
-      const key = row.employee_s_number as string;
-      const bucket = map.get(key) ?? [];
+      const key = String(row.employee_s_number ?? '');
+      if (!key) continue;
+      const bucket = attendanceRowsBySNumber.get(key) ?? [];
       bucket.push(row);
-      map.set(key, bucket);
+      attendanceRowsBySNumber.set(key, bucket);
     }
-    return [...map.entries()].map(([sNumber, rows]) => {
+
+    const normalizedFilter = employeeSNumber.trim();
+    const students = (studentsQuery.data ?? []).filter((student) => {
+      if (!normalizedFilter) return true;
+      return getStudentSNumber(student) === normalizedFilter;
+    });
+
+    return students.map((student) => {
+      const sNumber = getStudentSNumber(student);
+      const rows = attendanceRowsBySNumber.get(sNumber) ?? [];
       const overrides = shiftOverridesBySNumber.get(sNumber) ?? [];
       const counts = summarizeShiftAttendanceCounts({
         shiftAttendanceRecords: rows.map((row) => ({
@@ -202,10 +212,9 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
         })),
         overrides
       });
-      const student = (studentsQuery.data ?? []).find((item) => getStudentSNumber(item) === sNumber);
       return {
         sNumber,
-        name: student ? getStudentDisplayName(student) : sNumber,
+        name: getStudentDisplayName(student),
         expected: counts.expected,
         present: counts.present,
         absent: counts.absent,
@@ -213,7 +222,7 @@ export function ShiftAttendanceTab(props: { dateRange: { from: string; to: strin
         shiftRate: rates.adjusted_rate ?? rates.raw_rate
       };
     }).sort((left, right) => left.name.localeCompare(right.name));
-  }, [attendanceQuery.data, shiftOverridesQuery.data, studentsQuery.data]);
+  }, [attendanceQuery.data, employeeSNumber, shiftOverridesQuery.data, studentsQuery.data]);
 
   if (!canView) {
     return <p className="text-sm text-neutral-700">You do not have permission to view shift attendance.</p>;
