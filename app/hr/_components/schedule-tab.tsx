@@ -1258,7 +1258,8 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
     selectedShiftActionAssignment &&
       currentEmployeeOwnsSelectedShift &&
       selectedShiftActionAttendanceStatus !== 'absent' &&
-      (selectedShiftIsManualAssignment ||
+      (!selectedShiftSupportsOpenVolunteer ||
+        selectedShiftIsManualAssignment ||
         selectedShiftActionAssignment.effectiveWorkerSNumber !== selectedShiftActionAssignment.studentSNumber)
   );
   const canEditSelectedShiftAttendance = Boolean(selectedShiftActionAssignment && isManagerMode);
