@@ -178,8 +178,8 @@ export function DepartmentShell({
   }, []);
 
   return (
-    <main className="min-h-screen w-full overflow-x-hidden text-neutral-900">
-      <div className="relative min-h-screen w-full overflow-hidden border border-neutral-300 bg-white">
+    <main className="min-h-screen w-full text-neutral-900">
+      <div className="relative min-h-screen w-full border border-neutral-300 bg-white">
         <aside
           className={`z-30 w-full border-b border-neutral-300 bg-white transition-[width,box-shadow] duration-300 ease-out md:absolute md:inset-y-0 md:left-0 md:w-16 md:border-b-0 md:border-r ${
             isCollapsed ? 'md:shadow-none' : 'md:w-72 md:shadow-[10px_0_28px_rgba(0,0,0,0.18)]'
@@ -248,7 +248,7 @@ export function DepartmentShell({
           </nav>
         </aside>
 
-        <section className="ui-fade-in min-w-0 w-full flex-1 overflow-x-hidden md:pl-16">
+        <section className="ui-fade-in min-w-0 w-full flex-1 md:pl-16">
           {contentHeading ? (
             <header className="border-b border-neutral-300 bg-white px-4 py-4 md:px-6">
               <h2 className="text-lg font-semibold">{contentHeading}</h2>

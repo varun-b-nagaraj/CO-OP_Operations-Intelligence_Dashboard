@@ -2513,7 +2513,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
               </table>
             </div>
             {scheduleViewMode === 'list' && (
-              <div className="overflow-x-auto border border-neutral-300">
+              <div className="border border-neutral-300">
                 <table className="min-w-full text-sm">
                   <thead className="bg-neutral-100">
                     <tr>
@@ -2567,7 +2567,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                   : ''
               }`}
             >
-              <div className="overflow-x-auto border border-neutral-300">
+              <div className="border border-neutral-300">
               <div className="border-b border-neutral-300 bg-neutral-50 p-2">
                 <h3 className="text-sm font-semibold">Roster (Students Table)</h3>
                 <p className="text-xs text-neutral-600">
@@ -2629,7 +2629,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
               </table>
               </div>
               <div className="space-y-4">
-                <div className="overflow-x-auto border border-neutral-300">
+                <div className="border border-neutral-300">
                 <div className="border-b border-neutral-300 bg-neutral-50 p-2">
                   <h3 className="text-sm font-semibold">Summary</h3>
                 </div>

@@ -125,7 +125,7 @@ export function HRModule() {
       subtitle={resolvedModule === 'hr' ? 'People operations and attendance controls' : 'Sales log and forecast operations'}
       title={resolvedModule === 'hr' ? 'HR Dashboard' : 'Chick-fil-A Dashboard'}
     >
-      <section className="min-w-0 overflow-x-hidden border-x border-b border-neutral-300 bg-white">
+      <section className="min-w-0 border-x border-b border-neutral-300 bg-white">
         {resolvedModule === 'hr' && (
           <header className="border-b border-neutral-300 bg-white px-4 py-4 md:px-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -171,9 +171,9 @@ export function HRModule() {
         )}
 
         {resolvedModule === 'hr' ? (
-          <section className="min-w-0 overflow-x-hidden" id="module-panel-hr">
+          <section className="min-w-0" id="module-panel-hr">
             <section
-              className="min-w-0 overflow-x-hidden p-0"
+              className="min-w-0 p-0"
               id={`panel-${resolvedHRTab}`}
               role="tabpanel"
             >

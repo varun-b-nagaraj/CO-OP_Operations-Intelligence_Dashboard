@@ -131,7 +131,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       </button>
 
       <div
-        className={`absolute z-40 mt-1 max-h-64 w-full overflow-auto rounded border border-neutral-200 bg-white shadow-lg transition-all ${
+        className={`absolute z-40 mt-1 w-full rounded border border-neutral-200 bg-white shadow-lg transition-all ${
           open ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0'
         }`}
       >
