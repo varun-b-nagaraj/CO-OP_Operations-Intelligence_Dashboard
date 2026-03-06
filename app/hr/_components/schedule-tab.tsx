@@ -24,6 +24,10 @@ type AccessMode = 'employee' | 'manager';
 type ScheduleTabProps = {
   forcedAccessMode?: AccessMode;
   lockedEmployeeSNumber?: string | null;
+  hideActingEmployee?: boolean;
+  disableCellInteractions?: boolean;
+  enableListViewToggle?: boolean;
+  employeeScheduleOnly?: boolean;
 };
 type ShiftActionChoice = 'volunteer' | 'remove';
 type EmptySlotTarget = {
@@ -126,6 +130,13 @@ function isWeekendDateKey(dateKey: string): boolean {
   const value = new Date(`${dateKey}T00:00:00Z`);
   const day = value.getUTCDay();
   return day === 0 || day === 6;
+}
+
+function daysUntilDate(dateKey: string, todayKey: string): number {
+  const target = new Date(`${dateKey}T00:00:00Z`);
+  const today = new Date(`${todayKey}T00:00:00Z`);
+  const diffMs = target.getTime() - today.getTime();
+  return Math.ceil(diffMs / (24 * 60 * 60 * 1000));
 }
 
 function toCompactDisplayName(fullName: string): string {
@@ -373,10 +384,12 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
   const [pendingManualEdits, setPendingManualEdits] = useState<PendingManualEdit[]>([]);
   const [pendingJumpToToday, setPendingJumpToToday] = useState(false);
   const [isPersistingEdits, setIsPersistingEdits] = useState(false);
+  const [scheduleViewMode, setScheduleViewMode] = useState<'calendar' | 'list'>('calendar');
   const supabase = useBrowserSupabase();
   const queryClient = useQueryClient();
   const isManagerMode = hasScheduleEditPermission && scheduleAccessMode === 'manager';
   const canSelfAutoApproveShiftActions = hasScheduleEditPermission && canChangeAccessMode;
+  const disableCellInteractions = props.disableCellInteractions === true;
 
   const scheduleQuery = useQuery({
     queryKey: ['hr-schedule', params],
@@ -544,7 +557,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
       setEmptySlotTarget(null);
       setAssignmentTargetSNumber('');
       if (!variables.autoApprove) {
-        setMessage('Volunteer request submitted for approval.');
+        setMessage(
+          variables.mode === 'remove'
+            ? 'Shift exchange request submitted to HR for approval.'
+            : 'Volunteer request submitted for approval.'
+        );
         return;
       }
 
@@ -1198,7 +1215,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
       actingEmployeeSNumber &&
       actingEmployeeSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber
   );
-  const currentEmployeeCanRemoveSelfSelectedShift = Boolean(
+  const currentEmployeeCanRequestSelfRemovalSelectedShift = Boolean(
     selectedShiftActionAssignment &&
       currentEmployeeOwnsSelectedShift &&
       selectedShiftActionAttendanceStatus === 'expected' &&
@@ -1251,11 +1268,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
       if (shiftActionChoice !== 'volunteer') setShiftActionChoice('volunteer');
       return;
     }
-    if (currentEmployeeCanRemoveSelfSelectedShift && shiftActionChoice !== 'remove') {
+    if (currentEmployeeCanRequestSelfRemovalSelectedShift && shiftActionChoice !== 'remove') {
       setShiftActionChoice('remove');
     }
   }, [
-    currentEmployeeCanRemoveSelfSelectedShift,
+    currentEmployeeCanRequestSelfRemovalSelectedShift,
     currentEmployeeCanVolunteerSelectedShift,
     isShiftActionModalOpen,
     isManagerMode,
@@ -1280,6 +1297,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
 
   const todayKey = getTodayDateKey();
   const selectedShiftDayPassed = selectedActionDate ? isDateBeforeToday(selectedActionDate, todayKey) : false;
+  const selectedShiftDaysUntil = selectedActionDate ? daysUntilDate(selectedActionDate, todayKey) : null;
+  const selectedShiftRemovalLockActive = Boolean(
+    selectedShiftDaysUntil !== null && selectedShiftDaysUntil >= 0 && selectedShiftDaysUntil <= 7
+  );
+  const currentEmployeeCanRemoveSelfSelectedShift = currentEmployeeCanRequestSelfRemovalSelectedShift;
 
   const targetYearMonthLabel = `${generationSelection.year}-${String(generationSelection.month).padStart(2, '0')}`;
   const openMonthLabel = `${monthSelection.year}-${String(monthSelection.month).padStart(2, '0')}`;
@@ -1700,6 +1722,29 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
       }
       if (!selectedShiftActionAssignment) return;
 
+      const isRegularShiftRemoval = !selectedShiftSupportsOpenVolunteer;
+      if (isRegularShiftRemoval) {
+        volunteerForShiftMutation.mutate({
+          assignment: selectedShiftActionAssignment,
+          targetSNumber: selectedShiftActionAssignment.studentSNumber,
+          reason: 'Regular shift removal requires shift exchange approval',
+          autoApprove: false,
+          mode: 'remove'
+        });
+        return;
+      }
+
+      if (selectedShiftRemovalLockActive) {
+        volunteerForShiftMutation.mutate({
+          assignment: selectedShiftActionAssignment,
+          targetSNumber: selectedShiftActionAssignment.studentSNumber,
+          reason: 'Morning/off-period removal requested within 7 days of shift date',
+          autoApprove: false,
+          mode: 'remove'
+        });
+        return;
+      }
+
       if (selectedShiftIsManualAssignment) {
         manualSlotMutation.mutate({
           mode: 'remove',
@@ -1856,23 +1901,23 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                     </Select>
                   </label>
                 )}
-                {!isManagerMode && (
-                  <label className="text-xs text-neutral-700">
-                    Acting employee
-                    <Select
-                      className="ml-2 h-8 rounded border border-neutral-300 px-2 text-xs"
-                      disabled={actingEmployeeOptions.length === 0}
-                      onChange={(event) => setActingEmployeeSNumber(event.target.value)}
-                      value={actingEmployeeSNumber}
+                {!isManagerMode && props.enableListViewToggle && (
+                  <div className="inline-flex items-center rounded border border-neutral-300 bg-white p-0.5 text-xs">
+                    <button
+                      className={`h-7 rounded px-2 ${scheduleViewMode === 'calendar' ? 'bg-brand-maroon text-white' : 'text-neutral-700 hover:bg-neutral-100'}`}
+                      onClick={() => setScheduleViewMode('calendar')}
+                      type="button"
                     >
-                      {actingEmployeeOptions.length === 0 && <option value="">No schedulable employees</option>}
-                      {actingEmployeeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
+                      Calendar
+                    </button>
+                    <button
+                      className={`h-7 rounded px-2 ${scheduleViewMode === 'list' ? 'bg-brand-maroon text-white' : 'text-neutral-700 hover:bg-neutral-100'}`}
+                      onClick={() => setScheduleViewMode('list')}
+                      type="button"
+                    >
+                      List
+                    </button>
+                  </div>
                 )}
                 <label className="text-xs text-neutral-700">
                   Open month
@@ -1944,7 +1989,13 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
               </div>
             </div>
 
-            <div className="overflow-x-auto border border-neutral-300">
+            {props.employeeScheduleOnly && (
+              <p className="text-xs text-neutral-700">
+                Your assigned shifts are highlighted. Regular-shift removals always require an HR-approved shift
+                exchange request. Morning/off-period removals require exchange approval only within 7 days.
+              </p>
+            )}
+            <div className={scheduleViewMode === 'calendar' ? 'overflow-x-auto border border-neutral-300' : 'hidden'}>
               <table className="w-full table-fixed text-xs md:text-sm">
                 <colgroup>
                   <col className="w-[82px] md:w-[96px]" />
@@ -2028,6 +2079,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                         const canShowOpenSlotButton =
                           day.inCurrentMonth &&
                           !isWeekend &&
+                          !disableCellInteractions &&
                           (targetOpenRegularSlots > 0 || targetOpenAlternateSlots > 0);
 
                         return (
@@ -2067,14 +2119,21 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                                     : true;
                                   const isManualAssignment = isManualShiftSlotKey(assignment.shiftSlotKey);
 
+                                  const isCurrentEmployeeAssignment =
+                                    Boolean(props.lockedEmployeeSNumber) &&
+                                    assignment.effectiveWorkerSNumber === props.lockedEmployeeSNumber;
+
                                   return (
                                     <div
-                                      className={`${isSwapModeEnabled && !isManualAssignment ? 'cursor-grab' : 'cursor-pointer'} flex min-h-[40px] flex-col justify-center border px-1 py-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
+                                      className={`${disableCellInteractions ? 'cursor-default' : isSwapModeEnabled && !isManualAssignment ? 'cursor-grab' : 'cursor-pointer'} flex min-h-[40px] flex-col justify-center border px-1 py-1 ${isAlternate ? 'border-sky-400 bg-sky-100/80' : 'border-neutral-300 bg-white/90'} ${
                                         isDragTarget ? 'ring-2 ring-brand-maroon' : ''
-                                      } ${dragSourceUid && !isValidDropTarget ? 'opacity-60' : ''}`}
+                                      } ${dragSourceUid && !isValidDropTarget ? 'opacity-60' : ''} ${
+                                        isCurrentEmployeeAssignment ? 'ring-1 ring-brand-maroon/70' : ''
+                                      }`}
                                       draggable={isSwapModeEnabled && !isManualAssignment}
                                       key={assignment.uid}
                                       onClick={() => {
+                                        if (disableCellInteractions) return;
                                         if (isSwapModeEnabled) return;
                                         setShiftActionModalUid(assignment.uid);
                                         setEmptySlotTarget(null);
@@ -2195,7 +2254,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                             )}
                             {canShowOpenSlotButton && (
                               <button
-                                className="mt-1 h-8 w-full rounded border border-dashed border-brand-maroon px-2 py-1 text-left text-[10px] text-brand-maroon hover:bg-brand-maroon/5"
+                                className="mt-1 h-auto min-h-[32px] w-full rounded border border-dashed border-brand-maroon px-2 py-1 text-left text-[10px] leading-tight text-brand-maroon hover:bg-brand-maroon/5"
                                 onClick={() => {
                                   setEmptySlotTarget({ date: day.dateKey, period: targetPeriod });
                                   setShiftActionModalUid(null);
@@ -2246,8 +2305,10 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                                 }}
                                 type="button"
                               >
-                                Add employee ({targetOpenRegularSlots} regular left
-                                {targetOpenAlternateSlots > 0 ? `, ${targetOpenAlternateSlots} alternate left` : ''})
+                                <span className="block break-words whitespace-normal">
+                                  Add employee ({targetOpenRegularSlots} regular left
+                                  {targetOpenAlternateSlots > 0 ? `, ${targetOpenAlternateSlots} alternate left` : ''})
+                                </span>
                               </button>
                             )}
                           </td>
@@ -2258,9 +2319,54 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                 </tbody>
               </table>
             </div>
+            {scheduleViewMode === 'list' && (
+              <div className="overflow-x-auto border border-neutral-300">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-neutral-100">
+                    <tr>
+                      <th className="border-b border-neutral-300 p-2 text-left">Date</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">Day</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">Shift</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">Type</th>
+                      <th className="border-b border-neutral-300 p-2 text-left">Coworkers</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleAssignments
+                      .filter(
+                        (assignment) =>
+                          assignment.effectiveWorkerSNumber ===
+                          ((props.lockedEmployeeSNumber ?? '').trim() || actingEmployeeSNumber)
+                      )
+                      .sort((left, right) => {
+                        const leftKey = `${left.date}|${String(left.period).padStart(2, '0')}`;
+                        const rightKey = `${right.date}|${String(right.period).padStart(2, '0')}`;
+                        return leftKey.localeCompare(rightKey);
+                      })
+                      .map((assignment) => {
+                        const coworkerNames = (assignmentMap.get(`${assignment.date}|${assignment.period}`) ?? [])
+                          .filter((row) => row.effectiveWorkerSNumber !== assignment.effectiveWorkerSNumber)
+                          .map(
+                            (row) =>
+                              rosterNameBySNumber.get(row.effectiveWorkerSNumber) ?? row.effectiveWorkerSNumber
+                          );
+                        return (
+                          <tr className="border-b border-neutral-200" key={`list-${assignment.uid}`}>
+                            <td className="p-2">{assignment.date}</td>
+                            <td className="p-2">{assignment.day || '-'}</td>
+                            <td className="p-2">{formatPeriodBadge(assignment.period)}</td>
+                            <td className="p-2">{assignment.type}</td>
+                            <td className="p-2">{coworkerNames.length > 0 ? coworkerNames.join(', ') : '-'}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
-          <div className="relative">
+          {!props.employeeScheduleOnly && <div className="relative">
             <div
               className={`grid gap-4 md:grid-cols-2 ${
                 !isRosterSummaryExpanded && canExpandScheduleOverview
@@ -2409,8 +2515,8 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
             {!isRosterSummaryExpanded && canExpandScheduleOverview && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white to-transparent" />
             )}
-          </div>
-          {canExpandScheduleOverview && (
+          </div>}
+          {!props.employeeScheduleOnly && canExpandScheduleOverview && (
             <div className="flex justify-end">
               <button
                 className="h-9 border border-neutral-300 px-3 text-sm hover:bg-neutral-100"
@@ -2422,7 +2528,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
             </div>
           )}
 
-          <section className="space-y-3 border border-neutral-300 bg-neutral-50 p-3">
+          {!props.employeeScheduleOnly && <section className="space-y-3 border border-neutral-300 bg-neutral-50 p-3">
             <div className="grid gap-3 md:grid-cols-4">
               <label className="text-sm">
                 Year
@@ -2508,11 +2614,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
               Reference date/day are editable here. The values you set are used for the next generated table.
             </p>
             <p className="text-xs text-neutral-600">Seed is auto-generated each time you create a new table.</p>
-          </section>
+          </section>}
         </div>
       )}
 
-      {isShiftActionModalOpen && (
+      {isShiftActionModalOpen && !disableCellInteractions && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
           <div className="w-full max-w-lg border border-neutral-400 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
@@ -2698,6 +2804,22 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                         Remove is only available when you are the current volunteer on this shift.
                       </p>
                     )}
+                    {currentEmployeeCanRemoveSelfSelectedShift &&
+                      shiftActionChoice === 'remove' &&
+                      !selectedShiftSupportsOpenVolunteer && (
+                        <p className="text-sm text-neutral-700">
+                          Regular shifts always require an HR-approved shift exchange request.
+                        </p>
+                      )}
+                    {currentEmployeeCanRemoveSelfSelectedShift &&
+                      shiftActionChoice === 'remove' &&
+                      selectedShiftSupportsOpenVolunteer &&
+                      selectedShiftRemovalLockActive && (
+                        <p className="text-sm text-neutral-700">
+                          This morning/off-period shift is within 7 days. A shift exchange request will be sent to HR
+                          for approval.
+                        </p>
+                      )}
                     <div className="flex justify-end gap-2">
                       <button
                         className="h-9 border border-neutral-500 px-3 text-sm"
@@ -2717,7 +2839,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                         onClick={handleSubmitShiftAction}
                         type="button"
                       >
-                        {shiftActionChoice === 'remove' ? 'Remove me' : 'Sign me up'}
+                        {shiftActionChoice === 'remove'
+                          ? !selectedShiftSupportsOpenVolunteer || selectedShiftRemovalLockActive
+                            ? 'Submit exchange request'
+                            : 'Remove me'
+                          : 'Sign me up'}
                       </button>
                     </div>
                   </>

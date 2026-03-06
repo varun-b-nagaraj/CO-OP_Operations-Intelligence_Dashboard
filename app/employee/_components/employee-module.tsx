@@ -531,11 +531,7 @@ export function EmployeeModule() {
     strikeQuery.data
   ]);
 
-  const navItems = [
-    { id: 'schedule', label: 'Schedule', icon: 'schedule' as const },
-    { id: 'accountability', label: 'Accountability', icon: 'audit' as const },
-    { id: 'requests', label: 'Requests', icon: 'requests' as const }
-  ];
+  const navItems = [{ id: 'schedule', label: 'Schedule', icon: 'schedule' as const }];
 
   const loginMutation = useMutation({
     mutationFn: async (sNumber: string) => {
@@ -608,7 +604,7 @@ export function EmployeeModule() {
       navAriaLabel="Employee dashboard navigation"
       navItems={navItems}
       onNavSelect={(id) => setActiveTab(id as EmployeeTabId)}
-      subtitle="Self-service schedule, attendance, and requests"
+      subtitle="Schedule-only employee view"
       title="Employee Dashboard"
     >
       <section className="min-w-0 overflow-x-hidden border-x border-b border-neutral-300 bg-white">
@@ -636,7 +632,13 @@ export function EmployeeModule() {
 
         {activeTab === 'schedule' && (
           <section className="p-4 md:p-6">
-            <ScheduleTab forcedAccessMode="employee" lockedEmployeeSNumber={sessionSNumber} />
+            <ScheduleTab
+              disableCellInteractions
+              employeeScheduleOnly
+              enableListViewToggle
+              forcedAccessMode="employee"
+              lockedEmployeeSNumber={sessionSNumber}
+            />
           </section>
         )}
 
