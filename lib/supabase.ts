@@ -5,6 +5,7 @@ type BackendDepartment = 'hr' | 'marketing' | 'product' | 'inventory' | 'shared'
 
 const HR_TABLES = new Set([
   'students',
+  'employee_settings',
   'hr_employee_settings',
   'hr_shift_attendance',
   'hr_morning_shift_attendance',

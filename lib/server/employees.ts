@@ -12,6 +12,7 @@ function normalizeStudentRow(row: Record<string, unknown>): Employee {
       'Unknown',
     s_number:
       (typeof row.s_number === 'string' && row.s_number) ||
+      (typeof row.student_number === 'string' && row.student_number) ||
       (typeof row.snumber === 'string' && row.snumber) ||
       '',
     username: typeof row.username === 'string' ? row.username : null,
@@ -45,7 +46,7 @@ export async function getStudentBySNumber(
   const { data, error } = await supabase
     .from('students')
     .select('*')
-    .eq('s_number', sNumber)
+    .or(`s_number.eq.${sNumber},student_number.eq.${sNumber},snumber.eq.${sNumber}`)
     .maybeSingle();
 
   if (error || !data) return null;

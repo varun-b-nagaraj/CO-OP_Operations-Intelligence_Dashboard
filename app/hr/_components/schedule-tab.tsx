@@ -473,7 +473,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
     queryKey: ['employee-settings-for-schedule'],
     staleTime: 30 * 1000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('hr_employee_settings').select('employee_s_number, off_periods');
+      const { data, error } = await supabase.from('employee_settings').select('employee_s_number, off_periods');
       if (error) throw new Error(error.message);
       return data ?? [];
     }
