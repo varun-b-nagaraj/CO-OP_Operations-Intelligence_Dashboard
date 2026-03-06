@@ -14,6 +14,7 @@ import { getStudentDisplayName, getStudentSNumber, StudentRow, useBrowserSupabas
 
 type EmployeeTabId = 'schedule' | 'accountability' | 'requests';
 type ShiftRequestAssignment = {
+  requestKey: string;
   date: string;
   period: number;
   shiftSlotKey: string;
@@ -347,24 +348,23 @@ export function EmployeeModule() {
     const today = todayKey();
     return ownAssignments
       .filter((assignment) => assignment.date >= today)
-      .filter((assignment) => assignment.period > 0)
-      .filter((assignment) => !offPeriods.includes(assignment.period))
-      .map((assignment) => ({
+      .map((assignment, index) => ({
+        requestKey: `${assignment.date}|${assignment.period}|${assignment.shiftSlotKey}|${assignment.effectiveWorkerSNumber}|${index}`,
         date: assignment.date,
         period: assignment.period,
         shiftSlotKey: assignment.shiftSlotKey,
         fromSNumber: assignment.effectiveWorkerSNumber,
-        label: `${assignment.date} - Period ${assignment.period} (${assignment.shiftSlotKey})`
+        label: `${assignment.date} - ${formatPeriodDisplay(assignment.period)} (${assignment.shiftSlotKey})`
       }));
-  }, [offPeriods, ownAssignments]);
+  }, [ownAssignments]);
 
   useEffect(() => {
     if (requestableAssignments.length === 0) {
       setRequestAssignmentKey('');
       return;
     }
-    const exists = requestableAssignments.some((assignment) => assignment.shiftSlotKey === requestAssignmentKey);
-    if (!exists) setRequestAssignmentKey(requestableAssignments[0].shiftSlotKey);
+    const exists = requestableAssignments.some((assignment) => assignment.requestKey === requestAssignmentKey);
+    if (!exists) setRequestAssignmentKey(requestableAssignments[0].requestKey);
   }, [requestAssignmentKey, requestableAssignments]);
 
   const offPeriodsBySNumber = useMemo(() => {
@@ -381,7 +381,7 @@ export function EmployeeModule() {
   }, [allSettingsQuery.data]);
 
   const replacementOptions = useMemo(() => {
-    const assignment = requestableAssignments.find((item) => item.shiftSlotKey === requestAssignmentKey);
+    const assignment = requestableAssignments.find((item) => item.requestKey === requestAssignmentKey);
     if (!assignment) return [] as Array<{ value: string; label: string }>;
 
     const rows: Array<{ value: string; label: string }> = [];
@@ -393,7 +393,7 @@ export function EmployeeModule() {
 
       const targetClassPeriod = toNumber(student.Schedule ?? student.schedule);
       const targetOffPeriods = offPeriodsBySNumber.get(sNumber) ?? [4, 8];
-      if (targetClassPeriod !== assignment.period && !targetOffPeriods.includes(assignment.period)) continue;
+      if (assignment.period !== 0 && targetClassPeriod !== assignment.period && !targetOffPeriods.includes(assignment.period)) continue;
 
       rows.push({
         value: sNumber,
@@ -430,7 +430,7 @@ export function EmployeeModule() {
 
   const submitShiftRequestMutation = useMutation({
     mutationFn: async () => {
-      const assignment = requestableAssignments.find((item) => item.shiftSlotKey === requestAssignmentKey);
+      const assignment = requestableAssignments.find((item) => item.requestKey === requestAssignmentKey);
       if (!assignment) throw new Error('Select a shift first.');
       if (!requestToSNumber) throw new Error('Select a replacement employee.');
       if (!requestReason.trim()) throw new Error('Provide a reason.');
@@ -735,7 +735,7 @@ export function EmployeeModule() {
         {activeTab === 'requests' && (
           <section className="space-y-4 p-4 md:p-6">
             <section className="grid gap-3 border border-neutral-300 p-3 md:grid-cols-2">
-              <h3 className="md:col-span-2 text-sm font-semibold">Shift exchange request (regular shifts only)</h3>
+              <h3 className="md:col-span-2 text-sm font-semibold">Shift exchange request</h3>
               <label className="text-sm">
                 Your shift
                 <Select
@@ -744,10 +744,10 @@ export function EmployeeModule() {
                   value={requestAssignmentKey}
                 >
                   {requestableAssignments.length === 0 ? (
-                    <option value="">No requestable regular shifts</option>
+                    <option value="">No requestable shifts</option>
                   ) : (
                     requestableAssignments.map((assignment) => (
-                      <option key={assignment.shiftSlotKey} value={assignment.shiftSlotKey}>
+                      <option key={assignment.requestKey} value={assignment.requestKey}>
                         {assignment.label}
                       </option>
                     ))

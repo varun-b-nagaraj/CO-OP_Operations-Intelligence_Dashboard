@@ -216,6 +216,12 @@ function resolvePeriodForDay(periods: number[], dayType: string | undefined): nu
   return periods[0] ?? 0;
 }
 
+function pairedPeriod(period: number): number | null {
+  if (period >= 1 && period <= 4) return period + 4;
+  if (period >= 5 && period <= 8) return period - 4;
+  return null;
+}
+
 function buildManualShiftSlotKey(
   date: string,
   period: number,
@@ -379,6 +385,9 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
   const [dragTargetUid, setDragTargetUid] = useState<string | null>(null);
   const [emptySlotTarget, setEmptySlotTarget] = useState<EmptySlotTarget | null>(null);
   const [attendanceReason, setAttendanceReason] = useState('');
+  const [shiftActionReason, setShiftActionReason] = useState('');
+  const [exchangeToSNumber, setExchangeToSNumber] = useState('');
+  const [useExchangeForRemove, setUseExchangeForRemove] = useState(false);
   const [savedAssignmentWorkersByUid, setSavedAssignmentWorkersByUid] = useState<Record<string, string>>({});
   const [savedRosterScheduleableById, setSavedRosterScheduleableById] = useState<Record<string, boolean>>({});
   const [pendingManualEdits, setPendingManualEdits] = useState<PendingManualEdit[]>([]);
@@ -924,16 +933,23 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
       const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
       if (!rosterMeta || !rosterMeta.scheduleable) return false;
       if (period === 0) return true;
+      const partnerPeriod = pairedPeriod(period);
       const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
-      return rosterMeta.classPeriod === period || offPeriods.includes(period);
+      return (
+        rosterMeta.classPeriod === period ||
+        (partnerPeriod !== null && rosterMeta.classPeriod === partnerPeriod) ||
+        offPeriods.includes(period) ||
+        (partnerPeriod !== null && offPeriods.includes(partnerPeriod))
+      );
     },
     [rosterMetaBySNumber, settingsMap]
   );
 
   const isEmployeeOffPeriod = useCallback(
     (employeeSNumber: string, period: number): boolean => {
+      const partnerPeriod = pairedPeriod(period);
       const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
-      return offPeriods.includes(period);
+      return offPeriods.includes(period) || (partnerPeriod !== null && offPeriods.includes(partnerPeriod));
     },
     [settingsMap]
   );
@@ -971,6 +987,13 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
   const getShiftAssignments = useCallback(
     (date: string, period: number): EditableAssignment[] => assignmentMap.get(`${date}|${period}`) ?? [],
     [assignmentMap]
+  );
+  const isEmployeeAlreadyAssignedToShift = useCallback(
+    (employeeSNumber: string, date: string, period: number): boolean =>
+      getShiftAssignments(date, period).some(
+        (assignment) => assignment.effectiveWorkerSNumber === employeeSNumber
+      ),
+    [getShiftAssignments]
   );
 
   const getShiftSlotCapacity = useCallback(
@@ -1198,17 +1221,33 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
         selectedShiftSupportsOpenVolunteer &&
         selectedShiftActionAttendanceStatus === 'expected' &&
         actingEmployeeSNumber !== selectedShiftActionAssignment.effectiveWorkerSNumber &&
+        !isEmployeeAlreadyAssignedToShift(
+          actingEmployeeSNumber,
+          selectedShiftActionAssignment.date,
+          selectedShiftActionAssignment.period
+        ) &&
         canEmployeeSelfSignUpForPeriod(
           actingEmployeeSNumber,
           selectedShiftActionAssignment.date,
           selectedShiftActionAssignment.period
         )) ||
         (emptySlotTarget &&
+          !isEmployeeAlreadyAssignedToShift(
+            actingEmployeeSNumber,
+            emptySlotTarget.date,
+            emptySlotTarget.period
+          ) &&
           canEmployeeSelfSignUpForPeriod(
             actingEmployeeSNumber,
             emptySlotTarget.date,
             emptySlotTarget.period
           )))
+  );
+  const employeeCanInteractWithSelectedShift = Boolean(
+    isManagerMode ||
+      !selectedShiftActionAssignment ||
+      !actingEmployeeSNumber ||
+      selectedShiftActionAssignment.effectiveWorkerSNumber === actingEmployeeSNumber
   );
   const currentEmployeeOwnsSelectedShift = Boolean(
     selectedShiftActionAssignment &&
@@ -1218,13 +1257,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
   const currentEmployeeCanRequestSelfRemovalSelectedShift = Boolean(
     selectedShiftActionAssignment &&
       currentEmployeeOwnsSelectedShift &&
-      selectedShiftActionAttendanceStatus === 'expected' &&
+      selectedShiftActionAttendanceStatus !== 'absent' &&
       (selectedShiftIsManualAssignment ||
         selectedShiftActionAssignment.effectiveWorkerSNumber !== selectedShiftActionAssignment.studentSNumber)
   );
-  const canEditSelectedShiftAttendance = Boolean(
-    selectedShiftActionAssignment && (isManagerMode || currentEmployeeOwnsSelectedShift)
-  );
+  const canEditSelectedShiftAttendance = Boolean(selectedShiftActionAssignment && isManagerMode);
 
   useEffect(() => {
     if (!selectedShiftActionAssignment && !emptySlotTarget) {
@@ -1259,30 +1296,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
   ]);
 
   useEffect(() => {
-    if (!isShiftActionModalOpen || isManagerMode) return;
-    if (!selectedShiftActionAssignment) {
-      if (shiftActionChoice !== 'volunteer') setShiftActionChoice('volunteer');
-      return;
-    }
-    if (currentEmployeeCanVolunteerSelectedShift) {
-      if (shiftActionChoice !== 'volunteer') setShiftActionChoice('volunteer');
-      return;
-    }
-    if (currentEmployeeCanRequestSelfRemovalSelectedShift && shiftActionChoice !== 'remove') {
-      setShiftActionChoice('remove');
-    }
-  }, [
-    currentEmployeeCanRequestSelfRemovalSelectedShift,
-    currentEmployeeCanVolunteerSelectedShift,
-    isShiftActionModalOpen,
-    isManagerMode,
-    selectedShiftActionAssignment,
-    shiftActionChoice
-  ]);
-
-  useEffect(() => {
     setAttendanceReason('');
     setManagerAssigneeSearch('');
+    setShiftActionReason('');
+    setExchangeToSNumber('');
+    setUseExchangeForRemove(false);
   }, [emptySlotTarget, shiftActionModalUid]);
 
   useEffect(() => {
@@ -1302,6 +1320,98 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
     selectedShiftDaysUntil !== null && selectedShiftDaysUntil >= 0 && selectedShiftDaysUntil <= 7
   );
   const currentEmployeeCanRemoveSelfSelectedShift = currentEmployeeCanRequestSelfRemovalSelectedShift;
+  const canShowVolunteerAction = Boolean(
+    !selectedShiftDayPassed &&
+      ((!selectedShiftActionAssignment && !selectedActionIsWeekend) ||
+        (selectedShiftActionAssignment && currentEmployeeCanVolunteerSelectedShift))
+  );
+  const canShowRemoveAction = Boolean(
+    selectedShiftActionAssignment &&
+      currentEmployeeCanRequestSelfRemovalSelectedShift &&
+      !selectedShiftDayPassed
+  );
+  const removeRequiresExchangeRequest = Boolean(
+    selectedShiftActionAssignment &&
+      (!selectedShiftSupportsOpenVolunteer || selectedShiftRemovalLockActive)
+  );
+  const canOfferOptionalExchangeForRemove = Boolean(
+    shiftActionChoice === 'remove' && canShowRemoveAction && !removeRequiresExchangeRequest
+  );
+  const shouldShowExchangeForm = Boolean(
+    shiftActionChoice === 'remove' &&
+      canShowRemoveAction &&
+      (removeRequiresExchangeRequest || useExchangeForRemove)
+  );
+  const employeeHasAnyAction = canShowVolunteerAction || canShowRemoveAction;
+  const exchangeReplacementOptions = useMemo(() => {
+    if (!selectedShiftActionAssignment || !shouldShowExchangeForm) return [];
+    return editableRoster
+      .filter((employee) => employee.scheduleable && Boolean(employee.s_number))
+      .filter((employee) => employee.s_number !== selectedShiftActionAssignment.effectiveWorkerSNumber)
+      .filter((employee) =>
+        canEmployeeWorkPeriod(employee.s_number, selectedShiftActionAssignment.period)
+      )
+      .filter(
+        (employee) =>
+          !isEmployeeAlreadyAssignedToShift(
+            employee.s_number,
+            selectedShiftActionAssignment.date,
+            selectedShiftActionAssignment.period
+          )
+      )
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((employee) => ({
+        value: employee.s_number,
+        label: `${employee.name} (${employee.s_number})`
+      }));
+  }, [
+    canEmployeeWorkPeriod,
+    editableRoster,
+    isEmployeeAlreadyAssignedToShift,
+    shouldShowExchangeForm,
+    selectedShiftActionAssignment
+  ]);
+
+  useEffect(() => {
+    if (!isShiftActionModalOpen || isManagerMode) return;
+    if (canShowVolunteerAction) {
+      if (shiftActionChoice !== 'volunteer') setShiftActionChoice('volunteer');
+      return;
+    }
+    if (canShowRemoveAction) {
+      if (shiftActionChoice !== 'remove') setShiftActionChoice('remove');
+    }
+  }, [canShowRemoveAction, canShowVolunteerAction, isManagerMode, isShiftActionModalOpen, shiftActionChoice]);
+
+  useEffect(() => {
+    if (!isShiftActionModalOpen || isManagerMode || !shouldShowExchangeForm || shiftActionChoice !== 'remove') {
+      setExchangeToSNumber('');
+      return;
+    }
+    if (exchangeReplacementOptions.length === 0) {
+      setExchangeToSNumber('');
+      return;
+    }
+    const exists = exchangeReplacementOptions.some((option) => option.value === exchangeToSNumber);
+    if (!exists) setExchangeToSNumber(exchangeReplacementOptions[0].value);
+  }, [
+    exchangeReplacementOptions,
+    exchangeToSNumber,
+    isManagerMode,
+    isShiftActionModalOpen,
+    shouldShowExchangeForm,
+    shiftActionChoice
+  ]);
+
+  useEffect(() => {
+    if (!isShiftActionModalOpen || shiftActionChoice !== 'remove') {
+      setUseExchangeForRemove(false);
+      return;
+    }
+    if (removeRequiresExchangeRequest) {
+      setUseExchangeForRemove(true);
+    }
+  }, [isShiftActionModalOpen, removeRequiresExchangeRequest, shiftActionChoice]);
 
   const targetYearMonthLabel = `${generationSelection.year}-${String(generationSelection.month).padStart(2, '0')}`;
   const openMonthLabel = `${monthSelection.year}-${String(monthSelection.month).padStart(2, '0')}`;
@@ -1669,8 +1779,16 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
         setMessage('No active employee context was found for sign-up.');
         return;
       }
+      if (!employeeHasAnyAction) {
+        setMessage('No action is available for this shift.');
+        return;
+      }
 
       if (shiftActionChoice === 'volunteer') {
+        if (!canShowVolunteerAction) {
+          setMessage('Volunteer is not available for this shift.');
+          return;
+        }
         if (selectedShiftActionAssignment) {
           if (!currentEmployeeCanVolunteerSelectedShift) {
             setMessage('You can only sign up on weekdays for morning shifts and your configured off-periods.');
@@ -1716,29 +1834,25 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
         return;
       }
 
-      if (!currentEmployeeCanRemoveSelfSelectedShift) {
+      if (!canShowRemoveAction || !currentEmployeeCanRemoveSelfSelectedShift) {
         setMessage('You can only remove yourself from a shift you currently volunteered for.');
         return;
       }
       if (!selectedShiftActionAssignment) return;
-
-      const isRegularShiftRemoval = !selectedShiftSupportsOpenVolunteer;
-      if (isRegularShiftRemoval) {
+      const shouldSubmitExchangeRequest = removeRequiresExchangeRequest || useExchangeForRemove;
+      if (shouldSubmitExchangeRequest) {
+        if (!exchangeToSNumber) {
+          setMessage('Select who will cover your shift.');
+          return;
+        }
+        if (!shiftActionReason.trim()) {
+          setMessage('Provide a reason for this shift exchange request.');
+          return;
+        }
         volunteerForShiftMutation.mutate({
           assignment: selectedShiftActionAssignment,
-          targetSNumber: selectedShiftActionAssignment.studentSNumber,
-          reason: 'Regular shift removal requires shift exchange approval',
-          autoApprove: false,
-          mode: 'remove'
-        });
-        return;
-      }
-
-      if (selectedShiftRemovalLockActive) {
-        volunteerForShiftMutation.mutate({
-          assignment: selectedShiftActionAssignment,
-          targetSNumber: selectedShiftActionAssignment.studentSNumber,
-          reason: 'Morning/off-period removal requested within 7 days of shift date',
+          targetSNumber: exchangeToSNumber,
+          reason: shiftActionReason.trim(),
           autoApprove: false,
           mode: 'remove'
         });
@@ -2134,6 +2248,13 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                                       key={assignment.uid}
                                       onClick={() => {
                                         if (disableCellInteractions) return;
+                                        if (
+                                          !isManagerMode &&
+                                          actingEmployeeSNumber &&
+                                          assignment.effectiveWorkerSNumber !== actingEmployeeSNumber
+                                        ) {
+                                          return;
+                                        }
                                         if (isSwapModeEnabled) return;
                                         setShiftActionModalUid(assignment.uid);
                                         setEmptySlotTarget(null);
@@ -2779,29 +2900,31 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                 )}
                 {actingEmployeeSNumber && (
                   <>
-                    <label className="block text-sm">
-                      Action
-                      <Select
-                        className="mt-1 h-9 w-full border border-neutral-300 px-2"
-                        onChange={(event) => setShiftActionChoice(event.target.value as ShiftActionChoice)}
-                        value={shiftActionChoice}
-                      >
-                        <option disabled={!currentEmployeeCanVolunteerSelectedShift} value="volunteer">
-                          Volunteer me for this shift
-                        </option>
-                        <option disabled={!currentEmployeeCanRemoveSelfSelectedShift} value="remove">
-                          Remove me from this shift
-                        </option>
-                      </Select>
-                    </label>
-                    {!currentEmployeeCanVolunteerSelectedShift && shiftActionChoice === 'volunteer' && (
+                    {employeeHasAnyAction && (
+                      <label className="block text-sm">
+                        Action
+                        <Select
+                          className="mt-1 h-9 w-full border border-neutral-300 px-2"
+                          onChange={(event) => setShiftActionChoice(event.target.value as ShiftActionChoice)}
+                          value={shiftActionChoice}
+                        >
+                          {canShowVolunteerAction && (
+                            <option value="volunteer">Volunteer me for this shift</option>
+                          )}
+                          {canShowRemoveAction && (
+                            <option value="remove">Remove me from this shift</option>
+                          )}
+                        </Select>
+                      </label>
+                    )}
+                    {!employeeHasAnyAction && (
                       <p className="text-sm text-neutral-700">
-                        Volunteer is only available on weekdays for morning shifts and your configured off-periods.
+                        No employee action is available for this shift.
                       </p>
                     )}
-                    {!currentEmployeeCanRemoveSelfSelectedShift && shiftActionChoice === 'remove' && (
+                    {!employeeCanInteractWithSelectedShift && (
                       <p className="text-sm text-neutral-700">
-                        Remove is only available when you are the current volunteer on this shift.
+                        You can only interact with your own assignment rows.
                       </p>
                     )}
                     {currentEmployeeCanRemoveSelfSelectedShift &&
@@ -2820,6 +2943,48 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                           for approval.
                         </p>
                       )}
+                    {canOfferOptionalExchangeForRemove && (
+                      <label className="block text-sm">
+                        <span className="inline-flex items-center gap-2">
+                          <input
+                            checked={useExchangeForRemove}
+                            onChange={(event) => setUseExchangeForRemove(event.target.checked)}
+                            type="checkbox"
+                          />
+                          Submit as shift exchange instead
+                        </span>
+                      </label>
+                    )}
+                    {shouldShowExchangeForm && (
+                      <>
+                        <label className="block text-sm">
+                          To s_number (eligible)
+                          <Select
+                            className="mt-1 h-9 w-full border border-neutral-300 px-2"
+                            onChange={(event) => setExchangeToSNumber(event.target.value)}
+                            value={exchangeToSNumber}
+                          >
+                            {exchangeReplacementOptions.length === 0 && (
+                              <option value="">No eligible replacements</option>
+                            )}
+                            {exchangeReplacementOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </label>
+                        <label className="block text-sm">
+                          Reason
+                          <textarea
+                            className="mt-1 min-h-[88px] w-full border border-neutral-300 p-2"
+                            onChange={(event) => setShiftActionReason(event.target.value)}
+                            placeholder="Why do you need this shift exchange?"
+                            value={shiftActionReason}
+                          />
+                        </label>
+                      </>
+                    )}
                     <div className="flex justify-end gap-2">
                       <button
                         className="h-9 border border-neutral-500 px-3 text-sm"
@@ -2828,23 +2993,29 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                       >
                         Cancel
                       </button>
-                      <button
-                        className="h-9 border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
-                        disabled={
-                          volunteerForShiftMutation.isPending ||
-                          manualSlotMutation.isPending ||
-                          (shiftActionChoice === 'volunteer' && !currentEmployeeCanVolunteerSelectedShift) ||
-                          (shiftActionChoice === 'remove' && !currentEmployeeCanRemoveSelfSelectedShift)
-                        }
-                        onClick={handleSubmitShiftAction}
-                        type="button"
-                      >
-                        {shiftActionChoice === 'remove'
-                          ? !selectedShiftSupportsOpenVolunteer || selectedShiftRemovalLockActive
-                            ? 'Submit exchange request'
-                            : 'Remove me'
-                          : 'Sign me up'}
-                      </button>
+                      {employeeHasAnyAction && (
+                        <button
+                          className="h-9 border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
+                          disabled={
+                            volunteerForShiftMutation.isPending ||
+                            manualSlotMutation.isPending ||
+                            !employeeCanInteractWithSelectedShift ||
+                            (shiftActionChoice === 'volunteer' && !canShowVolunteerAction) ||
+                            (shiftActionChoice === 'remove' && !canShowRemoveAction) ||
+                            (shiftActionChoice === 'remove' &&
+                              shouldShowExchangeForm &&
+                              (!exchangeToSNumber || !shiftActionReason.trim()))
+                          }
+                          onClick={handleSubmitShiftAction}
+                          type="button"
+                        >
+                          {shiftActionChoice === 'remove'
+                            ? shouldShowExchangeForm
+                              ? 'Submit exchange request'
+                              : 'Remove me'
+                            : 'Sign me up'}
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -2862,7 +3033,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
               </div>
             )}
 
-            {selectedShiftActionAssignment && (
+            {selectedShiftActionAssignment && isManagerMode && (
               <div className="mt-4 border-t border-neutral-200 pt-3">
                 <p className="text-sm font-medium text-neutral-900">Attendance</p>
                 {!canEditSelectedShiftAttendance && (
