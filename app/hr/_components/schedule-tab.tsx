@@ -126,6 +126,7 @@ const COLLAPSED_ROSTER_SUMMARY_ROWS = 12;
 const COLLAPSED_OVERVIEW_MAX_HEIGHT_CLASS = 'max-h-[560px]';
 const MAX_REGULAR_ASSIGNMENTS_PER_SHIFT = 3;
 const MAX_ALTERNATE_ASSIGNMENTS_PER_SHIFT = 1;
+const MESSAGE_AUTO_DISMISS_MS = 5000;
 const LEAVE_WITH_UNSAVED_CHANGES_MESSAGE =
   'You have unsaved schedule changes. Save before leaving, or your changes will be lost.';
 
@@ -765,6 +766,14 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
   };
 
   const schedule = scheduleQuery.data;
+
+  useEffect(() => {
+    if (!message) return;
+    const timeoutId = window.setTimeout(() => {
+      setMessage(null);
+    }, MESSAGE_AUTO_DISMISS_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
 
   useEffect(() => {
     if (!schedule) return;

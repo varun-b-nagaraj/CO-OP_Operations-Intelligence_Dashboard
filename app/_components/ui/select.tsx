@@ -12,6 +12,16 @@ type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
   placeholder?: string;
 };
 
+function extractText(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map((item) => extractText(item)).join('');
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return extractText(node.props.children);
+  }
+  return '';
+}
+
 function getOptions(children: React.ReactNode): OptionItem[] {
   const options: OptionItem[] = [];
   React.Children.forEach(children, (child) => {
@@ -19,10 +29,7 @@ function getOptions(children: React.ReactNode): OptionItem[] {
     if (typeof child.type !== 'string' || child.type.toLowerCase() !== 'option') return;
 
     const value = String(child.props.value ?? '');
-    const label =
-      typeof child.props.children === 'string'
-        ? child.props.children
-        : String(child.props.children ?? value);
+    const label = extractText(child.props.children).trim() || value;
     options.push({
       value,
       label,
