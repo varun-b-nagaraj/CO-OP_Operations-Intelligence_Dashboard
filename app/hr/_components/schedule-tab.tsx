@@ -99,6 +99,13 @@ const PERIOD_BANDS: Array<{ id: string; label: string; periods: number[] }> = [
   { id: 'p3-7', label: 'Period 3 / 7', periods: [3, 7] },
   { id: 'p4-8', label: 'Period 4 / 8', periods: [4, 8] }
 ];
+const MORNING_SHIFT_WINDOW = Object.freeze({ start: '08:20', end: '09:00' });
+const BASE_PERIOD_WINDOWS = Object.freeze({
+  1: { start: '09:00', end: '10:32' },
+  2: { start: '10:40', end: '12:12' },
+  3: { start: '12:20', end: '14:39' },
+  4: { start: '14:47', end: '16:20' }
+});
 
 const MONTH_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 1, label: 'January' },
@@ -276,17 +283,54 @@ function isAlternateAssignment(assignment: Pick<ScheduleAssignment, 'role' | 'ty
 
 function normalizeAttendanceStatus(
   value: unknown,
-  shiftDate?: string
+  shiftDate?: string,
+  shiftPeriod?: number
 ): ShiftAttendanceStatus {
   const status: ShiftAttendanceStatus =
     value === 'present' || value === 'absent' || value === 'excused' || value === 'expected'
       ? value
       : 'expected';
 
-  if (status === 'expected' && shiftDate && isDateBeforeToday(shiftDate, getTodayDateKey())) {
+  if (!shiftDate || typeof shiftPeriod !== 'number') return status;
+  const shiftEnded = hasShiftWindowEnded(shiftDate, shiftPeriod);
+  if (status === 'expected' && shiftEnded) {
     return 'present';
   }
+  if (status === 'present' && !shiftEnded) {
+    return 'expected';
+  }
   return status;
+}
+
+function toDateKeyLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function toMinutesFromMidnight(value: string): number {
+  const [hour, minute] = value.split(':').map((part) => Number(part));
+  return hour * 60 + minute;
+}
+
+function resolveWindowForPeriod(period: number): { start: string; end: string } | null {
+  if (period === 0) return MORNING_SHIFT_WINDOW;
+  const basePeriod = period >= 5 ? period - 4 : period;
+  if (basePeriod < 1 || basePeriod > 4) return null;
+  return BASE_PERIOD_WINDOWS[basePeriod as 1 | 2 | 3 | 4] ?? null;
+}
+
+function hasShiftWindowEnded(shiftDate: string, shiftPeriod: number, now: Date = new Date()): boolean {
+  const todayKey = toDateKeyLocal(now);
+  if (shiftDate < todayKey) return true;
+  if (shiftDate > todayKey) return false;
+
+  const window = resolveWindowForPeriod(shiftPeriod);
+  if (!window) return false;
+
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return nowMinutes >= toMinutesFromMidnight(window.end);
 }
 
 function toValidNumber(value: unknown): number | null {
@@ -628,8 +672,8 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
             shift_period: payload.period,
             shift_slot_key: shiftSlotKey,
             employee_s_number: payload.employeeSNumber,
-            status: 'present',
-            raw_status: 'present',
+            status: 'expected',
+            raw_status: 'expected',
             source: 'manual',
             reason: null,
             marked_by: 'open_access',
@@ -1174,7 +1218,8 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
     ].join('|');
     return normalizeAttendanceStatus(
       attendanceByAssignmentKey.get(key)?.status,
-      selectedShiftActionAssignment.date
+      selectedShiftActionAssignment.date,
+      selectedShiftActionAssignment.period
     );
   }, [attendanceByAssignmentKey, selectedShiftActionAssignment]);
   const selectedShiftIsManualAssignment = Boolean(
@@ -1531,8 +1576,8 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
               shift_period: edit.period,
               shift_slot_key: shiftSlotKey,
               employee_s_number: edit.employeeSNumber,
-              status: 'present',
-              raw_status: 'present',
+              status: 'expected',
+              raw_status: 'expected',
               source: 'manual',
               reason: null,
               marked_by: 'open_access',
@@ -2226,7 +2271,8 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                                   ].join('|');
                                   const attendanceStatus = normalizeAttendanceStatus(
                                     attendanceByAssignmentKey.get(attendanceKey)?.status,
-                                    assignment.date
+                                    assignment.date,
+                                    assignment.period
                                   );
                                   const isDragTarget = dragTargetUid === assignment.uid;
                                   const isValidDropTarget = dragSourceUid
