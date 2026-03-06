@@ -2165,7 +2165,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                 exchange request. Morning/off-period removals require exchange approval only within 7 days.
               </p>
             )}
-            <div className={scheduleViewMode === 'calendar' ? 'overflow-x-auto border border-neutral-300' : 'hidden'}>
+            <div className={scheduleViewMode === 'calendar' ? 'border border-neutral-300' : 'hidden'}>
               <table className="w-full table-fixed text-xs md:text-sm">
                 <colgroup>
                   <col className="w-[82px] md:w-[96px]" />
