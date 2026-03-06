@@ -16,14 +16,6 @@ import {
 } from '@/lib/types';
 import { ShiftAttendanceMarkSchema, zodFieldErrors } from '@/lib/validation';
 
-function getTodayDateKey(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function hasShiftDatePassed(shiftDate: string): boolean {
-  return shiftDate < getTodayDateKey();
-}
-
 async function maybeAwardShiftPoints(
   params: {
     employeeSNumber: string;
@@ -208,13 +200,6 @@ export async function markShiftPresent(
   if (!allowed) {
     return errorResult(correlationId, 'FORBIDDEN', 'You do not have permission to mark attendance.');
   }
-  if (!hasShiftDatePassed(date)) {
-    return errorResult(
-      correlationId,
-      'VALIDATION_ERROR',
-      'You can only mark a shift present after the shift date has passed.'
-    );
-  }
 
   return upsertShiftAttendanceStatus({
     sNumber,
@@ -236,13 +221,6 @@ export async function markShiftAbsent(
   const allowed = await ensureServerPermission('hr.attendance.override');
   if (!allowed) {
     return errorResult(correlationId, 'FORBIDDEN', 'You do not have permission to mark attendance.');
-  }
-  if (!hasShiftDatePassed(date)) {
-    return errorResult(
-      correlationId,
-      'VALIDATION_ERROR',
-      'You can only mark a shift absent after the shift date has passed.'
-    );
   }
 
   return upsertShiftAttendanceStatus({
@@ -266,13 +244,6 @@ export async function excuseShiftAbsence(
   const allowed = await ensureServerPermission('hr.attendance.override');
   if (!allowed) {
     return errorResult(correlationId, 'FORBIDDEN', 'You do not have permission to excuse attendance.');
-  }
-  if (!hasShiftDatePassed(date)) {
-    return errorResult(
-      correlationId,
-      'VALIDATION_ERROR',
-      'You can only pardon a shift absence after the shift date has passed.'
-    );
   }
 
   return upsertShiftAttendanceStatus({

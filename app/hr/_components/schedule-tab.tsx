@@ -9,7 +9,7 @@ import { fetchSchedule } from '@/lib/api-client';
 import { usePermission } from '@/lib/permissions';
 import { ScheduleAssignment, ScheduleParams, ShiftAttendanceStatus } from '@/lib/types';
 
-import { getTodayDateKey, isDateBeforeToday, useBrowserSupabase } from './utils';
+import { getTodayDateKey, useBrowserSupabase } from './utils';
 
 type GenericRow = Record<string, unknown>;
 type YearMonthSelection = { year: number; month: number };
@@ -331,6 +331,18 @@ function hasShiftWindowEnded(shiftDate: string, shiftPeriod: number, now: Date =
 
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   return nowMinutes >= toMinutesFromMidnight(window.end);
+}
+
+function hasShiftWindowStarted(shiftDate: string, shiftPeriod: number, now: Date = new Date()): boolean {
+  const todayKey = toDateKeyLocal(now);
+  if (shiftDate < todayKey) return true;
+  if (shiftDate > todayKey) return false;
+
+  const window = resolveWindowForPeriod(shiftPeriod);
+  if (!window) return false;
+
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return nowMinutes >= toMinutesFromMidnight(window.start);
 }
 
 function toValidNumber(value: unknown): number | null {
@@ -927,24 +939,18 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
   );
   const requestedEmployeeSNumber =
     (props.lockedEmployeeSNumber ?? '').trim() || (searchParams.get('employee') ?? '').trim();
-  const requestedAccessMode = (props.forcedAccessMode ?? searchParams.get('access') ?? '').trim().toLowerCase();
 
   useEffect(() => {
     if (props.forcedAccessMode) {
       if (scheduleAccessMode !== props.forcedAccessMode) setScheduleAccessMode(props.forcedAccessMode);
       return;
     }
-
-    if (!canChangeAccessMode) {
-      if (scheduleAccessMode !== 'employee') setScheduleAccessMode('employee');
+    if (hasScheduleEditPermission) {
+      if (scheduleAccessMode !== 'manager') setScheduleAccessMode('manager');
       return;
     }
-
-    if (requestedAccessMode === 'manager' || requestedAccessMode === 'employee') {
-      const nextMode = requestedAccessMode as AccessMode;
-      if (scheduleAccessMode !== nextMode) setScheduleAccessMode(nextMode);
-    }
-  }, [canChangeAccessMode, props.forcedAccessMode, requestedAccessMode, scheduleAccessMode]);
+    if (scheduleAccessMode !== 'employee') setScheduleAccessMode('employee');
+  }, [hasScheduleEditPermission, props.forcedAccessMode, scheduleAccessMode]);
 
   useEffect(() => {
     if (isManagerMode || !isSwapModeEnabled) return;
@@ -1360,21 +1366,24 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
   }, [hasUnsavedChanges]);
 
   const todayKey = getTodayDateKey();
-  const selectedShiftDayPassed = selectedActionDate ? isDateBeforeToday(selectedActionDate, todayKey) : false;
+  const selectedShiftWindowStarted =
+    selectedActionDate && typeof selectedActionPeriod === 'number'
+      ? hasShiftWindowStarted(selectedActionDate, selectedActionPeriod)
+      : false;
   const selectedShiftDaysUntil = selectedActionDate ? daysUntilDate(selectedActionDate, todayKey) : null;
   const selectedShiftRemovalLockActive = Boolean(
     selectedShiftDaysUntil !== null && selectedShiftDaysUntil >= 0 && selectedShiftDaysUntil <= 7
   );
   const currentEmployeeCanRemoveSelfSelectedShift = currentEmployeeCanRequestSelfRemovalSelectedShift;
   const canShowVolunteerAction = Boolean(
-    !selectedShiftDayPassed &&
+    !selectedShiftWindowStarted &&
       ((!selectedShiftActionAssignment && !selectedActionIsWeekend) ||
         (selectedShiftActionAssignment && currentEmployeeCanVolunteerSelectedShift))
   );
   const canShowRemoveAction = Boolean(
     selectedShiftActionAssignment &&
       currentEmployeeCanRequestSelfRemovalSelectedShift &&
-      !selectedShiftDayPassed
+      !selectedShiftWindowStarted
   );
   const removeRequiresExchangeRequest = Boolean(
     selectedShiftActionAssignment &&
@@ -1661,6 +1670,13 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
       const source = previous[sourceIndex];
       const target = previous[targetIndex];
       if (
+        hasShiftWindowStarted(source.date, source.period) ||
+        hasShiftWindowStarted(target.date, target.period)
+      ) {
+        setMessage('Swap blocked: assignments cannot be changed after the shift period has started.');
+        return previous;
+      }
+      if (
         !canEmployeeWorkPeriod(source.effectiveWorkerSNumber, target.period) ||
         !canEmployeeWorkPeriod(target.effectiveWorkerSNumber, source.period)
       ) {
@@ -1683,6 +1699,10 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
     employeeSNumber: string
   ) => {
     if (!employeeSNumber) return;
+    if (hasShiftWindowStarted(targetAssignment.date, targetAssignment.period)) {
+      setMessage('Drop blocked: assignments cannot be changed after the shift period has started.');
+      return;
+    }
     if (targetAssignment.effectiveWorkerSNumber === employeeSNumber) {
       setMessage('No change: this employee is already assigned.');
       return;
@@ -1934,6 +1954,12 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
       setMessage('Assignments are disabled on Saturdays and Sundays.');
       return;
     }
+    if (selectedActionDate && typeof selectedActionPeriod === 'number' && selectedShiftWindowStarted) {
+      setMessage(
+        'Assignment blocked: this shift period has already started. Attendance can still be edited anytime.'
+      );
+      return;
+    }
 
     if (selectedShiftActionAssignment) {
       if (assignmentTargetSNumber === selectedShiftActionAssignment.effectiveWorkerSNumber) {
@@ -2004,63 +2030,108 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
         <div className="space-y-3">
           <div className="space-y-2">
             <div className="rounded-md border border-neutral-300 bg-neutral-50 p-2">
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Month — {monthTitle}</h3>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {isManagerMode && (
-                  <button
-                    className={`h-8 rounded border px-2.5 text-xs ${
-                      isSwapModeEnabled
-                        ? 'border-brand-maroon bg-brand-maroon text-white'
-                        : 'border-neutral-500 bg-white text-neutral-900'
-                    }`}
-                    onClick={() => {
-                      setIsSwapModeEnabled((previous) => {
-                        const next = !previous;
-                        if (!next) {
-                          setDragSourceUid(null);
-                          setDragTargetUid(null);
-                        }
-                        return next;
-                      });
-                    }}
-                    type="button"
-                  >
-                    {isSwapModeEnabled ? 'Drag to switch/assign' : 'Enable Drag Mode'}
-                  </button>
-                )}
-                {canChangeAccessMode && (
-                  <button
-                    className="h-8 rounded border border-brand-maroon bg-brand-maroon px-2.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={!hasUnsavedChanges || isPersistingEdits}
-                    onClick={() => {
-                      void handleSaveChanges();
-                    }}
-                    type="button"
-                  >
-                    {isPersistingEdits ? 'Saving...' : 'Save Changes'}
-                  </button>
-                )}
-                {hasUnsavedChanges && (
-                  <p className="text-xs text-brand-maroon">
-                    Unsaved changes: {changedAssignmentRows.length} assignment, {changedRosterRows.length} roster,{' '}
-                    {pendingManualEdits.length} manual.
-                  </p>
-                )}
-                {canChangeAccessMode && (
-                  <label className="text-xs text-neutral-700">
-                    Access
-                    <Select
-                      className="ml-2 h-8 rounded border border-neutral-300 px-2 text-xs"
-                      onChange={(event) => setScheduleAccessMode(event.target.value as AccessMode)}
-                      value={scheduleAccessMode}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">{monthTitle}</h3>
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  {isManagerMode && (
+                    <button
+                      className={`h-8 rounded border px-2.5 text-xs ${
+                        isSwapModeEnabled
+                          ? 'border-brand-maroon bg-brand-maroon text-white'
+                          : 'border-neutral-500 bg-white text-neutral-900'
+                      }`}
+                      onClick={() => {
+                        setIsSwapModeEnabled((previous) => {
+                          const next = !previous;
+                          if (!next) {
+                            setDragSourceUid(null);
+                            setDragTargetUid(null);
+                          }
+                          return next;
+                        });
+                      }}
+                      type="button"
                     >
-                      <option value="employee">Employee</option>
-                      <option value="manager">Manager</option>
-                    </Select>
-                  </label>
-                )}
+                      {isSwapModeEnabled ? 'Drag to switch/assign' : 'Enable Drag Mode'}
+                    </button>
+                  )}
+                  {canChangeAccessMode && (
+                    <button
+                      className="h-8 rounded border border-brand-maroon bg-brand-maroon px-2.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={!hasUnsavedChanges || isPersistingEdits}
+                      onClick={() => {
+                        void handleSaveChanges();
+                      }}
+                      type="button"
+                    >
+                      {isPersistingEdits ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  )}
+                  <input
+                    className="h-8 w-24 rounded border border-neutral-300 px-2 text-xs"
+                    max={2100}
+                    min={2000}
+                    onChange={(event) =>
+                      setMonthSelection((previous) => ({
+                        ...previous,
+                        year: Number(event.target.value) || previous.year
+                      }))
+                    }
+                    type="number"
+                    value={monthSelection.year}
+                  />
+                  <Select
+                    className="h-8 rounded border border-neutral-300 px-2 text-xs"
+                    onChange={(event) =>
+                      setMonthSelection((previous) => ({
+                        ...previous,
+                        month: Number(event.target.value)
+                      }))
+                    }
+                    value={monthSelection.month}
+                  >
+                    {MONTH_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <button
+                    className="h-8 rounded border border-neutral-500 px-2 text-xs"
+                    onClick={handleApplyMonthSelection}
+                    type="button"
+                  >
+                    Open
+                  </button>
+                  <button
+                    className="h-8 rounded border border-neutral-500 px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={activeWeekIndex <= 0}
+                    onClick={() => setActiveWeekIndex((previous) => Math.max(0, previous - 1))}
+                    type="button"
+                  >
+                    Previous Week
+                  </button>
+                  <button
+                    className="h-8 rounded border border-neutral-500 px-2.5 text-xs"
+                    onClick={handleJumpToToday}
+                    type="button"
+                  >
+                    Today
+                  </button>
+                  <p className="px-1 text-xs text-neutral-700">
+                    Week {activeWeekIndex + 1} / {Math.max(calendarWeeks.length, 1)}
+                  </p>
+                  <button
+                    className="h-8 rounded border border-neutral-500 px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={activeWeekIndex >= calendarWeeks.length - 1}
+                    onClick={() => setActiveWeekIndex((previous) => Math.min(calendarWeeks.length - 1, previous + 1))}
+                    type="button"
+                  >
+                    Next Week
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {!isManagerMode && props.enableListViewToggle && (
                   <div className="inline-flex items-center rounded border border-neutral-300 bg-white p-0.5 text-xs">
                     <button
@@ -2079,73 +2150,12 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                     </button>
                   </div>
                 )}
-                <label className="text-xs text-neutral-700">
-                  Open month
-                  <span className="ml-2 inline-flex items-center gap-2">
-                    <input
-                      className="h-8 w-24 rounded border border-neutral-300 px-2 text-xs"
-                      max={2100}
-                      min={2000}
-                      onChange={(event) =>
-                        setMonthSelection((previous) => ({
-                          ...previous,
-                          year: Number(event.target.value) || previous.year
-                        }))
-                      }
-                      type="number"
-                      value={monthSelection.year}
-                    />
-                    <Select
-                      className="h-8 rounded border border-neutral-300 px-2 text-xs"
-                      onChange={(event) =>
-                        setMonthSelection((previous) => ({
-                          ...previous,
-                          month: Number(event.target.value)
-                        }))
-                      }
-                      value={monthSelection.month}
-                    >
-                      {MONTH_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Select>
-                    <button
-                      className="h-8 rounded border border-neutral-500 px-2 text-xs"
-                      onClick={handleApplyMonthSelection}
-                      type="button"
-                    >
-                      Open
-                    </button>
-                  </span>
-                </label>
-                <button
-                  className="h-8 rounded border border-neutral-500 px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={activeWeekIndex <= 0}
-                  onClick={() => setActiveWeekIndex((previous) => Math.max(0, previous - 1))}
-                  type="button"
-                >
-                  Previous Week
-                </button>
-                <button
-                  className="h-8 rounded border border-neutral-500 px-2.5 text-xs"
-                  onClick={handleJumpToToday}
-                  type="button"
-                >
-                  Today
-                </button>
-                <p className="px-1 text-xs text-neutral-700">
-                  Week {activeWeekIndex + 1} / {Math.max(calendarWeeks.length, 1)}
-                </p>
-                <button
-                  className="h-8 rounded border border-neutral-500 px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={activeWeekIndex >= calendarWeeks.length - 1}
-                  onClick={() => setActiveWeekIndex((previous) => Math.min(calendarWeeks.length - 1, previous + 1))}
-                  type="button"
-                >
-                  Next Week
-                </button>
+                {hasUnsavedChanges && (
+                  <p className="text-xs text-brand-maroon">
+                    Unsaved changes: {changedAssignmentRows.length} assignment, {changedRosterRows.length} roster,{' '}
+                    {pendingManualEdits.length} manual.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -2236,9 +2246,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                           openRegularSlots: targetOpenRegularSlots,
                           openAlternateSlots: targetOpenAlternateSlots
                         } = getShiftSlotCapacity(day.dateKey, targetPeriod);
+                        const targetShiftStarted = hasShiftWindowStarted(day.dateKey, targetPeriod);
                         const canShowOpenSlotButton =
                           day.inCurrentMonth &&
                           !isWeekend &&
+                          !targetShiftStarted &&
                           !disableCellInteractions &&
                           (targetOpenRegularSlots > 0 || targetOpenAlternateSlots > 0);
 
@@ -2424,6 +2436,12 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                               <button
                                 className="mt-1 h-auto min-h-[32px] w-full rounded border border-dashed border-brand-maroon px-2 py-1 text-left text-[10px] leading-tight text-brand-maroon hover:bg-brand-maroon/5"
                                 onClick={() => {
+                                  if (targetShiftStarted) {
+                                    setMessage(
+                                      'Assignment blocked: this shift period has already started. Attendance can still be edited anytime.'
+                                    );
+                                    return;
+                                  }
                                   setEmptySlotTarget({ date: day.dateKey, period: targetPeriod });
                                   setShiftActionModalUid(null);
                                 }}
@@ -2434,6 +2452,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                                   );
                                   if (
                                     !draggedEmployeeSNumber ||
+                                    targetShiftStarted ||
                                     !canAssignEmployeeToOpenSlot(draggedEmployeeSNumber, day.dateKey, targetPeriod)
                                   ) {
                                     return;
@@ -2448,6 +2467,12 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                                   );
                                   if (!draggedEmployeeSNumber) {
                                     setMessage('Drop failed: unable to determine the employee.');
+                                    return;
+                                  }
+                                  if (targetShiftStarted) {
+                                    setMessage(
+                                      'Drop blocked: assignments cannot be changed after the shift period has started.'
+                                    );
                                     return;
                                   }
                                   if (!canAssignEmployeeToOpenSlot(draggedEmployeeSNumber, day.dateKey, targetPeriod)) {
@@ -2835,6 +2860,11 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                 Assigning and volunteering are disabled on Saturdays and Sundays.
               </p>
             )}
+            {selectedShiftWindowStarted && (
+              <p className="mt-2 text-xs text-neutral-600">
+                Assignment changes are blocked after this shift period starts. Attendance can still be edited anytime.
+              </p>
+            )}
 
             {isManagerMode ? (
               <div className="mt-3 space-y-3">
@@ -2853,6 +2883,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                     className="mt-1 h-9 w-full border border-neutral-300 px-2"
                     disabled={
                       selectedActionIsWeekend ||
+                      selectedShiftWindowStarted ||
                       filteredManagerAssignableOptions.length === 0 ||
                       volunteerForShiftMutation.isPending ||
                       manualSlotMutation.isPending
@@ -2876,6 +2907,17 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                       className="h-9 border border-neutral-500 px-3 text-sm"
                       onClick={() => {
                         if (!selectedShiftActionAssignment) return;
+                        if (
+                          hasShiftWindowStarted(
+                            selectedShiftActionAssignment.date,
+                            selectedShiftActionAssignment.period
+                          )
+                        ) {
+                          setMessage(
+                            'Removal blocked: assignments cannot be changed after the shift period has started.'
+                          );
+                          return;
+                        }
                         if (isManualShiftSlotKey(selectedShiftActionAssignment.shiftSlotKey)) {
                           stageManualRemove({
                             date: selectedShiftActionAssignment.date,
@@ -2926,6 +2968,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                     className="h-9 border border-brand-maroon bg-brand-maroon px-3 text-sm text-white disabled:opacity-40"
                     disabled={
                       selectedActionIsWeekend ||
+                      selectedShiftWindowStarted ||
                       volunteerForShiftMutation.isPending ||
                       manualSlotMutation.isPending ||
                       !assignmentTargetSNumber ||
@@ -3101,7 +3144,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                     <div className="mt-3 grid grid-cols-3 gap-2">
                       <button
                         className="h-9 border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={updateAttendanceMutation.isPending || !selectedShiftDayPassed}
+                        disabled={updateAttendanceMutation.isPending}
                         onClick={() =>
                           updateAttendanceMutation.mutate({
                             assignment: selectedShiftActionAssignment,
@@ -3114,7 +3157,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                       </button>
                       <button
                         className="h-9 border border-neutral-500 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={updateAttendanceMutation.isPending || !selectedShiftDayPassed}
+                        disabled={updateAttendanceMutation.isPending}
                         onClick={() =>
                           updateAttendanceMutation.mutate({
                             assignment: selectedShiftActionAssignment,
@@ -3126,11 +3169,6 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                         Mark Absent
                       </button>
                     </div>
-                    {!selectedShiftDayPassed && (
-                      <p className="mt-2 text-xs text-neutral-600">
-                        Present/absent updates are only allowed after the shift date has passed.
-                      </p>
-                    )}
                   </>
                 )}
               </div>
