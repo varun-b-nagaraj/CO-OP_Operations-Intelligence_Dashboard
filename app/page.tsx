@@ -37,7 +37,7 @@ const DEPARTMENTS: Array<{ href: string; name: string; summary: string }> = [
     summary: 'Personal schedule, accountability metrics, and self-service requests.'
   },
   {
-    href: '/hr?module=cfa',
+    href: '/cfa',
     name: 'Chick-fil-A',
     summary: 'CFA operations, daily logs, A/B analysis, forecasting, and menu planning.'
   }

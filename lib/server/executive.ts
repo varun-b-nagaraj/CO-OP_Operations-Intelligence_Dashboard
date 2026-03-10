@@ -696,7 +696,7 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       detail: `Log captured at ${formatDateTime(log.created_at)}.`,
       timestamp: formatDateTime(log.created_at),
       severity: 'info' as const,
-      href: '/hr?module=cfa'
+      href: '/cfa'
     }))
   ].slice(0, 12);
 
@@ -780,7 +780,7 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       status: 'captured',
       updatedAt: formatDateTime(log.created_at),
       owner: 'cfa',
-      href: '/hr?module=cfa'
+      href: '/cfa'
     }))
   ];
 

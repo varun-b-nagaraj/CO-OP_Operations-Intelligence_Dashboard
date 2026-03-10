@@ -45,7 +45,7 @@ function isTab(value: string | null): value is HRTabItem['id'] {
 
 const HR_DATE_RANGE_SESSION_KEY = 'hr_global_date_range_v1';
 
-export function HRModule() {
+export function HRModule(props?: { forcedModule?: PrimaryModule }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -55,7 +55,8 @@ export function HRModule() {
   const [openAddEmployeeSignal, setOpenAddEmployeeSignal] = useState(0);
 
   const requestedModule = searchParams.get('module');
-  const resolvedModule: PrimaryModule = requestedModule === 'cfa' ? 'cfa' : 'hr';
+  const resolvedModule: PrimaryModule =
+    props?.forcedModule ?? (requestedModule === 'cfa' ? 'cfa' : 'hr');
 
   const requestedTabRaw = searchParams.get('tab');
   const requestedTab =
@@ -98,7 +99,11 @@ export function HRModule() {
 
   const onCFATabChange = (tab: CFATabId) => {
     const nextParams = new URLSearchParams(searchParams.toString());
-    nextParams.set('module', 'cfa');
+    if (!props?.forcedModule) {
+      nextParams.set('module', 'cfa');
+    } else {
+      nextParams.delete('module');
+    }
     nextParams.set('tab', tab);
     replaceWithParams(nextParams);
   };
