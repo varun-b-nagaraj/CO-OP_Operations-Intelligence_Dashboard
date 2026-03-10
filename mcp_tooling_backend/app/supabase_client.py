@@ -61,22 +61,43 @@ class SupabaseProxyClient:
         order: str | None = None,
         filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        params: dict[str, str] = {
+        base_params: dict[str, str] = {
             "select": select,
             "limit": str(limit),
             "offset": str(offset),
         }
+        base_params.update(self._normalize_filters(filters))
+
+        params = dict(base_params)
         if order:
             params["order"] = order
-        params.update(self._normalize_filters(filters))
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{self._base_url}/rest/v1/{table}",
-                params=params,
-                headers={**self._auth_headers, "Accept": "application/json"},
-            )
-            response.raise_for_status()
+            try:
+                response = await client.get(
+                    f"{self._base_url}/rest/v1/{table}",
+                    params=params,
+                    headers={**self._auth_headers, "Accept": "application/json"},
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                # Common LLM failure mode: invalid order column (e.g. timestamp desc).
+                # Retry once without ordering to keep tool calls resilient.
+                if exc.response.status_code == 400 and order:
+                    fallback_response = await client.get(
+                        f"{self._base_url}/rest/v1/{table}",
+                        params=base_params,
+                        headers={**self._auth_headers, "Accept": "application/json"},
+                    )
+                    fallback_response.raise_for_status()
+                    payload = fallback_response.json()
+                    if isinstance(payload, list):
+                        return payload
+                    raise RuntimeError(
+                        f"Unexpected Supabase payload type for table {table}: {type(payload)}"
+                    )
+                raise
+
             payload = response.json()
             if isinstance(payload, list):
                 return payload

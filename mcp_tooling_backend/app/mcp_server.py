@@ -47,24 +47,18 @@ class MCPServerBuilder:
         return re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
 
     def _register_tool(self, fn: ToolCallable, *, name: str, description: str) -> None:
-        if hasattr(self.mcp, "add_tool"):
-            self.mcp.add_tool(fn, name=name, description=description)
-        else:
-            self.mcp.tool(name=name, description=description)(fn)
+        tool_decorator = getattr(self.mcp, "tool")
+        tool_decorator(name=name, description=description)(fn)
         self.tool_registry[name] = fn
 
     def _register_prompt(self, fn: ToolCallable, *, name: str, description: str) -> None:
-        if hasattr(self.mcp, "add_prompt"):
-            self.mcp.add_prompt(fn, name=name, description=description)
-        else:
-            self.mcp.prompt(name=name, description=description)(fn)
+        prompt_decorator = getattr(self.mcp, "prompt")
+        prompt_decorator(name=name, description=description)(fn)
         self.prompt_registry[name] = fn
 
     def _register_resource(self, fn: ToolCallable, *, uri: str, name: str, description: str) -> None:
-        if hasattr(self.mcp, "add_resource"):
-            self.mcp.add_resource(fn, uri=uri, name=name, description=description)
-        else:
-            self.mcp.resource(uri, name=name, description=description)(fn)
+        resource_decorator = getattr(self.mcp, "resource")
+        resource_decorator(uri, name=name, description=description)(fn)
         self.resource_registry[name] = fn
 
     def _register_core_prompts(self) -> None:
@@ -72,6 +66,7 @@ class MCPServerBuilder:
             return (
                 "You are the executive insights assistant for CO-OP operations. Use MCP tools to gather hard evidence "
                 "before making claims. Focus on trends, outliers, and concrete recommendations. "
+                "Respond in English only. "
                 f"Business question: {question}"
             )
 
@@ -79,6 +74,7 @@ class MCPServerBuilder:
             return (
                 "You are analyzing employee behavior and performance signals. Prioritize strikes, points ledger, "
                 "attendance, meeting attendance, and schedule compliance, then summarize with specific names and counts. "
+                "Respond in English only. "
                 f"Requested analysis: {question}"
             )
 
@@ -86,6 +82,7 @@ class MCPServerBuilder:
             return (
                 "You are analyzing sales and business growth. Pull finance, marketing, product purchasing, and "
                 "inventory signals. Compare current vs historical periods and highlight opportunities/risks. "
+                "Respond in English only. "
                 f"Requested analysis: {question}"
             )
 
