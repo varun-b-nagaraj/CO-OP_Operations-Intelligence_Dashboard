@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import type {
   AssetType,
+  CalendarAudiencePriority,
   CoordinationLogRow,
   CoordinationMethod,
   EventAssetRow,
@@ -59,6 +60,8 @@ function mapEvent(row: Record<string, unknown>): MarketingEventRow {
     revenue_impact: asNumber(row.revenue_impact),
     engagement_notes: (row.engagement_notes as string | null) ?? null,
     cost_roi_notes: (row.cost_roi_notes as string | null) ?? null,
+    include_in_general_calendar: Boolean(row.include_in_general_calendar ?? true),
+    general_calendar_priority: ((row.general_calendar_priority as CalendarAudiencePriority | null) ?? 'employee'),
     updated_at: String(row.updated_at ?? row.starts_at ?? new Date().toISOString())
   };
 }
@@ -209,6 +212,8 @@ interface SaveEventInput {
   engagement_notes: string | null;
   cost_roi_notes: string | null;
   cover_asset_id: string | null;
+  include_in_general_calendar: boolean;
+  general_calendar_priority: CalendarAudiencePriority;
 }
 
 interface SaveReportInput {
@@ -575,6 +580,8 @@ export function createMarketingRepository(supabase: SupabaseClient): MarketingRe
         revenue_impact: input.revenue_impact,
         engagement_notes: input.engagement_notes,
         cost_roi_notes: input.cost_roi_notes,
+        include_in_general_calendar: input.include_in_general_calendar,
+        general_calendar_priority: input.general_calendar_priority,
         cover_asset_id: input.cover_asset_id,
         updated_by: 'dashboard'
       };

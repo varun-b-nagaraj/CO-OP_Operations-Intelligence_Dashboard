@@ -23,8 +23,12 @@ const ShiftAttendanceTab = dynamic(() =>
 );
 const RequestsTab = dynamic(() => import('./requests-tab').then((module) => module.RequestsTab));
 const AuditTab = dynamic(() => import('./audit-tab').then((module) => module.AuditTab));
+const SharedCalendarTab = dynamic(() =>
+  import('@/app/_components/shared-calendar-tab').then((module) => module.SharedCalendarTab)
+);
 
 const tabs: Array<HRTabItem & { permission: PermissionFlag }> = [
+  { id: 'calendar', label: 'Calendar', icon: 'calendar', permission: 'hr.schedule.view' },
   { id: 'schedule', label: 'Schedule', icon: 'schedule', permission: 'hr.schedule.view' },
   { id: 'employees', label: 'Employee Management', icon: 'employees', permission: 'hr.attendance.view' },
   { id: 'meeting-attendance', label: 'Meeting Attendance', icon: 'meeting', permission: 'hr.attendance.view' },
@@ -59,7 +63,7 @@ export function HRModule() {
       ? 'employees'
       : requestedTabRaw;
 
-  const activeHRTab = isTab(requestedTab) ? requestedTab : 'schedule';
+  const activeHRTab = isTab(requestedTab) ? requestedTab : 'calendar';
   const resolvedHRTab = visibleTabs.some((tab) => tab.id === activeHRTab) ? activeHRTab : visibleTabs[0]?.id;
 
   const activeCFATab: CFATabId = isCFATab(requestedTabRaw) ? requestedTabRaw : 'daily-log';
@@ -99,7 +103,7 @@ export function HRModule() {
     replaceWithParams(nextParams);
   };
 
-  const activeNavId = resolvedModule === 'hr' ? (resolvedHRTab ?? 'schedule') : activeCFATab;
+  const activeNavId = resolvedModule === 'hr' ? (resolvedHRTab ?? 'calendar') : activeCFATab;
   const navItems =
     resolvedModule === 'hr'
       ? visibleTabs.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }))
@@ -178,6 +182,7 @@ export function HRModule() {
               role="tabpanel"
             >
               {resolvedHRTab === 'schedule' && <ScheduleTab />}
+              {resolvedHRTab === 'calendar' && <SharedCalendarTab sourceDepartment="hr" />}
               {resolvedHRTab === 'employees' && (
                 <EmployeesTab dateRange={globalDateRange} openAddEmployeeSignal={openAddEmployeeSignal} />
               )}

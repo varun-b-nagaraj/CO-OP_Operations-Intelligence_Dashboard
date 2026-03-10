@@ -1,11 +1,41 @@
+'use client';
+
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+
+type ThemeMode = 'light' | 'dark';
 
 export default function HomePage() {
+  const [theme, setTheme] = useState<ThemeMode>('light');
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem('landing-theme');
+    const next: ThemeMode = saved === 'dark' ? 'dark' : 'light';
+    setTheme(next);
+    document.body.style.backgroundColor = next === 'dark' ? '#0f172a' : '#f7f7f7';
+  }, []);
+
+  const toggleTheme = () => {
+    const next: ThemeMode = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    window.localStorage.setItem('landing-theme', next);
+    document.body.style.backgroundColor = next === 'dark' ? '#0f172a' : '#f7f7f7';
+  };
+
+  const pageClass = theme === 'dark' ? 'min-h-screen w-full bg-slate-950 p-6 text-slate-100' : 'min-h-screen w-full p-6';
+  const panelClass = theme === 'dark'
+    ? 'w-full border border-slate-700 bg-slate-900 p-8 text-center'
+    : 'w-full border border-neutral-300 bg-white p-8 text-center';
+  const subtitleClass = theme === 'dark' ? 'mt-3 text-sm text-slate-300' : 'mt-3 text-sm text-neutral-700';
+  const toggleClass = theme === 'dark'
+    ? 'fixed bottom-5 right-5 z-50 min-h-[44px] min-w-[44px] rounded-full border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 shadow-md hover:bg-slate-700'
+    : 'fixed bottom-5 right-5 z-50 min-h-[44px] min-w-[44px] rounded-full border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-900 shadow-md hover:bg-neutral-100';
+
   return (
-    <main className="min-h-screen w-full p-6">
-      <div className="w-full border border-neutral-300 bg-white p-8 text-center">
+    <main className={pageClass}>
+      <div className={panelClass}>
         <h1 className="text-2xl font-semibold">CO-OP Operations &amp; Intelligence Dashboard</h1>
-        <p className="mt-3 text-sm text-neutral-700">
+        <p className={subtitleClass}>
           Choose which module to open first.
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
@@ -47,6 +77,15 @@ export default function HomePage() {
           </Link>
         </div>
       </div>
+
+      <button
+        aria-label="Toggle dark mode"
+        className={toggleClass}
+        onClick={toggleTheme}
+        type="button"
+      >
+        {theme === 'dark' ? 'Light' : 'Dark'}
+      </button>
     </main>
   );
 }

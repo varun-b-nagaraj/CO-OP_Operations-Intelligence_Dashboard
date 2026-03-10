@@ -1,4 +1,5 @@
 export type MarketingEventStatus = 'draft' | 'scheduled' | 'completed' | 'cancelled';
+export type CalendarAudiencePriority = 'employee' | 'department_manager' | 'all_managers' | 'exec';
 
 export type CoordinationMethod = 'email' | 'call' | 'in_person' | 'text' | 'other';
 
@@ -29,6 +30,8 @@ export interface MarketingEventRow {
   revenue_impact: number | null;
   engagement_notes: string | null;
   cost_roi_notes: string | null;
+  include_in_general_calendar: boolean;
+  general_calendar_priority: CalendarAudiencePriority;
   updated_at: string;
 }
 

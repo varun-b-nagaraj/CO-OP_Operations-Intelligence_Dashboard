@@ -4,6 +4,7 @@ import { DepartmentShellNavIcon } from '@/app/_components/department-shell';
 
 export interface HRTabItem {
   id:
+    | 'calendar'
     | 'schedule'
     | 'employees'
     | 'meeting-attendance'
