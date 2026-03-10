@@ -19,6 +19,7 @@ import {
   ExecutiveToolTraceItem,
   runExecutiveTooling
 } from '@/lib/server/executive';
+import { proxyOllamaChatRequest } from '@/lib/server/ollama-proxy';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -176,13 +177,11 @@ function memoryFactsToPromptContext(
 }
 
 async function extractMemoryFactsWithSmallModel(params: {
-  request: NextRequest;
   userMessage: string;
   assistantMessage: string;
   existingFactsPrompt: string;
 }): Promise<MemoryFactCandidate[]> {
   const memoryModel = process.env.OLLAMA_MEMORY_MODEL?.trim() || 'qwen3:8b';
-  const proxyUrl = new URL('/api/backend/shared/ollama/chat', params.request.url);
 
   const extractionPrompt = [
     'You are a compact memory extraction model.',
@@ -203,15 +202,13 @@ async function extractMemoryFactsWithSmallModel(params: {
     params.assistantMessage
   ].join('\n');
 
-  const upstream = await fetch(proxyUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const upstream = await proxyOllamaChatRequest({
+    body: {
       model: memoryModel,
       stream: false,
       messages: [{ role: 'user', content: extractionPrompt }],
       options: { temperature: 0.0 }
-    })
+    }
   });
 
   if (!upstream.ok) return [];
@@ -361,7 +358,6 @@ export async function POST(request: NextRequest) {
     ].join('\n');
 
     const model = process.env.OLLAMA_MODEL?.trim() || 'deepseek-v3.1:671b-cloud';
-    const proxyUrl = new URL('/api/backend/shared/ollama/chat', request.url);
     const dbConversation = await listRecentConversationContext({ userKey, sessionId, limit: 20 });
 
     const fallbackConversation = Array.isArray(body.conversation)
@@ -385,10 +381,8 @@ export async function POST(request: NextRequest) {
       lastContextMessage?.role === 'user' &&
       lastContextMessage.content.trim().toLowerCase() === message.trim().toLowerCase();
 
-    const upstream = await fetch(proxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const upstream = await proxyOllamaChatRequest({
+      body: {
         model,
         stream: false,
         messages: [
@@ -402,7 +396,7 @@ export async function POST(request: NextRequest) {
         options: {
           temperature: 0.1
         }
-      })
+      }
     });
 
     let assistantMessage = '';
@@ -480,7 +474,6 @@ export async function POST(request: NextRequest) {
     } else {
       try {
         const extractedFacts = await extractMemoryFactsWithSmallModel({
-          request,
           userMessage: message,
           assistantMessage,
           existingFactsPrompt: memoryContext
