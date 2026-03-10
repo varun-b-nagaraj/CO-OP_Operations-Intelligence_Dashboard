@@ -53,9 +53,18 @@ export async function POST(request: NextRequest) {
     }
   })();
   const requestHostname = request.nextUrl.hostname.toLowerCase();
-  const shouldFallbackToCloudBase = configuredHostname.toLowerCase() === requestHostname;
-  const effectiveBaseUrl = shouldFallbackToCloudBase ? 'https://ollama.com' : configuredBaseUrl;
-  const targetCandidates = resolveOllamaChatUrlCandidates(effectiveBaseUrl);
+  if (configuredHostname.toLowerCase() === requestHostname) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'Invalid OLLAMA_BASE_URL: it points to this same app host.',
+        configuredBaseUrl,
+        hint: 'Set OLLAMA_BASE_URL to the actual Ollama API host (for cloud: https://ollama.com).'
+      },
+      { status: 500 }
+    );
+  }
+  const targetCandidates = resolveOllamaChatUrlCandidates(configuredBaseUrl);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.delete('host');
   requestHeaders.delete('content-length');
@@ -106,12 +115,6 @@ export async function POST(request: NextRequest) {
         const headers = copyResponseHeaders(upstreamResponse.headers);
         headers.set('x-coop-backend-proxy-target', targetUrl);
         headers.set('x-coop-backend-proxy-attempts', JSON.stringify(attempts));
-        if (shouldFallbackToCloudBase) {
-          headers.set(
-            'x-coop-backend-proxy-warning',
-            'OLLAMA_BASE_URL matched this app host; proxy used https://ollama.com fallback.'
-          );
-        }
         return new Response(upstreamResponse.body, {
           status: upstreamResponse.status,
           statusText: upstreamResponse.statusText,
@@ -129,7 +132,6 @@ export async function POST(request: NextRequest) {
               error:
                 'OLLAMA_BASE_URL points to a Vercel-protected page, not a public Ollama API endpoint.',
               configuredBaseUrl,
-              effectiveBaseUrl,
               targetUrl,
               hint:
                 'Set OLLAMA_BASE_URL to https://ollama.com and keep OLLAMA_API_KEY set in Vercel env vars.',
@@ -168,7 +170,6 @@ export async function POST(request: NextRequest) {
       ok: false,
       error: lastError instanceof Error ? lastError.message : 'Failed to reach Ollama upstream.',
       configuredBaseUrl,
-      effectiveBaseUrl,
       attempts,
       hint:
         'Verify OLLAMA_BASE_URL and OLLAMA_API_KEY in Vercel project env vars. If using ollama.com, keep base URL as https://ollama.com.'
