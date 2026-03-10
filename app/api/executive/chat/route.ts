@@ -81,6 +81,12 @@ async function readResponseError(response: Response): Promise<string> {
       return JSON.stringify(payload);
     }
     const text = (await response.text()).trim();
+    if (/<!doctype html/i.test(text) || /<html/i.test(text)) {
+      if (/vercel/i.test(text) || /authentication required/i.test(text)) {
+        return 'Received Vercel authentication HTML page from upstream instead of Ollama API JSON.';
+      }
+      return 'Received HTML response from upstream instead of Ollama API JSON.';
+    }
     if (text) return text.slice(0, 500);
     return '';
   } catch {

@@ -11,6 +11,11 @@ function normalizeBaseUrl(baseUrlRaw: string | undefined): string {
   }
 }
 
+function isAllowedOllamaHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === 'ollama.com' || host.endsWith('.ollama.com') || host === 'localhost' || host === '127.0.0.1';
+}
+
 function resolveOllamaChatUrlCandidates(baseUrlRaw: string | undefined): string[] {
   const baseUrl = normalizeBaseUrl(baseUrlRaw);
   const addUnique = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
@@ -51,6 +56,17 @@ export async function proxyOllamaChatRequest(params: {
       return '';
     }
   })();
+  if (configuredHostname && !isAllowedOllamaHost(configuredHostname)) {
+    return jsonResponse(
+      {
+        ok: false,
+        error: `Invalid OLLAMA_BASE_URL host "${configuredHostname}".`,
+        configuredBaseUrl,
+        hint: 'Use https://ollama.com for cloud Ollama, or localhost/127.0.0.1 for local Ollama.'
+      },
+      500
+    );
+  }
   if (configuredHostname.endsWith('.vercel.app')) {
     return jsonResponse(
       {
@@ -123,9 +139,15 @@ export async function proxyOllamaChatRequest(params: {
       }
 
       const contentType = upstreamResponse.headers.get('content-type')?.toLowerCase() ?? '';
-      if (upstreamResponse.status === 401 && contentType.includes('text/html')) {
+      if (upstreamResponse.status === 401) {
         const html = await upstreamResponse.text();
-        if (html.toLowerCase().includes('vercel authentication')) {
+        const normalized = html.toLowerCase();
+        if (
+          contentType.includes('text/html') ||
+          normalized.includes('<!doctype html') ||
+          normalized.includes('authentication required') ||
+          normalized.includes('vercel')
+        ) {
           return jsonResponse(
             {
               ok: false,
