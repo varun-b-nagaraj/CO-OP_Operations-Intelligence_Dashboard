@@ -156,6 +156,14 @@ export async function proxyOllamaChatRequest(params: {
   if (!requestHeaders.has('Content-Type')) {
     requestHeaders.set('Content-Type', 'application/json');
   }
+  const vercelBypassSecret =
+    process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim() ||
+    process.env.VERCEL_PROTECTION_BYPASS_SECRET?.trim() ||
+    '';
+  if (vercelBypassSecret) {
+    requestHeaders.set('x-vercel-protection-bypass', vercelBypassSecret);
+    requestHeaders.set('x-vercel-set-bypass-cookie', 'true');
+  }
 
   if (!apiKey && configuredHostname === 'ollama.com') {
     debugLog('error', 'missing_api_key', debugId, { configuredBaseUrl });
@@ -176,6 +184,11 @@ export async function proxyOllamaChatRequest(params: {
     requestHeaders.set('X-API-Key', apiKey);
     requestHeaders.set('api-key', apiKey);
   }
+
+  debugLog('info', 'auth_headers_resolved', debugId, {
+    hasApiKey: Boolean(apiKey),
+    hasVercelBypassSecret: Boolean(vercelBypassSecret)
+  });
 
   const requestBody: string =
     params.body instanceof Uint8Array ? new TextDecoder().decode(params.body) : JSON.stringify(params.body);
