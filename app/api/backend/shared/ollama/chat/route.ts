@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 function normalizeBaseUrl(baseUrlRaw: string | undefined): string {
-  const raw = (baseUrlRaw?.trim() || 'http://localhost:11434').replace(/\/+$/, '');
+  const raw = (baseUrlRaw?.trim() || 'https://ollama.com').replace(/\/+$/, '');
   try {
     const parsed = new URL(raw);
     // Ollama cloud endpoints should use HTTPS even if env uses http://ollama.com.
@@ -41,6 +44,7 @@ function copyResponseHeaders(sourceHeaders: Headers): Headers {
 
 export async function POST(request: NextRequest) {
   const targetCandidates = resolveOllamaChatUrlCandidates(process.env.OLLAMA_BASE_URL);
+  const configuredBaseUrl = normalizeBaseUrl(process.env.OLLAMA_BASE_URL);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.delete('host');
   requestHeaders.delete('content-length');
@@ -59,12 +63,18 @@ export async function POST(request: NextRequest) {
   let lastError: unknown = null;
 
   for (const targetUrl of targetCandidates) {
+    let timeout: NodeJS.Timeout | null = null;
     try {
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), 45_000);
       const upstreamResponse = await fetch(targetUrl, {
         method: 'POST',
         headers: requestHeaders,
-        body: requestBody
+        body: requestBody,
+        signal: controller.signal
       });
+      clearTimeout(timeout);
+      timeout = null;
       attempts.push({ url: targetUrl, status: upstreamResponse.status });
       lastResponse = upstreamResponse;
 
@@ -81,6 +91,8 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       lastError = error;
       attempts.push({ url: targetUrl, status: 0 });
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   }
 
@@ -98,7 +110,10 @@ export async function POST(request: NextRequest) {
     {
       ok: false,
       error: lastError instanceof Error ? lastError.message : 'Failed to reach Ollama upstream.',
-      attempts
+      configuredBaseUrl,
+      attempts,
+      hint:
+        'Verify OLLAMA_BASE_URL and OLLAMA_API_KEY in Vercel project env vars. If using ollama.com, keep base URL as https://ollama.com.'
     },
     { status: 502 }
   );

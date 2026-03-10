@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export type BackendDepartment = 'hr' | 'marketing' | 'product' | 'inventory' | 'shared';
 
@@ -35,25 +35,36 @@ async function proxySupabaseRequest(
   params: { supabasePath: string[] },
   department: BackendDepartment
 ) {
-  const targetUrl = buildTargetUrl(request, params.supabasePath);
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.delete('host');
-  requestHeaders.delete('content-length');
+  try {
+    const targetUrl = buildTargetUrl(request, params.supabasePath);
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.delete('host');
+    requestHeaders.delete('content-length');
 
-  const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
-  const upstreamInit: RequestInit & { duplex?: 'half' } = {
-    method: request.method,
-    headers: requestHeaders,
-    body: hasBody ? request.body : undefined,
-    duplex: hasBody ? 'half' : undefined
-  };
-  const upstreamResponse = await fetch(targetUrl, upstreamInit as RequestInit);
+    const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+    const upstreamInit: RequestInit & { duplex?: 'half' } = {
+      method: request.method,
+      headers: requestHeaders,
+      body: hasBody ? request.body : undefined,
+      duplex: hasBody ? 'half' : undefined
+    };
+    const upstreamResponse = await fetch(targetUrl, upstreamInit as RequestInit);
 
-  return new Response(upstreamResponse.body, {
-    status: upstreamResponse.status,
-    statusText: upstreamResponse.statusText,
-    headers: copyResponseHeaders(upstreamResponse.headers, department)
-  });
+    return new Response(upstreamResponse.body, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: copyResponseHeaders(upstreamResponse.headers, department)
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Supabase proxy request failed.',
+        department
+      },
+      { status: 502 }
+    );
+  }
 }
 
 export function createDepartmentSupabaseProxyHandlers(department: BackendDepartment): Record<string, RouteHandler> {
