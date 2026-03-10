@@ -44,7 +44,6 @@ function copyResponseHeaders(sourceHeaders: Headers): Headers {
 }
 
 export async function POST(request: NextRequest) {
-  const targetCandidates = resolveOllamaChatUrlCandidates(process.env.OLLAMA_BASE_URL);
   const configuredBaseUrl = normalizeBaseUrl(process.env.OLLAMA_BASE_URL);
   const configuredHostname = (() => {
     try {
@@ -53,6 +52,10 @@ export async function POST(request: NextRequest) {
       return '';
     }
   })();
+  const requestHostname = request.nextUrl.hostname.toLowerCase();
+  const shouldFallbackToCloudBase = configuredHostname.toLowerCase() === requestHostname;
+  const effectiveBaseUrl = shouldFallbackToCloudBase ? 'https://ollama.com' : configuredBaseUrl;
+  const targetCandidates = resolveOllamaChatUrlCandidates(effectiveBaseUrl);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.delete('host');
   requestHeaders.delete('content-length');
@@ -103,11 +106,38 @@ export async function POST(request: NextRequest) {
         const headers = copyResponseHeaders(upstreamResponse.headers);
         headers.set('x-coop-backend-proxy-target', targetUrl);
         headers.set('x-coop-backend-proxy-attempts', JSON.stringify(attempts));
+        if (shouldFallbackToCloudBase) {
+          headers.set(
+            'x-coop-backend-proxy-warning',
+            'OLLAMA_BASE_URL matched this app host; proxy used https://ollama.com fallback.'
+          );
+        }
         return new Response(upstreamResponse.body, {
           status: upstreamResponse.status,
           statusText: upstreamResponse.statusText,
           headers
         });
+      }
+
+      const contentType = upstreamResponse.headers.get('content-type')?.toLowerCase() ?? '';
+      if (upstreamResponse.status === 401 && contentType.includes('text/html')) {
+        const html = await upstreamResponse.text();
+        if (html.toLowerCase().includes('vercel authentication')) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error:
+                'OLLAMA_BASE_URL points to a Vercel-protected page, not a public Ollama API endpoint.',
+              configuredBaseUrl,
+              effectiveBaseUrl,
+              targetUrl,
+              hint:
+                'Set OLLAMA_BASE_URL to https://ollama.com and keep OLLAMA_API_KEY set in Vercel env vars.',
+              attempts
+            },
+            { status: 502 }
+          );
+        }
       }
 
       // Keep the most relevant upstream failure status for diagnostics.
@@ -138,6 +168,7 @@ export async function POST(request: NextRequest) {
       ok: false,
       error: lastError instanceof Error ? lastError.message : 'Failed to reach Ollama upstream.',
       configuredBaseUrl,
+      effectiveBaseUrl,
       attempts,
       hint:
         'Verify OLLAMA_BASE_URL and OLLAMA_API_KEY in Vercel project env vars. If using ollama.com, keep base URL as https://ollama.com.'
