@@ -11,7 +11,7 @@ import { resolveCatalogItemByCode } from '@/lib/inventory/identifiers';
 import { clearSessionLocalData, getPendingEvents, getSessionEvents, markEventsSynced, readCatalogSnapshot, readSnapshot, saveCatalogSnapshot, saveLocalEvent, saveSnapshot
 } from '@/lib/inventory/indexeddb';
 import { InventoryCatalogItem, InventoryCountEvent } from '@/lib/inventory/types';
-import { createSessionJoinPacket, parseSessionJoinPacket } from '@/lib/inventory/sync'; const TABS = [ { id: 'calendar', label: 'Calendar', icon: 'calendar' }, { id: 'catalog', label: 'Catalog', icon: 'catalog' }, { id: 'sessions', label: 'Sessions', icon: 'sessions' }, { id: 'count-view', label: 'Count View', icon: 'count_view' }, { id: 'finalize-upload', label: 'Finalize & Upload', icon: 'finalize' }
+import { createSessionJoinPacket, parseSessionJoinPacket } from '@/lib/inventory/sync'; const TABS = [ { id: 'catalog', label: 'Catalog', icon: 'catalog' }, { id: 'sessions', label: 'Sessions', icon: 'sessions' }, { id: 'count-view', label: 'Count View', icon: 'count_view' }, { id: 'finalize-upload', label: 'Finalize & Upload', icon: 'finalize' }, { id: 'calendar', label: 'Calendar', icon: 'calendar' }
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 type FinalAction = 'none' | 'finalize' | 'lock';
