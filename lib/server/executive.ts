@@ -1,4 +1,5 @@
 import { createServerClient } from '@/lib/supabase';
+import { resolvePreferredTable } from '@/lib/server/common';
 import { getToolSpecById, planExecutiveTools } from '@/lib/executive/tooling';
 
 export interface ExecutiveSummaryCard {
@@ -61,6 +62,27 @@ export interface ExecutiveOverviewData {
   metrics: ExecutiveMetric[];
   reports: ExecutiveReportItem[];
   departmentHealth: DepartmentHealthItem[];
+  latestMorningMeeting?: {
+    date: string | null;
+    dateLabel: string;
+    presentExcusedCount: number;
+    totalCount: number;
+    attendeeNames: string[];
+    absentNames: string[];
+  };
+  morningMeetingTrend?: {
+    windowStartDate: string;
+    windowEndDate: string;
+    totalMeetings: number;
+    minMeetingsForFlag: number;
+    underFiftyPercent: Array<{
+      sNumber: string;
+      name: string;
+      attendanceRate: number;
+      presentExcused: number;
+      totalMeetings: number;
+    }>;
+  };
 }
 
 export interface ExecutiveToolTraceItem {
@@ -167,6 +189,24 @@ type ShiftAttendanceRow = {
   shift_date: string;
 };
 
+type SplitShiftAttendanceRow = {
+  status: 'expected' | 'present' | 'absent' | 'excused';
+  shift_date: string;
+  shift_period: number;
+  shift_slot_key: string;
+  employee_s_number: string;
+};
+
+type StudentNameRow = {
+  [key: string]: unknown;
+};
+
+type MeetingAttendanceRow = {
+  s_number: string;
+  checkin_date: string;
+  effective_status: 'present' | 'absent' | 'excused';
+};
+
 type CFAHistoryRow = {
   id: string;
   log_date: string;
@@ -180,16 +220,104 @@ type CalendarEventRow = {
   source_department: string | null;
 };
 
+interface AttendanceStats {
+  expected: number;
+  present: number;
+  absent: number;
+  excused: number;
+  rate: number | null;
+}
+
+function buildAttendanceStats(rows: Array<{ status: SplitShiftAttendanceRow['status'] }>): AttendanceStats {
+  const expected = rows.filter((row) => row.status === 'expected').length;
+  const present = rows.filter((row) => row.status === 'present').length;
+  const absent = rows.filter((row) => row.status === 'absent').length;
+  const excused = rows.filter((row) => row.status === 'excused').length;
+  const denominator = expected + present + absent + excused;
+  const numerator = present + excused;
+  const rate = denominator > 0 ? (numerator / denominator) * 100 : null;
+  return { expected, present, absent, excused, rate };
+}
+
+function formatRatePercent(value: number | null): string {
+  if (value === null) return 'No recent data';
+  return `${Math.round(value)}%`;
+}
+
+function averageRates(values: Array<number | null>): number | null {
+  const defined = values.filter((value): value is number => value !== null);
+  if (!defined.length) return null;
+  const sum = defined.reduce((total, value) => total + value, 0);
+  return sum / defined.length;
+}
+
+function latestShiftDate(rows: SplitShiftAttendanceRow[]): string | null {
+  const dates = rows.map((row) => row.shift_date).filter(Boolean).sort();
+  return dates.length ? dates[dates.length - 1] : null;
+}
+
+function formatEmployeeName(
+  sNumber: string,
+  studentBySNumber: Map<string, string>
+): string {
+  return studentBySNumber.get(sNumber) ?? sNumber;
+}
+
+function readStringValue(row: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function resolveStudentSNumber(row: StudentNameRow): string {
+  return readStringValue(row, ['s_number', 'student_number']);
+}
+
+function resolveStudentName(row: StudentNameRow): string {
+  const directName = readStringValue(row, ['name', 'full_name', 'student_name']);
+  if (directName) return directName;
+  const first = readStringValue(row, ['first_name', 'first']);
+  const last = readStringValue(row, ['last_name', 'last']);
+  return `${first} ${last}`.trim();
+}
+
+async function resolveTableOrNull(
+  supabase: ReturnType<typeof createServerClient>,
+  preferredTable: string,
+  fallbackTable: string,
+  probeColumn = 'id'
+): Promise<string | null> {
+  try {
+    return await resolvePreferredTable(supabase, preferredTable, fallbackTable, probeColumn);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const supabase = createServerClient();
   const nowIso = new Date().toISOString();
   const weekAgoIso = daysAgoIso(7);
+  const twoWeeksAgoDate = daysAgoIso(14).slice(0, 10);
+  const meetingTrendEndDate = nowIso.slice(0, 10);
+  const minMeetingsForFlag = 3;
+
+  const [shiftRequestsTable, morningAttendanceTable, offPeriodAttendanceTable, meetingAttendanceTable] = await Promise.all([
+    resolveTableOrNull(supabase, 'hr_shift_change_requests', 'shift_change_requests'),
+    resolveTableOrNull(supabase, 'hr_morning_shift_attendance', 'morning_shift_attendance', 'shift_date'),
+    resolveTableOrNull(supabase, 'hr_off_period_shift_attendance', 'off_period_shift_attendance', 'shift_date'),
+    resolveTableOrNull(supabase, 'hr_meeting_attendance_records', 'meeting_attendance_records', 'checkin_date')
+  ]);
 
   const [
     newOrdersThisWeek,
     openShiftRequests,
     recentProductOrders,
-    shiftAttendanceRows,
+    morningAttendanceRows,
+    offPeriodAttendanceRows,
+    recentMeetingAttendanceRows,
     financeHeaders,
     upcomingMarketingEvents,
     inventorySessions,
@@ -202,12 +330,14 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
         .select('id', { count: 'exact', head: true })
         .gte('created_at', weekAgoIso)
     ),
-    safeCount(() =>
-      supabase
-        .from('hr_shift_change_requests')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'pending')
-    ),
+    shiftRequestsTable
+      ? safeCount(() =>
+          supabase
+            .from(shiftRequestsTable)
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'pending')
+        )
+      : Promise.resolve(0),
     safeRows<ProductOrderRow>(() =>
       supabase
         .from('product_purchase_orders')
@@ -215,14 +345,37 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
         .order('created_at', { ascending: false })
         .limit(10)
     ),
-    safeRows<ShiftAttendanceRow>(() =>
-      supabase
-        .from('hr_shift_attendance')
-        .select('status,shift_date')
-        .gte('shift_date', weekAgoIso.slice(0, 10))
-        .order('shift_date', { ascending: false })
-        .limit(400)
-    ),
+    morningAttendanceTable
+      ? safeRows<SplitShiftAttendanceRow>(() =>
+          supabase
+            .from(morningAttendanceTable)
+            .select('status,shift_date,shift_period,shift_slot_key,employee_s_number')
+            .gte('shift_date', twoWeeksAgoDate)
+            .order('shift_date', { ascending: false })
+            .order('shift_period', { ascending: true })
+            .limit(1500)
+        )
+      : Promise.resolve([]),
+    offPeriodAttendanceTable
+      ? safeRows<SplitShiftAttendanceRow>(() =>
+          supabase
+            .from(offPeriodAttendanceTable)
+            .select('status,shift_date,shift_period,shift_slot_key,employee_s_number')
+            .gte('shift_date', twoWeeksAgoDate)
+            .order('shift_date', { ascending: false })
+            .order('shift_period', { ascending: true })
+            .limit(1500)
+        )
+      : Promise.resolve([]),
+    meetingAttendanceTable
+      ? safeRows<MeetingAttendanceRow>(() =>
+          supabase
+            .from(meetingAttendanceTable)
+            .select('s_number,checkin_date,effective_status')
+            .order('checkin_date', { ascending: false })
+            .limit(8000)
+        )
+      : Promise.resolve([]),
     safeRows<FinanceHeaderRow>(() =>
       supabase
         .from('finance_report_headers')
@@ -262,16 +415,134 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
     )
   ]);
 
-  const absentCount = shiftAttendanceRows.filter((row) => row.status === 'absent').length;
-  const presentCount = shiftAttendanceRows.filter((row) => row.status === 'present').length;
-  const attendanceTotal = absentCount + presentCount;
-  const attendanceRate =
-    attendanceTotal > 0 ? `${Math.round((presentCount / attendanceTotal) * 100)}%` : 'No recent data';
+  const morningStats = buildAttendanceStats(morningAttendanceRows);
+  const offPeriodStats = buildAttendanceStats(offPeriodAttendanceRows);
+  const splitAttendanceAverageRate = averageRates([morningStats.rate, offPeriodStats.rate]);
+  const splitAttendanceRateLabel = formatRatePercent(splitAttendanceAverageRate);
+  const morningRateLabel = formatRatePercent(morningStats.rate);
+  const offPeriodRateLabel = formatRatePercent(offPeriodStats.rate);
+
+  const latestMorningDate = latestShiftDate(morningAttendanceRows);
+  const latestMorningRows = latestMorningDate
+    ? morningAttendanceRows.filter((row) => row.shift_date === latestMorningDate)
+    : [];
+  const latestMorningStats = buildAttendanceStats(latestMorningRows);
+
+  const latestMorningSNumbers = Array.from(
+    new Set(
+      latestMorningRows
+        .map((row) => row.employee_s_number)
+        .filter((sNumber): sNumber is string => Boolean(sNumber))
+    )
+  );
+
+  const latestMeetingDate = recentMeetingAttendanceRows
+    .map((row) => row.checkin_date)
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? null;
+  const latestMeetingRows = latestMeetingDate
+    ? recentMeetingAttendanceRows.filter((row) => row.checkin_date === latestMeetingDate)
+    : [];
+  const latestMeetingPresentRows = latestMeetingRows.filter(
+    (row) => row.effective_status === 'present' || row.effective_status === 'excused'
+  );
+  const latestMeetingAbsentRows = latestMeetingRows.filter((row) => row.effective_status === 'absent');
+  const latestMeetingSNumbers = Array.from(
+    new Set(latestMeetingRows.map((row) => row.s_number).filter((sNumber): sNumber is string => Boolean(sNumber)))
+  );
+  const meetingTrendSNumbers = Array.from(
+    new Set(recentMeetingAttendanceRows.map((row) => row.s_number).filter((sNumber): sNumber is string => Boolean(sNumber)))
+  );
+  const studentLookupSNumbers = Array.from(
+    new Set([...latestMorningSNumbers, ...latestMeetingSNumbers, ...meetingTrendSNumbers])
+  );
+
+  const latestMorningStudents =
+    studentLookupSNumbers.length > 0
+      ? await safeRows<StudentNameRow>(() =>
+          supabase
+            .from('students')
+            .select('*')
+            .in('s_number', studentLookupSNumbers)
+            .limit(3000)
+        )
+      : [];
+
+  const studentBySNumber = new Map(
+    latestMorningStudents
+      .map((row) => ({ sNumber: resolveStudentSNumber(row), name: resolveStudentName(row) }))
+      .filter((row) => row.sNumber && row.name)
+      .map((row) => [row.sNumber, row.name] as const)
+  );
+
+  const latestMorningAbsentNames = latestMorningRows
+    .filter((row) => row.status === 'absent')
+    .map((row) => formatEmployeeName(row.employee_s_number, studentBySNumber))
+    .slice(0, 6);
+  const latestMorningPresentNames = latestMorningRows
+    .filter((row) => row.status === 'present')
+    .map((row) => formatEmployeeName(row.employee_s_number, studentBySNumber))
+    .slice(0, 6);
+  const latestMeetingAttendeeNames = Array.from(
+    new Set(latestMeetingPresentRows.map((row) => formatEmployeeName(row.s_number, studentBySNumber)))
+  );
+  const latestMeetingAbsentNames = Array.from(
+    new Set(latestMeetingAbsentRows.map((row) => formatEmployeeName(row.s_number, studentBySNumber)))
+  );
+  const latestMeetingDateLabel = latestMeetingDate ? formatDate(latestMeetingDate) : 'No recent meeting date';
+  const latestMeetingValue = latestMeetingRows.length
+    ? `${latestMeetingPresentRows.length}/${latestMeetingRows.length} present/excused`
+    : 'No recent rows';
+  const meetingDatesInWindow = Array.from(new Set(recentMeetingAttendanceRows.map((row) => row.checkin_date))).sort();
+  const meetingTrendStartDate = meetingDatesInWindow[0] ?? 'No recorded meeting date';
+  const meetingTrendByStudent = new Map<
+    string,
+    { totalMeetings: number; presentExcused: number; absent: number }
+  >();
+  for (const row of recentMeetingAttendanceRows) {
+    const key = row.s_number;
+    const current = meetingTrendByStudent.get(key) ?? { totalMeetings: 0, presentExcused: 0, absent: 0 };
+    current.totalMeetings += 1;
+    if (row.effective_status === 'present' || row.effective_status === 'excused') {
+      current.presentExcused += 1;
+    } else {
+      current.absent += 1;
+    }
+    meetingTrendByStudent.set(key, current);
+  }
+  const consistentMeetingSkippers = Array.from(meetingTrendByStudent.entries())
+    .map(([sNumber, stats]) => {
+      const rate = stats.totalMeetings > 0 ? (stats.presentExcused / stats.totalMeetings) * 100 : 0;
+      return {
+        sNumber,
+        name: formatEmployeeName(sNumber, studentBySNumber),
+        attendanceRate: rate,
+        presentExcused: stats.presentExcused,
+        totalMeetings: stats.totalMeetings,
+        absent: stats.absent
+      };
+    })
+    .filter((row) => row.totalMeetings >= minMeetingsForFlag && row.attendanceRate < 50)
+    .sort((left, right) => {
+      if (left.attendanceRate !== right.attendanceRate) return left.attendanceRate - right.attendanceRate;
+      return right.totalMeetings - left.totalMeetings;
+    });
+  const consistentMeetingSkipperSample = consistentMeetingSkippers
+    .slice(0, 8)
+    .map((row) => `${row.name} (${Math.round(row.attendanceRate)}%, ${row.presentExcused}/${row.totalMeetings})`);
+
+  const latestMorningDateLabel = latestMorningDate ? formatDate(latestMorningDate) : 'No recent shift date';
+  const latestMorningValue =
+    latestMorningStats.expected + latestMorningStats.present + latestMorningStats.absent + latestMorningStats.excused > 0
+      ? `${latestMorningStats.present + latestMorningStats.excused}/${latestMorningStats.expected + latestMorningStats.present + latestMorningStats.absent + latestMorningStats.excused} present/excused`
+      : 'No recent rows';
 
   const highRiskOrders = recentProductOrders.filter(
     (order) => order.status === 'ordered' || order.status === 'partially_received'
   ).length;
   const financeReportCount = financeHeaders.length;
+  const totalSplitAbsences = morningStats.absent + offPeriodStats.absent;
 
   const summaryCards: ExecutiveSummaryCard[] = [
     {
@@ -282,11 +553,32 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       tone: 'neutral'
     },
     {
-      id: 'attendance-rate',
-      title: 'Shift Attendance',
-      value: attendanceRate,
-      subtitle: 'Present vs absent in recent shifts',
-      tone: absentCount > 8 ? 'warning' : 'positive'
+      id: 'split-attendance-rate',
+      title: 'Split Shift Attendance Avg',
+      value: splitAttendanceRateLabel,
+      subtitle: `Morning ${morningRateLabel} | Off-period ${offPeriodRateLabel}`,
+      tone: totalSplitAbsences > 8 ? 'warning' : 'positive'
+    },
+    {
+      id: 'morning-shift-recent',
+      title: 'Most Recent Morning Shift',
+      value: latestMorningValue,
+      subtitle: `${latestMorningDateLabel} | Absent ${latestMorningStats.absent} | Excused ${latestMorningStats.excused}`,
+      tone: latestMorningStats.absent > 2 ? 'warning' : 'neutral'
+    },
+    {
+      id: 'morning-meeting-recent',
+      title: 'Most Recent Morning Meeting',
+      value: latestMeetingValue,
+      subtitle: `${latestMeetingDateLabel} | Absent ${latestMeetingAbsentRows.length}`,
+      tone: latestMeetingAbsentRows.length > 2 ? 'warning' : 'neutral'
+    },
+    {
+      id: 'meeting-under-fifty',
+      title: 'Morning Meeting Under 50%',
+      value: String(consistentMeetingSkippers.length),
+      subtitle: `${meetingDatesInWindow.length} meetings scanned (all available) | min ${minMeetingsForFlag} meetings`,
+      tone: consistentMeetingSkippers.length > 0 ? 'warning' : 'positive'
     },
     {
       id: 'open-hr-requests',
@@ -333,6 +625,34 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   ];
 
   const feed: ExecutiveFeedItem[] = [
+    ...(latestMeetingDate
+      ? [
+          {
+            id: `feed-hr-meeting-${latestMeetingDate}`,
+            department: 'HR',
+            title: 'Most recent morning meeting',
+            detail: `${latestMeetingDateLabel}: ${latestMeetingValue}. Attendees: ${
+              latestMeetingAttendeeNames.length ? latestMeetingAttendeeNames.join(', ') : 'none listed'
+            }.`,
+            timestamp: formatDateTime(`${latestMeetingDate}T00:00:00.000Z`),
+            severity: (latestMeetingAbsentRows.length > 2 ? 'warning' : 'info') as ExecutiveFeedItem['severity'],
+            href: '/hr?module=hr&tab=meeting-attendance'
+          }
+        ]
+      : []),
+    ...(latestMorningDate
+      ? [
+          {
+            id: `feed-hr-morning-${latestMorningDate}`,
+            department: 'HR',
+            title: 'Most recent morning shift',
+            detail: `${latestMorningDateLabel}: ${latestMorningValue}.`,
+            timestamp: formatDateTime(`${latestMorningDate}T00:00:00.000Z`),
+            severity: (latestMorningStats.absent > 2 ? 'warning' : 'info') as ExecutiveFeedItem['severity'],
+            href: '/hr?module=hr&tab=shift-attendance'
+          }
+        ]
+      : []),
     ...recentProductOrders.slice(0, 3).map((order) => ({
       id: `feed-order-${order.id}`,
       department: 'Product',
@@ -376,9 +696,9 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       id: 'alert-hr-attendance',
       title: 'Attendance Risk',
       department: 'HR',
-      severity: absentCount > 8 ? 'high' : 'medium',
-      description: `Recent shift absences recorded: ${absentCount}.`,
-      action: 'Review shift attendance and no-show patterns in HR.'
+      severity: totalSplitAbsences > 8 ? 'high' : 'medium',
+      description: `Split-shift absences (morning + off-period): ${totalSplitAbsences}.`,
+      action: 'Review morning/off-period attendance trends and no-shows in HR.'
     },
     {
       id: 'alert-product-orders',
@@ -401,9 +721,9 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const metrics: ExecutiveMetric[] = [
     {
       id: 'metric-attendance',
-      title: 'Attendance reliability',
-      value: attendanceRate,
-      trend: absentCount > 8 ? 'Watch closely' : 'Stable'
+      title: 'Split-shift attendance reliability',
+      value: splitAttendanceRateLabel,
+      trend: totalSplitAbsences > 8 ? 'Watch closely' : 'Stable'
     },
     {
       id: 'metric-orders',
@@ -450,8 +770,28 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
     {
       id: 'health-hr',
       department: 'HR',
-      status: absentCount > 8 ? 'risk' : 'watch',
-      summary: `Absences this week: ${absentCount}. Pending requests: ${openShiftRequests}.`
+      status: totalSplitAbsences > 8 ? 'risk' : 'watch',
+      summary: [
+        `Most recent morning meeting (${latestMeetingDateLabel}): ${latestMeetingValue}.`,
+        latestMeetingAttendeeNames.length
+          ? `Attendees: ${latestMeetingAttendeeNames.join(', ')}.`
+          : 'No attendee names available for the latest morning meeting.',
+        latestMeetingAbsentNames.length
+          ? `Meeting absences: ${latestMeetingAbsentNames.join(', ')}.`
+          : 'No meeting absences listed on latest morning meeting.',
+        consistentMeetingSkipperSample.length
+          ? `Under 50% meeting attendance (min ${minMeetingsForFlag} meetings): ${consistentMeetingSkipperSample.join(', ')}.`
+          : `No students currently below 50% meeting attendance with at least ${minMeetingsForFlag} meetings in window.`,
+        `Most recent morning shift (${latestMorningDateLabel}): ${latestMorningValue}.`,
+        latestMorningAbsentNames.length
+          ? `Absent roster: ${latestMorningAbsentNames.join(', ')}.`
+          : 'No absent roster names on most recent morning shift.',
+        latestMorningPresentNames.length
+          ? `Present roster sample: ${latestMorningPresentNames.join(', ')}.`
+          : 'No present roster sample available.',
+        `Off-period attendance rate: ${offPeriodRateLabel}.`,
+        `Pending shift requests: ${openShiftRequests}.`
+      ].join(' ')
     },
     {
       id: 'health-product',
@@ -485,7 +825,14 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
     }
   ];
 
-  const executiveBrief = `Since the last 7 days, ${newOrdersThisWeek} new product orders were placed and ${openShiftRequests} HR shift requests remain pending. Attendance reliability is currently ${attendanceRate}. Finance has ${financeReportCount} recent uploaded reports, while marketing has ${upcomingMarketingEvents.length} upcoming events and inventory has ${inventorySessions.length} active/recent session records.`;
+  const executiveBrief = [
+    `Since the last 7 days, ${newOrdersThisWeek} new product orders were placed and ${openShiftRequests} HR shift requests remain pending.`,
+    `Split-shift attendance average is ${splitAttendanceRateLabel} (morning ${morningRateLabel}, off-period ${offPeriodRateLabel}).`,
+    `Most recent morning meeting (${latestMeetingDateLabel}) is ${latestMeetingValue}.`,
+    `Morning meeting trend scan found ${consistentMeetingSkippers.length} student(s) below 50% attendance (min ${minMeetingsForFlag} meetings).`,
+    `Most recent morning shift (${latestMorningDateLabel}) is ${latestMorningValue}.`,
+    `Finance has ${financeReportCount} recent uploaded reports, while marketing has ${upcomingMarketingEvents.length} upcoming events and inventory has ${inventorySessions.length} active/recent session records.`
+  ].join(' ');
 
   return {
     generatedAt: nowIso,
@@ -495,7 +842,28 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
     alerts,
     metrics,
     reports,
-    departmentHealth
+    departmentHealth,
+    latestMorningMeeting: {
+      date: latestMeetingDate,
+      dateLabel: latestMeetingDateLabel,
+      presentExcusedCount: latestMeetingPresentRows.length,
+      totalCount: latestMeetingRows.length,
+      attendeeNames: latestMeetingAttendeeNames,
+      absentNames: latestMeetingAbsentNames
+    },
+    morningMeetingTrend: {
+      windowStartDate: meetingTrendStartDate,
+      windowEndDate: meetingTrendEndDate,
+      totalMeetings: meetingDatesInWindow.length,
+      minMeetingsForFlag,
+      underFiftyPercent: consistentMeetingSkippers.map((row) => ({
+        sNumber: row.sNumber,
+        name: row.name,
+        attendanceRate: row.attendanceRate,
+        presentExcused: row.presentExcused,
+        totalMeetings: row.totalMeetings
+      }))
+    }
   };
 }
 
@@ -507,7 +875,31 @@ function summarizeToolResult(toolId: string, overview: ExecutiveOverviewData): s
       return `Top feed updates loaded: ${overview.feed.slice(0, 5).map((item) => `${item.department}: ${item.title}`).join('; ')}`;
     case 'get_hr_insights': {
       const hrHealth = overview.departmentHealth.find((row) => row.department === 'HR');
-      return hrHealth?.summary ?? 'No HR summary available.';
+      const morningCard = overview.summaryCards.find((card) => card.id === 'morning-shift-recent');
+      const meetingCard = overview.summaryCards.find((card) => card.id === 'morning-meeting-recent');
+      const splitCard = overview.summaryCards.find((card) => card.id === 'split-attendance-rate');
+      const trend = overview.morningMeetingTrend;
+      const trendLine =
+        trend && trend.underFiftyPercent.length
+          ? `Consistent morning meeting under-50% attendance (min ${trend.minMeetingsForFlag} meetings): ${trend.underFiftyPercent
+              .slice(0, 12)
+              .map(
+                (row) =>
+                  `${row.name} (${Math.round(row.attendanceRate)}%, ${row.presentExcused}/${row.totalMeetings})`
+              )
+              .join('; ')}.`
+          : trend
+            ? `No students under 50% morning meeting attendance (min ${trend.minMeetingsForFlag} meetings, ${trend.totalMeetings} meetings scanned).`
+            : '';
+      return [
+        hrHealth?.summary ?? 'No HR summary available.',
+        splitCard ? `Split attendance: ${splitCard.value} (${splitCard.subtitle}).` : '',
+        meetingCard ? `Morning meeting snapshot: ${meetingCard.value} (${meetingCard.subtitle}).` : '',
+        trendLine,
+        morningCard ? `Morning shift snapshot: ${morningCard.value} (${morningCard.subtitle}).` : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
     }
     case 'get_product_order_updates': {
       const productHealth = overview.departmentHealth.find((row) => row.department === 'Product');
@@ -554,16 +946,22 @@ export async function runExecutiveTooling(prompt: string): Promise<{
     const startedAt = new Date().toISOString();
     try {
       const detail = summarizeToolResult(tool.id, overview);
+      const toolSpec = getToolSpecById(tool.id);
+      const detailedDescription = `${toolSpec?.purpose ?? 'No purpose documented.'} Result: ${detail}`;
       const finishedAt = new Date().toISOString();
       toolTrace.push({
         id: tool.id,
-        label: getToolSpecById(tool.id)?.label ?? tool.id,
+        label: toolSpec?.label ?? tool.id,
         status: 'complete',
         startedAt,
         finishedAt,
-        detail
+        detail: detailedDescription
       });
-      contextLines.push(`${tool.id}: ${detail}`);
+      contextLines.push([
+        `[${tool.id}]`,
+        `Purpose: ${toolSpec?.purpose ?? 'No purpose documented.'}`,
+        `Result: ${detail}`
+      ].join('\n'));
     } catch (error) {
       const finishedAt = new Date().toISOString();
       toolTrace.push({

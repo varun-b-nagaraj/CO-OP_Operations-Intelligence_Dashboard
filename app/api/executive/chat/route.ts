@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getToolSpecById } from '@/lib/executive/tooling';
 import {
+  getToolSpecById,
+  isGreetingPrompt,
+  isOperationalDataPrompt,
+  requiresFreshDataPrompt
+} from '@/lib/executive/tooling';
+import {
+  getLatestAssistantMessageState,
   getUserMemoryFacts,
   insertConversationMessage,
   listRecentConversationContext,
   resolveUserKey,
   upsertUserMemoryFacts
 } from '@/lib/server/executive-memory';
-import { ExecutiveToolTraceItem, runExecutiveTooling } from '@/lib/server/executive';
+import {
+  ExecutiveOverviewData,
+  ExecutiveToolTraceItem,
+  runExecutiveTooling
+} from '@/lib/server/executive';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -21,12 +31,40 @@ interface MemoryFactCandidate {
   importance: number;
 }
 
+interface ToolingCachePayload {
+  generatedAt: string;
+  toolContext: string;
+  overview: ExecutiveOverviewData;
+  toolTrace: ExecutiveToolTraceItem[];
+}
+
 function parseAssistantMessage(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;
   const candidate = payload as { message?: { content?: unknown }; response?: unknown };
   if (typeof candidate.message?.content === 'string') return candidate.message.content;
   if (typeof candidate.response === 'string') return candidate.response;
   return null;
+}
+
+function maybeToolingCache(payload: unknown): ToolingCachePayload | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const candidate = payload as {
+    generatedAt?: unknown;
+    toolContext?: unknown;
+    overview?: unknown;
+    toolTrace?: unknown;
+  };
+  if (typeof candidate.generatedAt !== 'string') return null;
+  if (typeof candidate.toolContext !== 'string') return null;
+  if (!candidate.overview || typeof candidate.overview !== 'object') return null;
+  if (!Array.isArray(candidate.toolTrace)) return null;
+  return candidate as ToolingCachePayload;
+}
+
+function isRecentCache(createdAt: string, maxAgeMs = 2 * 60 * 1000): boolean {
+  const created = new Date(createdAt).getTime();
+  if (!Number.isFinite(created)) return false;
+  return Date.now() - created <= maxAgeMs;
 }
 
 async function readResponseError(response: Response): Promise<string> {
@@ -218,8 +256,8 @@ export async function POST(request: NextRequest) {
           id: 'get_user_preferences',
           status: 'complete',
           detail: memoryFacts.length
-            ? `Loaded ${memoryFacts.length} memory fact(s) from Supabase.${sampleFacts ? ` Sample: ${sampleFacts}` : ''}`
-            : 'No saved preferences yet; memory table is empty for this user.',
+            ? `Load durable preferences from Supabase memory. Result: Loaded ${memoryFacts.length} memory fact(s).${sampleFacts ? ` Sample: ${sampleFacts}` : ''}`
+            : 'Load durable preferences from Supabase memory. Result: No saved preferences yet; memory table is empty for this user.',
           startedAt: preferencesToolStart,
           finishedAt: preferencesToolEnd
         })
@@ -230,7 +268,9 @@ export async function POST(request: NextRequest) {
         toToolTraceItem({
           id: 'get_user_preferences',
           status: 'failed',
-          detail: error instanceof Error ? error.message : 'Failed to fetch memory from Supabase.',
+          detail: `Load durable preferences from Supabase memory. Result: ${
+            error instanceof Error ? error.message : 'Failed to fetch memory from Supabase.'
+          }`,
           startedAt: preferencesToolStart,
           finishedAt: preferencesToolEnd
         })
@@ -246,23 +286,78 @@ export async function POST(request: NextRequest) {
       metadata: { source: 'executive_chat_api' }
     });
 
-    const { overview, toolContext, toolTrace: overviewToolTrace } = await runExecutiveTooling(message);
-
     const memoryContext = memoryFactsToPromptContext(memoryFacts);
+    const wantsOperationalData = isOperationalDataPrompt(message);
+    const isGreeting = isGreetingPrompt(message);
+
+    let overview: ExecutiveOverviewData | null = null;
+    let toolContext = '';
+    let overviewToolTrace: ExecutiveToolTraceItem[] = [];
+    let toolingMode: 'fresh' | 'reused' | 'skipped' = 'skipped';
+
+    if (wantsOperationalData) {
+      const latestAssistantState = await getLatestAssistantMessageState({ userKey, sessionId });
+      const cachedTooling = maybeToolingCache(
+        latestAssistantState?.metadata?.tooling_cache ?? null
+      );
+      const cacheReusable =
+        Boolean(latestAssistantState && cachedTooling) &&
+        !requiresFreshDataPrompt(message) &&
+        isRecentCache(latestAssistantState?.createdAt ?? '');
+
+      if (cacheReusable && cachedTooling && latestAssistantState) {
+        toolingMode = 'reused';
+        overview = cachedTooling.overview;
+        toolContext = cachedTooling.toolContext;
+        const startedAt = new Date().toISOString();
+        const finishedAt = new Date().toISOString();
+        overviewToolTrace = [
+          toToolTraceItem({
+            id: 'use_recent_context',
+            status: 'complete',
+            detail: `Reused recent executive context from ${latestAssistantState.createdAt}.`,
+            startedAt,
+            finishedAt
+          }),
+          ...cachedTooling.toolTrace
+        ];
+      } else {
+        toolingMode = 'fresh';
+        const toolingResult = await runExecutiveTooling(message);
+        overview = toolingResult.overview;
+        toolContext = toolingResult.toolContext;
+        overviewToolTrace = toolingResult.toolTrace;
+      }
+    }
+
     const systemPrompt = [
       'You are the executive AI agent for the CO-OP Operations dashboard.',
-      'Use the provided MCP-style tool output as evidence.',
-      'Give concise, direct operational guidance with callouts for risks and follow-up actions.',
-      'If data is missing, say what is missing and what dashboard tab to check.',
+      'Conversation style requirements:',
+      '- Be natural and concise.',
+      '- If the user says hi/hello/small-talk, respond casually in 1-2 sentences and ask what they want.',
+      '- Do not dump metrics unless the user explicitly asks for status, overview, trends, or analysis.',
+      '- When discussing shift attendance, prioritize morning and off-period attendance and their average; do not prioritize general shift attendance.',
+      '- Ground every factual claim in the provided tool outputs or conversation history. Never invent fields, departments, or placeholders.',
+      '- Do not produce generic numbered templates (for example 1..10 categories) unless the user explicitly asks for that format.',
+      '- For direct questions like "who came?" or "how many came?", answer in the first sentence with exact date + names/counts from tool output.',
+      '- For "consistently skipped" / "<50% attendance" questions, use morning meeting trend results from tool output and return names with percentages.',
+      '- Avoid repetitive wording and avoid unnecessary warnings.',
+      '- If a specific detail is unavailable, state exactly what is missing and continue with the available data.',
       '',
-      'Saved user preferences and critical facts (default tool context):',
+      'Saved user preferences and critical facts:',
       memoryContext,
       '',
-      'Executive overview snapshot:',
-      overview.executiveBrief,
+      wantsOperationalData && overview
+        ? `Executive overview snapshot:\n${overview.executiveBrief}`
+        : 'No operational tool snapshot was requested for this turn.',
       '',
-      'Tool outputs:',
-      toolContext
+      wantsOperationalData && toolContext
+        ? `Tool outputs:\n${toolContext}`
+        : 'No operational tool output was requested for this turn.',
+      '',
+      isGreeting
+        ? 'The latest user message is a greeting or casual opener. Keep your response short and friendly.'
+        : 'Answer directly based on the user request.'
     ].join('\n');
 
     const model = process.env.OLLAMA_MODEL?.trim() || 'deepseek-v3.1:671b-cloud';
@@ -284,7 +379,7 @@ export async function POST(request: NextRequest) {
     const contextConversation = dbConversation.length
       ? dbConversation
       : fallbackConversation.map((entry) => ({ role: entry.role, content: entry.content }));
-    const recentConversation = contextConversation.slice(-12);
+    const recentConversation = contextConversation.slice(isGreeting ? -2 : -12);
     const lastContextMessage = recentConversation[recentConversation.length - 1];
     const hasCurrentUserPromptAlready =
       lastContextMessage?.role === 'user' &&
@@ -305,7 +400,7 @@ export async function POST(request: NextRequest) {
           ...(hasCurrentUserPromptAlready ? [] : [{ role: 'user', content: message }])
         ],
         options: {
-          temperature: 0.2
+          temperature: 0.1
         }
       })
     });
@@ -320,8 +415,10 @@ export async function POST(request: NextRequest) {
         'Unable to reach Ollama through the internal proxy right now.',
         `Upstream status: ${upstream.status}.`,
         upstreamDetail ? `Upstream detail: ${upstreamDetail}` : '',
-        `Executive snapshot: ${overview.executiveBrief}`,
-        'Check the Overview tab for current metrics and the Alerts tab for follow-up actions.'
+        overview ? `Executive snapshot: ${overview.executiveBrief}` : '',
+        overview
+          ? 'Check the Overview tab for current metrics and the Alerts tab for follow-up actions.'
+          : 'Try again in a moment.'
       ]
         .filter(Boolean)
         .join(' ');
@@ -329,7 +426,25 @@ export async function POST(request: NextRequest) {
       const upstreamJson = (await upstream.json()) as unknown;
       assistantMessage =
         parseAssistantMessage(upstreamJson) ??
-        `Tool execution finished, but the model response was empty. Executive snapshot: ${overview.executiveBrief}`;
+        [
+          'Tool execution finished, but the model response was empty.',
+          overview ? `Executive snapshot: ${overview.executiveBrief}` : ''
+        ]
+          .filter(Boolean)
+          .join(' ');
+    }
+
+    const assistantMetadata: Record<string, unknown> = {
+      source,
+      tooling_mode: toolingMode
+    };
+    if (wantsOperationalData && overview) {
+      assistantMetadata.tooling_cache = {
+        generatedAt: new Date().toISOString(),
+        toolContext,
+        overview,
+        toolTrace: overviewToolTrace
+      } satisfies ToolingCachePayload;
     }
 
     await insertConversationMessage({
@@ -338,51 +453,68 @@ export async function POST(request: NextRequest) {
       role: 'assistant',
       content: assistantMessage,
       model: model,
-      metadata: { source }
+      metadata: assistantMetadata
     });
 
     const memoryWriteStart = new Date().toISOString();
     let memoryWriteCount = 0;
-    try {
-      const extractedFacts = await extractMemoryFactsWithSmallModel({
-        request,
-        userMessage: message,
-        assistantMessage,
-        existingFactsPrompt: memoryContext
-      });
-      memoryWriteCount = await upsertUserMemoryFacts(
-        userKey,
-        sessionId,
-        extractedFacts.map((fact) => ({
-          factText: fact.factText,
-          category: fact.category,
-          importance: fact.importance
-        }))
-      );
+    const shouldRunMemoryWriter = wantsOperationalData || message.trim().length >= 10;
+
+    if (!shouldRunMemoryWriter) {
       const memoryWriteEnd = new Date().toISOString();
-      toolTrace.push(
-        toToolTraceItem({
-          id: 'sync_user_memory',
-          status: 'complete',
-          detail:
-            memoryWriteCount > 0
-              ? `qwen3:8b saved ${memoryWriteCount} condensed fact(s) to memory.`
-              : 'qwen3:8b found no new durable facts to store.',
-          startedAt: memoryWriteStart,
-          finishedAt: memoryWriteEnd
-        })
+        toolTrace.push(
+          toToolTraceItem({
+            id: 'sync_user_memory',
+            status: 'complete',
+            detail: 'Condense durable facts with qwen3:8b and sync memory. Result: skipped for short conversational turn.',
+            startedAt: memoryWriteStart,
+            finishedAt: memoryWriteEnd
+          })
       );
-    } catch (error) {
-      const memoryWriteEnd = new Date().toISOString();
-      toolTrace.push(
-        toToolTraceItem({
-          id: 'sync_user_memory',
-          status: 'failed',
-          detail: error instanceof Error ? error.message : 'Memory writer failed.',
-          startedAt: memoryWriteStart,
-          finishedAt: memoryWriteEnd
-        })
-      );
+    } else {
+      try {
+        const extractedFacts = await extractMemoryFactsWithSmallModel({
+          request,
+          userMessage: message,
+          assistantMessage,
+          existingFactsPrompt: memoryContext
+        });
+        memoryWriteCount = await upsertUserMemoryFacts(
+          userKey,
+          sessionId,
+          extractedFacts.map((fact) => ({
+            factText: fact.factText,
+            category: fact.category,
+            importance: fact.importance
+          }))
+        );
+        const memoryWriteEnd = new Date().toISOString();
+        toolTrace.push(
+          toToolTraceItem({
+            id: 'sync_user_memory',
+            status: 'complete',
+            detail:
+              memoryWriteCount > 0
+                ? `Condense durable facts with qwen3:8b and sync memory. Result: saved ${memoryWriteCount} condensed fact(s).`
+                : 'Condense durable facts with qwen3:8b and sync memory. Result: no new durable facts to store.',
+            startedAt: memoryWriteStart,
+            finishedAt: memoryWriteEnd
+          })
+        );
+      } catch (error) {
+        const memoryWriteEnd = new Date().toISOString();
+        toolTrace.push(
+          toToolTraceItem({
+            id: 'sync_user_memory',
+            status: 'failed',
+            detail: `Condense durable facts with qwen3:8b and sync memory. Result: ${
+              error instanceof Error ? error.message : 'Memory writer failed.'
+            }`,
+            startedAt: memoryWriteStart,
+            finishedAt: memoryWriteEnd
+          })
+        );
+      }
     }
 
     return NextResponse.json({

@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 
+import { DepartmentShell } from '@/app/_components/department-shell';
 import { SharedCalendarTab } from '@/app/_components/shared-calendar-tab';
 import { planExecutiveTools } from '@/lib/executive/tooling';
 
@@ -93,14 +94,18 @@ interface ConversationSession {
 
 const USER_KEY_STORAGE = 'executive_agent_user_key_v1';
 
-const EXECUTIVE_TABS: Array<{ id: ExecutiveTabId; label: string }> = [
-  { id: 'ai-agent', label: 'AI Agent' },
-  { id: 'overview', label: 'Overview' },
-  { id: 'department-feed', label: 'Feed' },
-  { id: 'alerts', label: 'Alerts' },
-  { id: 'metrics', label: 'Metrics' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'calendar', label: 'Calendar' }
+const EXECUTIVE_TABS: Array<{
+  id: ExecutiveTabId;
+  label: string;
+  icon: 'dashboard' | 'analysis' | 'history' | 'prompts' | 'reports' | 'calendar';
+}> = [
+  { id: 'ai-agent', label: 'AI Agent', icon: 'dashboard' },
+  { id: 'overview', label: 'Overview', icon: 'analysis' },
+  { id: 'department-feed', label: 'Feed', icon: 'history' },
+  { id: 'alerts', label: 'Alerts', icon: 'prompts' },
+  { id: 'metrics', label: 'Metrics', icon: 'reports' },
+  { id: 'reports', label: 'Reports', icon: 'history' },
+  { id: 'calendar', label: 'Calendar', icon: 'calendar' }
 ];
 
 const QUICK_PROMPTS = [
@@ -151,8 +156,72 @@ function toConversation(messages: ChatMessage[]) {
     }));
 }
 
+function renderInlineMessageText(text: string): ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return <strong key={`bold-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      return (
+        <code className="rounded bg-neutral-100 px-1 py-0.5 text-[0.95em]" key={`code-${index}`}>
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return <span key={`text-${index}`}>{part}</span>;
+  });
+}
+
+function renderMessageContent(content: string): ReactNode[] {
+  const lines = content.split('\n');
+  const nodes: ReactNode[] = [];
+  let bulletBuffer: string[] = [];
+  let keyIndex = 0;
+
+  const flushBullets = () => {
+    if (!bulletBuffer.length) return;
+    nodes.push(
+      <ul className="list-disc space-y-1 pl-5" key={`list-${keyIndex++}`}>
+        {bulletBuffer.map((item, idx) => (
+          <li key={`item-${idx}`}>{renderInlineMessageText(item)}</li>
+        ))}
+      </ul>
+    );
+    bulletBuffer = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const bulletMatch = trimmed.match(/^[-*]\s+(.+)$/);
+    if (bulletMatch?.[1]) {
+      bulletBuffer.push(bulletMatch[1]);
+      continue;
+    }
+
+    flushBullets();
+    if (!trimmed) {
+      nodes.push(<div className="h-2" key={`gap-${keyIndex++}`} />);
+      continue;
+    }
+
+    nodes.push(
+      <p className="whitespace-pre-wrap" key={`line-${keyIndex++}`}>
+        {renderInlineMessageText(line)}
+      </p>
+    );
+  }
+
+  flushBullets();
+  return nodes;
+}
+
 export function ExecutiveDashboard() {
   const [activeTab, setActiveTab] = useState<ExecutiveTabId>('ai-agent');
+  const activeLabel = useMemo(
+    () => EXECUTIVE_TABS.find((tab) => tab.id === activeTab)?.label ?? 'Executive Dashboard',
+    [activeTab]
+  );
 
   const [overview, setOverview] = useState<ExecutiveOverviewData | null>(null);
   const [loadingOverview, setLoadingOverview] = useState(true);
@@ -413,189 +482,182 @@ export function ExecutiveDashboard() {
   const activeBreadcrumb = activeBreadcrumbs[breadcrumbIndex] ?? '';
 
   return (
-    <main className="min-h-screen w-full bg-neutral-50 text-neutral-900">
-      <header className="sticky top-0 z-30 border-b border-neutral-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-2">
-            {activeTab === 'ai-agent' ? (
-              <button
-                className="min-h-[34px] border border-neutral-300 bg-white px-3 text-xs hover:bg-neutral-100"
-                onClick={() => setHistoryOpen((current) => !current)}
-                type="button"
-              >
-                {historyOpen ? 'Hide History' : 'Show History'}
-              </button>
-            ) : null}
-            <h1 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">Executive Dashboard</h1>
-          </div>
-          <nav className="flex max-w-full items-center gap-1 overflow-x-auto">
-            {EXECUTIVE_TABS.map((tab) => {
-              const isActive = tab.id === activeTab;
-              return (
-                <button
-                  key={tab.id}
-                  className={`min-h-[34px] whitespace-nowrap border px-3 text-xs ${
-                    isActive
-                      ? 'border-brand-maroon bg-brand-maroon text-white'
-                      : 'border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100'
-                  }`}
-                  onClick={() => setActiveTab(tab.id)}
-                  type="button"
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-      </header>
-
-      {activeTab === 'ai-agent' ? (
-        <section className="mx-auto flex h-[calc(100vh-63px)] w-full max-w-[1400px]">
-          {historyOpen ? (
-            <aside className="w-full max-w-[260px] border-r border-neutral-200 bg-white p-3">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-600">Conversations</h2>
-                <button
-                  className="min-h-[30px] border border-neutral-300 bg-white px-2 text-xs hover:bg-neutral-100"
-                  onClick={startNewConversation}
-                  type="button"
-                >
-                  + New
-                </button>
-              </div>
-              <p className="mb-2 truncate text-[11px] text-neutral-500">User: {userKey || 'loading...'}</p>
-              <div className="max-h-[calc(100vh-190px)] space-y-2 overflow-y-auto">
-                {loadingSessions ? <p className="text-xs text-neutral-600">Loading sessions...</p> : null}
-                {!loadingSessions && sessions.length === 0 ? (
-                  <p className="text-xs text-neutral-600">No saved conversations yet.</p>
-                ) : null}
-                {sessions.map((session) => {
-                  const isActive = session.sessionId === activeSessionId;
-                  return (
-                    <button
-                      key={session.sessionId}
-                      className={`w-full border p-2 text-left ${
-                        isActive ? 'border-brand-maroon bg-[#fff5f5]' : 'border-neutral-300 bg-white hover:bg-neutral-100'
-                      }`}
-                      onClick={() => void openSession(session.sessionId)}
-                      type="button"
-                    >
-                      <p className="truncate text-xs font-medium text-neutral-900">
-                        {session.lastMessagePreview || 'Conversation'}
-                      </p>
-                      <p className="mt-1 text-[11px] text-neutral-500">
-                        {formatSessionTimestamp(session.updatedAt)} | {session.messageCount}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            </aside>
-          ) : null}
-
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex-1 overflow-y-auto px-4 py-6">
-              <div className="mx-auto w-full max-w-3xl space-y-6">
-                {!loadingMessages && messages.length === 0 ? (
-                  <section className="space-y-4 py-16 text-center">
-                    <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Executive AI Agent</h2>
-                    <p className="mx-auto max-w-xl text-sm text-neutral-600">
-                      Ask one question to get cross-department insights from Product, HR, Inventory, Marketing, Finance,
-                      and CFA.
-                    </p>
-                    <div className="mx-auto flex max-w-2xl flex-wrap justify-center gap-2">
-                      {QUICK_PROMPTS.map((prompt) => (
-                        <button
-                          key={prompt}
-                          className="min-h-[34px] border border-neutral-300 bg-white px-3 text-xs text-neutral-800 hover:bg-neutral-100"
-                          onClick={() => void sendPrompt(prompt)}
-                          type="button"
-                        >
-                          {prompt}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
-
-                {loadingMessages ? <p className="text-sm text-neutral-600">Loading conversation...</p> : null}
-
-                {messages.map((message) => (
-                  <article
-                    key={message.id}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+    <DepartmentShell
+      activeNavId={activeTab}
+      contentHeading={activeLabel}
+      departmentIcon="dashboard"
+      navAriaLabel="Executive dashboard navigation"
+      navItems={EXECUTIVE_TABS}
+      onNavSelect={(id) => setActiveTab(id as ExecutiveTabId)}
+      subtitle="Cross-department intelligence with AI-assisted executive operations"
+      title="Executive Dashboard"
+    >
+      <section className="w-full border-x border-b border-neutral-300 bg-white">
+        {activeTab === 'ai-agent' ? (
+          <section className="flex h-[calc(100dvh-76px)] min-h-[720px] w-full overflow-hidden">
+            {historyOpen ? (
+              <aside className="flex w-full max-w-[260px] flex-col border-r border-neutral-200 bg-white p-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-600">Conversations</h2>
+                  <button
+                    className="min-h-[30px] border border-neutral-300 bg-white px-2 text-xs hover:bg-neutral-100"
+                    onClick={startNewConversation}
+                    type="button"
                   >
-                    <div
-                      className={`max-w-[84%] rounded-2xl px-4 py-3 text-[15px] leading-6 shadow-sm ${
-                        message.role === 'user'
-                          ? 'bg-neutral-900 text-white'
-                          : 'border border-neutral-200 bg-white text-neutral-900'
-                      }`}
-                    >
-                      {message.pending ? (
-                        <div className="flex items-center gap-1.5 text-sm text-neutral-500">
-                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
-                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:120ms]" />
-                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:240ms]" />
-                        </div>
-                      ) : (
-                        <p className="whitespace-pre-wrap">{message.content}</p>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </div>
-
-            <div className="border-t border-neutral-200 bg-white px-4 py-4">
-              <div className="mx-auto w-full max-w-3xl">
-                {sending && activeBreadcrumb ? (
-                  <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
-                    <span>{activeBreadcrumb}</span>
-                  </div>
-                ) : null}
-
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void sendPrompt(input);
-                  }}
-                >
-                  <div className="rounded-2xl border border-neutral-300 bg-white p-2 shadow-sm">
-                    <textarea
-                      className="max-h-[220px] min-h-[52px] w-full resize-none bg-transparent px-2 py-1 text-sm outline-none"
-                      onChange={(event) => setInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          event.preventDefault();
-                          void sendPrompt(input);
-                        }
-                      }}
-                      placeholder="Ask executive AI anything..."
-                      value={input}
-                    />
-                    <div className="mt-2 flex items-center justify-between px-2 pb-1">
-                      <p className="text-[11px] text-neutral-500">Enter to send, Shift+Enter for new line</p>
+                    + New
+                  </button>
+                </div>
+                <p className="mb-2 truncate text-[11px] text-neutral-500">User: {userKey || 'loading...'}</p>
+                <div className="flex-1 space-y-2 overflow-y-auto">
+                  {loadingSessions ? <p className="text-xs text-neutral-600">Loading sessions...</p> : null}
+                  {!loadingSessions && sessions.length === 0 ? (
+                    <p className="text-xs text-neutral-600">No saved conversations yet.</p>
+                  ) : null}
+                  {sessions.map((session) => {
+                    const isActive = session.sessionId === activeSessionId;
+                    return (
                       <button
-                        className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-4 text-xs font-medium text-white hover:bg-[#6a0000] disabled:opacity-60"
-                        disabled={sending || !input.trim() || loadingMessages}
-                        type="submit"
+                        key={session.sessionId}
+                        className={`w-full border p-2 text-left ${
+                          isActive ? 'border-brand-maroon bg-[#fff5f5]' : 'border-neutral-300 bg-white hover:bg-neutral-100'
+                        }`}
+                        onClick={() => void openSession(session.sessionId)}
+                        type="button"
                       >
-                        {sending ? 'Working...' : 'Send'}
+                        <p className="truncate text-xs font-medium text-neutral-900">
+                          {session.lastMessagePreview || 'Conversation'}
+                        </p>
+                        <p className="mt-1 text-[11px] text-neutral-500">
+                          {formatSessionTimestamp(session.updatedAt)} | {session.messageCount}
+                        </p>
                       </button>
+                    );
+                  })}
+                </div>
+                <button
+                  className="mt-3 min-h-[30px] w-full border border-neutral-300 bg-white px-2 text-xs hover:bg-neutral-100"
+                  onClick={() => setHistoryOpen(false)}
+                  type="button"
+                >
+                  Hide History
+                </button>
+              </aside>
+            ) : null}
+
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="mb-3 flex items-center justify-between gap-2 px-4 pt-3">
+                <h2 className="text-sm font-semibold text-neutral-800">Executive AI Agent</h2>
+                {!historyOpen ? (
+                  <button
+                    className="min-h-[30px] border border-neutral-300 bg-white px-2 text-xs hover:bg-neutral-100"
+                    onClick={() => setHistoryOpen(true)}
+                    type="button"
+                  >
+                    Show History
+                  </button>
+                ) : null}
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-2">
+                <div className="mx-auto w-full max-w-5xl space-y-6">
+                  {!loadingMessages && messages.length === 0 ? (
+                    <section className="space-y-4 py-16 text-center">
+                      <h3 className="text-3xl font-semibold tracking-tight text-neutral-900">Executive AI Agent</h3>
+                      <p className="mx-auto max-w-xl text-sm text-neutral-600">
+                        Ask one question to get cross-department insights from Product, HR, Inventory, Marketing,
+                        Finance, and CFA.
+                      </p>
+                      <div className="mx-auto flex max-w-2xl flex-wrap justify-center gap-2">
+                        {QUICK_PROMPTS.map((prompt) => (
+                          <button
+                            key={prompt}
+                            className="min-h-[34px] border border-neutral-300 bg-white px-3 text-xs text-neutral-800 hover:bg-neutral-100"
+                            onClick={() => void sendPrompt(prompt)}
+                            type="button"
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {loadingMessages ? <p className="text-sm text-neutral-600">Loading conversation...</p> : null}
+
+                  {messages.map((message) => (
+                    <article
+                      key={message.id}
+                      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[84%] rounded-2xl px-4 py-3 text-[15px] leading-6 shadow-sm ${
+                          message.role === 'user'
+                            ? 'bg-neutral-900 text-white'
+                            : 'border border-neutral-200 bg-white text-neutral-900'
+                        }`}
+                      >
+                        {message.pending ? (
+                          <div className="flex items-center gap-1.5 text-sm text-neutral-500">
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:120ms]" />
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:240ms]" />
+                          </div>
+                        ) : (
+                          <div className="space-y-1">{renderMessageContent(message.content)}</div>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-neutral-200 bg-white px-4 py-4">
+                <div className="mx-auto w-full max-w-5xl">
+                  {sending && activeBreadcrumb ? (
+                    <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
+                      <span>{activeBreadcrumb}</span>
                     </div>
-                  </div>
-                </form>
+                  ) : null}
+
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void sendPrompt(input);
+                    }}
+                  >
+                    <div className="rounded-2xl border border-neutral-300 bg-white p-2 shadow-sm">
+                      <textarea
+                        className="max-h-[220px] min-h-[52px] w-full resize-none bg-transparent px-2 py-1 text-sm outline-none"
+                        onChange={(event) => setInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault();
+                            void sendPrompt(input);
+                          }
+                        }}
+                        placeholder="Ask executive AI anything..."
+                        value={input}
+                      />
+                      <div className="mt-2 flex items-center justify-between px-2 pb-1">
+                        <p className="text-[11px] text-neutral-500">Enter to send, Shift+Enter for new line</p>
+                        <button
+                          className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-4 text-xs font-medium text-white hover:bg-[#6a0000] disabled:opacity-60"
+                          disabled={sending || !input.trim() || loadingMessages}
+                          type="submit"
+                        >
+                          {sending ? 'Working...' : 'Send'}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      {activeTab === 'overview' ? (
-        <section className="mx-auto w-full max-w-[1100px] space-y-4 p-4 md:p-6">
+        {activeTab === 'overview' ? (
+          <section className="mx-auto w-full max-w-[1100px] space-y-4 p-4 md:p-6">
           {loadingOverview ? <p className="text-sm text-neutral-700">Loading executive overview...</p> : null}
           {overviewError ? <p className="text-sm text-red-700">{overviewError}</p> : null}
           {overview ? (
@@ -624,11 +686,11 @@ export function ExecutiveDashboard() {
               </section>
             </>
           ) : null}
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      {activeTab === 'department-feed' ? (
-        <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
+        {activeTab === 'department-feed' ? (
+          <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
           {overview?.feed.map((item) => (
             <article className={`border p-3 ${severityClass(item.severity)}`} key={item.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -644,11 +706,11 @@ export function ExecutiveDashboard() {
             </article>
           ))}
           {!overview?.feed.length ? <p className="text-sm text-neutral-700">No feed updates available yet.</p> : null}
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      {activeTab === 'alerts' ? (
-        <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
+        {activeTab === 'alerts' ? (
+          <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
           {overview?.alerts.map((alert) => (
             <article
               className={`border p-3 ${
@@ -666,11 +728,11 @@ export function ExecutiveDashboard() {
             </article>
           ))}
           {!overview?.alerts.length ? <p className="text-sm text-neutral-700">No active alerts.</p> : null}
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      {activeTab === 'metrics' ? (
-        <section className="mx-auto grid w-full max-w-[1100px] gap-3 p-4 md:grid-cols-2 md:p-6">
+        {activeTab === 'metrics' ? (
+          <section className="mx-auto grid w-full max-w-[1100px] gap-3 p-4 md:grid-cols-2 md:p-6">
           {overview?.metrics.map((metric) => (
             <article className="border border-neutral-300 bg-white p-4" key={metric.id}>
               <p className="text-xs uppercase tracking-wide text-neutral-500">{metric.title}</p>
@@ -679,11 +741,11 @@ export function ExecutiveDashboard() {
             </article>
           ))}
           {!overview?.metrics.length ? <p className="text-sm text-neutral-700">No metric snapshots available.</p> : null}
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      {activeTab === 'reports' ? (
-        <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
+        {activeTab === 'reports' ? (
+          <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
           {overview?.reports.map((report) => (
             <article className="border border-neutral-300 bg-white p-3" key={report.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -701,16 +763,17 @@ export function ExecutiveDashboard() {
             </article>
           ))}
           {!overview?.reports.length ? <p className="text-sm text-neutral-700">No report records available.</p> : null}
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      {activeTab === 'calendar' ? (
-        <section className="mx-auto w-full max-w-[1300px] p-4 md:p-6">
+        {activeTab === 'calendar' ? (
+          <section className="w-full p-4 md:p-6">
           <div className="border border-neutral-300 bg-white">
             <SharedCalendarTab sourceDepartment="exec" />
           </div>
-        </section>
-      ) : null}
-    </main>
+          </section>
+        ) : null}
+      </section>
+    </DepartmentShell>
   );
 }

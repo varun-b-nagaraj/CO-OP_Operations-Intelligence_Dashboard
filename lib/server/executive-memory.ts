@@ -24,6 +24,11 @@ export interface ExecutiveConversationSession {
   messageCount: number;
 }
 
+export interface ExecutiveAssistantMessageState {
+  createdAt: string;
+  metadata: Record<string, unknown>;
+}
+
 interface MemoryFactInsert {
   factText: string;
   category: string;
@@ -201,4 +206,29 @@ export async function listRecentConversationContext(params: {
     limit: params.limit ?? 24
   });
   return rows.map((row) => ({ role: row.role, content: row.content }));
+}
+
+export async function getLatestAssistantMessageState(params: {
+  userKey: string;
+  sessionId: string;
+}): Promise<ExecutiveAssistantMessageState | null> {
+  const supabase = createServerClient();
+  const userKey = normalizeUserKey(params.userKey);
+
+  const { data, error } = await supabase
+    .from('executive_agent_messages')
+    .select('created_at,metadata')
+    .eq('user_key', userKey)
+    .eq('session_id', params.sessionId)
+    .eq('role', 'assistant')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return {
+    createdAt: String(data.created_at),
+    metadata: typeof data.metadata === 'object' && data.metadata !== null ? (data.metadata as Record<string, unknown>) : {}
+  };
 }
