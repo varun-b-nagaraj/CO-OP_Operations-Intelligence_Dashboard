@@ -411,6 +411,7 @@ export async function POST(request: NextRequest) {
     if (!upstream.ok) {
       source = 'fallback';
       const upstreamDetail = await readResponseError(upstream);
+      const debugId = upstream.headers.get('x-coop-ollama-debug-id') ?? '';
       const isAuthError = upstream.status === 401 || upstream.status === 403;
       assistantMessage = [
         isAuthError
@@ -418,6 +419,7 @@ export async function POST(request: NextRequest) {
           : 'Unable to reach Ollama through the internal proxy right now.',
         `Upstream status: ${upstream.status}.`,
         upstreamDetail ? `Upstream detail: ${upstreamDetail}` : '',
+        debugId ? `Debug ID: ${debugId}.` : '',
         isAuthError
           ? 'Check OLLAMA_API_KEY and OLLAMA_BASE_URL in Vercel environment settings.'
           : '',
