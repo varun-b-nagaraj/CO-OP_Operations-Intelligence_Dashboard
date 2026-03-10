@@ -46,13 +46,33 @@ function copyResponseHeaders(sourceHeaders: Headers): Headers {
 export async function POST(request: NextRequest) {
   const targetCandidates = resolveOllamaChatUrlCandidates(process.env.OLLAMA_BASE_URL);
   const configuredBaseUrl = normalizeBaseUrl(process.env.OLLAMA_BASE_URL);
+  const configuredHostname = (() => {
+    try {
+      return new URL(configuredBaseUrl).hostname;
+    } catch {
+      return '';
+    }
+  })();
   const requestHeaders = new Headers(request.headers);
   requestHeaders.delete('host');
   requestHeaders.delete('content-length');
 
   const apiKey = process.env.OLLAMA_API_KEY?.trim();
+  if (!apiKey && configuredHostname === 'ollama.com') {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'OLLAMA_API_KEY is required when using ollama.com.',
+        configuredBaseUrl,
+        hint: 'Set OLLAMA_API_KEY in Vercel project environment variables.'
+      },
+      { status: 500 }
+    );
+  }
   if (apiKey) {
     requestHeaders.set('Authorization', `Bearer ${apiKey}`);
+    requestHeaders.set('X-API-Key', apiKey);
+    requestHeaders.set('api-key', apiKey);
   }
   if (!requestHeaders.has('Content-Type')) {
     requestHeaders.set('Content-Type', 'application/json');

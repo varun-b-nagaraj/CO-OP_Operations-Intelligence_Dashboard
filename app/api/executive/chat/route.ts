@@ -411,10 +411,16 @@ export async function POST(request: NextRequest) {
     if (!upstream.ok) {
       source = 'fallback';
       const upstreamDetail = await readResponseError(upstream);
+      const isAuthError = upstream.status === 401 || upstream.status === 403;
       assistantMessage = [
-        'Unable to reach Ollama through the internal proxy right now.',
+        isAuthError
+          ? 'Ollama authentication failed through the internal proxy.'
+          : 'Unable to reach Ollama through the internal proxy right now.',
         `Upstream status: ${upstream.status}.`,
         upstreamDetail ? `Upstream detail: ${upstreamDetail}` : '',
+        isAuthError
+          ? 'Check OLLAMA_API_KEY and OLLAMA_BASE_URL in Vercel environment settings.'
+          : '',
         overview ? `Executive snapshot: ${overview.executiveBrief}` : '',
         overview
           ? 'Check the Overview tab for current metrics and the Alerts tab for follow-up actions.'
