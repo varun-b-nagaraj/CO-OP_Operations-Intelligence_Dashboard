@@ -2175,19 +2175,14 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
               </p>
             )}
             <div className={scheduleViewMode === 'calendar' ? 'border border-neutral-300' : 'hidden'}>
-              <table className="w-full table-fixed text-xs md:text-sm">
-                <colgroup>
-                  <col className="w-[82px] md:w-[96px]" />
+              <table className="w-full table-fixed text-xs md:text-sm"><colgroup><col className="w-[82px] md:w-[96px]" />
                   {activeWeek.map((day) => (
                     <col
                       className={isWeekendDateKey(day.dateKey) ? 'w-[56px] md:w-[64px]' : 'w-[150px] md:w-[170px]'}
                       key={`${day.dateKey}-col`}
                     />
                   ))}
-                </colgroup>
-                <thead className="bg-neutral-100">
-                  <tr>
-                    <th className="border-b border-r border-neutral-300 p-1.5 text-left">Week {activeWeekIndex + 1}</th>
+                </colgroup><thead className="bg-neutral-100"><tr><th className="border-b border-r border-neutral-300 p-1.5 text-left">Week {activeWeekIndex + 1}</th>
                     {activeWeek.map((day, index) => {
                       const isWeekend = isWeekendDateKey(day.dateKey);
                       const label = WEEKDAY_LABELS[index] ?? '';
@@ -2200,9 +2195,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                         </th>
                       );
                     })}
-                  </tr>
-                  <tr>
-                    <th className="border-b border-r border-neutral-300 p-1.5 text-left">Date</th>
+                  </tr><tr><th className="border-b border-r border-neutral-300 p-1.5 text-left">Date</th>
                     {activeWeek.map((day) => {
                       const isWeekend = isWeekendDateKey(day.dateKey);
                       const dayType = schedule.calendar[day.dateKey];
@@ -2213,8 +2206,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                         <th
                           className={`border-b border-neutral-300 p-1.5 ${isWeekend ? 'text-center' : 'text-left'} ${dateCellClass}`}
                           key={`${day.dateKey}-date`}
-                        >
-                          <div className={`flex items-center ${isWeekend ? 'justify-center' : 'justify-between'} gap-1`}>
+                        ><div className={`flex items-center ${isWeekend ? 'justify-center' : 'justify-between'} gap-1`}>
                             <span>{day.dayNumber}</span>
                             {!isWeekend && dayType && (
                               <span className="border border-neutral-400 px-1 text-[10px] uppercase tracking-wide">
@@ -2225,12 +2217,9 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                         </th>
                       );
                     })}
-                  </tr>
-                </thead>
-                <tbody>
+                  </tr></thead><tbody>
                   {PERIOD_BANDS.map((periodBand) => (
-                    <tr key={`${activeWeekIndex}-${periodBand.id}`}>
-                      <th className="border-b border-r border-neutral-300 bg-blue-50 p-1.5 text-left text-[11px] font-medium text-neutral-800 md:text-xs">
+                    <tr key={`${activeWeekIndex}-${periodBand.id}`}><th className="border-b border-r border-neutral-300 bg-blue-50 p-1.5 text-left text-[11px] font-medium text-neutral-800 md:text-xs">
                         {periodBand.label}
                       </th>
                       {activeWeek.map((day) => {
@@ -2518,22 +2507,10 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                       })}
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </tbody></table></div>
             {scheduleViewMode === 'list' && (
               <div className="border border-neutral-300">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-neutral-100">
-                    <tr>
-                      <th className="border-b border-neutral-300 p-2 text-left">Date</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Day</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Shift</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Type</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Coworkers</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <table className="min-w-full text-sm"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 p-2 text-left">Date</th><th className="border-b border-neutral-300 p-2 text-left">Day</th><th className="border-b border-neutral-300 p-2 text-left">Shift</th><th className="border-b border-neutral-300 p-2 text-left">Type</th><th className="border-b border-neutral-300 p-2 text-left">Coworkers</th></tr></thead><tbody>
                     {visibleAssignments
                       .filter(
                         (assignment) =>
@@ -2553,18 +2530,10 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                               rosterNameBySNumber.get(row.effectiveWorkerSNumber) ?? row.effectiveWorkerSNumber
                           );
                         return (
-                          <tr className="border-b border-neutral-200" key={`list-${assignment.uid}`}>
-                            <td className="p-2">{assignment.date}</td>
-                            <td className="p-2">{assignment.day || '-'}</td>
-                            <td className="p-2">{formatPeriodBadge(assignment.period)}</td>
-                            <td className="p-2">{assignment.type}</td>
-                            <td className="p-2">{coworkerNames.length > 0 ? coworkerNames.join(', ') : '-'}</td>
-                          </tr>
+                          <tr className="border-b border-neutral-200" key={`list-${assignment.uid}`}><td className="p-2">{assignment.date}</td><td className="p-2">{assignment.day || '-'}</td><td className="p-2">{formatPeriodBadge(assignment.period)}</td><td className="p-2">{assignment.type}</td><td className="p-2">{coworkerNames.length > 0 ? coworkerNames.join(', ') : '-'}</td></tr>
                         );
                       })}
-                  </tbody>
-                </table>
-              </div>
+                  </tbody></table></div>
             )}
           </div>
 
@@ -2583,16 +2552,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                   Comprehensive list comes from `public.students`. `Scheduleable` controls roster inclusion.
                 </p>
               </div>
-              <table className="min-w-full text-sm">
-                <thead className="bg-neutral-100">
-                  <tr>
-                    <th className="border-b border-neutral-300 p-2 text-left">Name</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">Scheduleable</th>
-                    <th className="border-b border-neutral-300 p-2 text-left">Schedule</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <table className="min-w-full text-sm"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 p-2 text-left">Name</th><th className="border-b border-neutral-300 p-2 text-left">s_number</th><th className="border-b border-neutral-300 p-2 text-left">Scheduleable</th><th className="border-b border-neutral-300 p-2 text-left">Schedule</th></tr></thead><tbody>
                   {editableRoster.map((entry) => (
                     <tr
                       className={`border-b border-neutral-200 ${isManagerMode && isSwapModeEnabled ? 'cursor-grab' : ''}`}
@@ -2609,10 +2569,7 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                         event.dataTransfer.setData('text/plain', `roster:${entry.s_number}`);
                       }}
                     >
-                      <td className="p-2">{entry.name}</td>
-                      <td className="p-2">{entry.s_number}</td>
-                      <td className="p-2">
-                        <label className="flex items-center gap-2">
+                      <td className="p-2">{entry.name}</td><td className="p-2">{entry.s_number}</td><td className="p-2"><label className="flex items-center gap-2">
                           <input
                             checked={entry.scheduleable}
                             disabled={isPersistingEdits}
@@ -2630,43 +2587,19 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
                           />
                           <span>{entry.scheduleable ? 'On roster' : 'Off roster'}</span>
                         </label>
-                      </td>
-                      <td className="p-2">{entry.Schedule}</td>
-                    </tr>
+                      </td><td className="p-2">{entry.Schedule}</td></tr>
                   ))}
-                </tbody>
-              </table>
-              </div>
+                </tbody></table></div>
               <div className="space-y-4">
                 <div className="border border-neutral-300">
                 <div className="border-b border-neutral-300 bg-neutral-50 p-2">
                   <h3 className="text-sm font-semibold">Summary</h3>
                 </div>
-                <table className="min-w-full text-sm">
-                  <thead className="bg-neutral-100">
-                    <tr>
-                      <th className="border-b border-neutral-300 p-2 text-left">Student</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">s_number</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Regular</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Alternate</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Total</th>
-                      <th className="border-b border-neutral-300 p-2 text-left">Periods</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <table className="min-w-full text-sm"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 p-2 text-left">Student</th><th className="border-b border-neutral-300 p-2 text-left">s_number</th><th className="border-b border-neutral-300 p-2 text-left">Regular</th><th className="border-b border-neutral-300 p-2 text-left">Alternate</th><th className="border-b border-neutral-300 p-2 text-left">Total</th><th className="border-b border-neutral-300 p-2 text-left">Periods</th></tr></thead><tbody>
                     {summaryRows.map((entry) => (
-                      <tr className="border-b border-neutral-200" key={entry.localId}>
-                        <td className="p-2">{entry.student}</td>
-                        <td className="p-2">{entry.studentSNumber}</td>
-                        <td className="p-2">{entry.regularShifts}</td>
-                        <td className="p-2">{entry.alternateShifts}</td>
-                        <td className="p-2">{entry.totalShifts}</td>
-                        <td className="p-2">{entry.periodsWorked}</td>
-                      </tr>
+                      <tr className="border-b border-neutral-200" key={entry.localId}><td className="p-2">{entry.student}</td><td className="p-2">{entry.studentSNumber}</td><td className="p-2">{entry.regularShifts}</td><td className="p-2">{entry.alternateShifts}</td><td className="p-2">{entry.totalShifts}</td><td className="p-2">{entry.periodsWorked}</td></tr>
                     ))}
-                  </tbody>
-                </table>
-                </div>
+                  </tbody></table></div>
 
                 <div className="grid gap-3 border border-neutral-300 bg-white p-3 md:grid-cols-2">
                 <div className="border border-neutral-300 p-3">

@@ -714,23 +714,10 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
         </div>
       ) : (
         <div className="border border-neutral-300">
-          <table className="min-w-full text-sm">
-            <thead className="bg-neutral-100">
-              <tr>
-                <th className="border-b border-neutral-300 p-2 text-left">Title</th>
-                <th className="border-b border-neutral-300 p-2 text-left">Type</th>
-                <th className="border-b border-neutral-300 p-2 text-left">Starts</th>
-                <th className="border-b border-neutral-300 p-2 text-left">Ends</th>
-                <th className="border-b border-neutral-300 p-2 text-left">Priority</th>
-                <th className="border-b border-neutral-300 p-2 text-left">Source</th>
-              </tr>
-            </thead>
-            <tbody>
+          <table className="min-w-full text-sm"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 p-2 text-left">Title</th><th className="border-b border-neutral-300 p-2 text-left">Type</th><th className="border-b border-neutral-300 p-2 text-left">Starts</th><th className="border-b border-neutral-300 p-2 text-left">Ends</th><th className="border-b border-neutral-300 p-2 text-left">Priority</th><th className="border-b border-neutral-300 p-2 text-left">Source</th></tr></thead><tbody>
               {upcomingEvents.map((entry) => (
                 <Fragment key={entry.id}>
-                <tr className="cursor-pointer border-b border-neutral-200 hover:bg-neutral-50">
-                  <td className="p-2">
-                    <button
+                <tr className="cursor-pointer border-b border-neutral-200 hover:bg-neutral-50"><td className="p-2"><button
                       className="text-left font-medium underline-offset-2 hover:underline"
                       onClick={() => openListEditor(entry)}
                       type="button"
@@ -746,25 +733,15 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                       </span>
                     </div>
                     <p className="text-xs text-neutral-600">{entry.details ?? '-'}</p>
-                  </td>
-                  <td className="p-2">{ENTRY_TYPE_OPTIONS.find((item) => item.value === entry.entry_type)?.label ?? entry.entry_type}</td>
-                  <td className="p-2">{formatDateTime(entry.starts_at)}</td>
-                  <td className="p-2">{formatDateTime(entry.ends_at)}</td>
-                  <td className="p-2">
-                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${PRIORITY_PILL_CLASS[entry.priority]}`}>
+                  </td><td className="p-2">{ENTRY_TYPE_OPTIONS.find((item) => item.value === entry.entry_type)?.label ?? entry.entry_type}</td><td className="p-2">{formatDateTime(entry.starts_at)}</td><td className="p-2">{formatDateTime(entry.ends_at)}</td><td className="p-2"><span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${PRIORITY_PILL_CLASS[entry.priority]}`}>
                       {PRIORITY_OPTIONS.find((item) => item.value === entry.priority)?.label ?? entry.priority}
                     </span>
-                  </td>
-                  <td className="p-2">
-                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${getDepartmentStyle(entry.source_department).pillClass}`}>
+                  </td><td className="p-2"><span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${getDepartmentStyle(entry.source_department).pillClass}`}>
                       {getDepartmentStyle(entry.source_department).label}
                     </span>
-                  </td>
-                </tr>
+                  </td></tr>
                 {expandedListEventId === entry.id && listEditDraft ? (
-                  <tr className="border-b border-neutral-300 bg-neutral-50">
-                    <td className="p-3" colSpan={6}>
-                      <div className="grid gap-2 md:grid-cols-3">
+                  <tr className="border-b border-neutral-300 bg-neutral-50"><td className="p-3" colSpan={6}><div className="grid gap-2 md:grid-cols-3">
                         <label className="text-xs font-medium text-neutral-700">
                           Title
                           <input
@@ -871,21 +848,16 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                           {saving ? 'Saving...' : 'Save'}
                         </button>
                       </div>
-                    </td>
-                  </tr>
+                    </td></tr>
                 ) : null}
                 </Fragment>
               ))}
               {!upcomingEvents.length ? (
-                <tr>
-                  <td className="p-2 text-neutral-600" colSpan={6}>
+                <tr><td className="p-2 text-neutral-600" colSpan={6}>
                     No calendar entries yet.
-                  </td>
-                </tr>
+                  </td></tr>
               ) : null}
-            </tbody>
-          </table>
-        </div>
+            </tbody></table></div>
       )}
 
       {createModalOpen ? (

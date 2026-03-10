@@ -92,29 +92,9 @@ type ReportDraft = MarketingReportRow; const TABS: Array<{ id: DashboardTab; lab
 <span className="hidden"> {hasImages ? <span className="text-neutral-600">IMG</span> : null} {hasExternalContacts ? <span className="text-neutral-600">EXT</span> : null} </span>
 </button> ); })} {dayEvents.length > DAY_PAGE_SIZE ? ( <p className="text-[11px] text-neutral-600">Page {currentPage + 1}/{totalPages}</p> ) : null} </div>
 </div> ); })} </div> ) : ( <div className=" border border-neutral-300 bg-white">
-<table className="min-w-full text-left text-sm">
-<thead className="bg-neutral-50">
-<tr>
-<th className="border-b border-neutral-300 px-3 py-2">Date</th>
-<th className="border-b border-neutral-300 px-3 py-2">Title</th>
-<th className="border-b border-neutral-300 px-3 py-2">Status</th>
-<th className="border-b border-neutral-300 px-3 py-2">Category</th>
-<th className="border-b border-neutral-300 px-3 py-2">Department</th>
-</tr>
-</thead>
-<tbody> {calendarListRows.map((event) => ( <tr key={event.id}>
-<td className="border-b border-neutral-200 px-3 py-2">{formatDate(event.starts_at)}</td>
-<td className="border-b border-neutral-200 px-3 py-2">
-<button className="text-left underline-offset-2 hover:underline" onClick={() => { void loadEventBundle(event.id); }} type="button" > {event.title} </button>
-</td>
-<td className="border-b border-neutral-200 px-3 py-2">
-<span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_CLASSES[event.status]}`}> {formatLabel(event.status)} </span>
-</td>
-<td className="border-b border-neutral-200 px-3 py-2">{event.category ?? 'Uncategorized'}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{event.location ?? '-'}</td>
-</tr> ))} </tbody>
-</table>
-</div> )} </section> )} {activeTab === 'events' && ( <section className="space-y-3">
+<table className="min-w-full text-left text-sm"><thead className="bg-neutral-50"><tr><th className="border-b border-neutral-300 px-3 py-2">Date</th><th className="border-b border-neutral-300 px-3 py-2">Title</th><th className="border-b border-neutral-300 px-3 py-2">Status</th><th className="border-b border-neutral-300 px-3 py-2">Category</th><th className="border-b border-neutral-300 px-3 py-2">Department</th></tr></thead><tbody> {calendarListRows.map((event) => ( <tr key={event.id}><td className="border-b border-neutral-200 px-3 py-2">{formatDate(event.starts_at)}</td><td className="border-b border-neutral-200 px-3 py-2"><button className="text-left underline-offset-2 hover:underline" onClick={() => { void loadEventBundle(event.id); }} type="button" > {event.title} </button>
+</td><td className="border-b border-neutral-200 px-3 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_CLASSES[event.status]}`}> {formatLabel(event.status)} </span>
+</td><td className="border-b border-neutral-200 px-3 py-2">{event.category ?? 'Uncategorized'}</td><td className="border-b border-neutral-200 px-3 py-2">{event.location ?? '-'}</td></tr> ))} </tbody></table></div> )} </section> )} {activeTab === 'events' && ( <section className="space-y-3">
 <div className="flex flex-wrap items-center gap-2 border border-neutral-300 bg-white p-3">
 <input className="min-h-[36px] w-[240px] border border-neutral-300 px-2 text-sm" onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search" value={searchQuery} />
 <CustomSelect className="w-[170px]" onChange={(value) => setStatusFilter(value as 'all' | MarketingEventStatus)} options={[ { value: 'all', label: 'All Statuses' }, ...STATUS_OPTIONS.map((status) => ({ value: status.value, label: status.label })) ]} value={statusFilter} />
@@ -124,59 +104,18 @@ type ReportDraft = MarketingReportRow; const TABS: Array<{ id: DashboardTab; lab
 <CustomSelect className="w-[210px]" onChange={(value) => setEventSort(value as 'upcoming' | 'recently_updated' | 'recently_completed')} options={[ { value: 'upcoming', label: 'Sort: Upcoming first' }, { value: 'recently_updated', label: 'Sort: Recently updated' }, { value: 'recently_completed', label: 'Sort: Recently completed' } ]} value={eventSort} />
 </div>
 <div className=" border border-neutral-300 bg-white">
-<table className="min-w-full text-left text-sm">
-<thead className="bg-neutral-50">
-<tr>
-<th className="border-b border-neutral-300 px-3 py-2">Date</th>
-<th className="border-b border-neutral-300 px-3 py-2">Title</th>
-<th className="border-b border-neutral-300 px-3 py-2">Status</th>
-<th className="border-b border-neutral-300 px-3 py-2">Category</th>
-<th className="border-b border-neutral-300 px-3 py-2">Department</th>
-<th className="border-b border-neutral-300 px-3 py-2">Coordinators</th>
-<th className="border-b border-neutral-300 px-3 py-2">External Orgs</th>
-<th className="border-b border-neutral-300 px-3 py-2">Attachments</th>
-<th className="border-b border-neutral-300 px-3 py-2">Last Updated</th>
-</tr>
-</thead>
-<tbody> {visibleEventRows.map((event) => { const internalCount = eventIndicators[event.id]?.internalContacts ?? 0; const externalOrgs = eventIndicators[event.id]?.externalContacts ?? 0; const attachmentCount = eventIndicators[event.id]?.assets ?? 0; return ( <tr key={event.id} className="cursor-pointer hover:bg-neutral-50" onClick={() => { void loadEventBundle(event.id); }} onKeyDown={(keyboardEvent) => { if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') { keyboardEvent.preventDefault(); void loadEventBundle(event.id); } }} role="button" tabIndex={0} >
-<td className="border-b border-neutral-200 px-3 py-2">{formatDate(event.starts_at)}</td>
-<td className="border-b border-neutral-200 px-3 py-2 underline-offset-2 hover:underline">{event.title}</td>
-<td className="border-b border-neutral-200 px-3 py-2">
-<span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_CLASSES[event.status]}`}> {formatLabel(event.status)} </span>
-</td>
-<td className="border-b border-neutral-200 px-3 py-2">{event.category ?? '-'}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{event.location ?? '-'}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{internalCount}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{externalOrgs}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{attachmentCount}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{formatDateTime(event.updated_at)}</td>
-</tr> ); })} </tbody>
-</table>
-</div>
+<table className="min-w-full text-left text-sm"><thead className="bg-neutral-50"><tr><th className="border-b border-neutral-300 px-3 py-2">Date</th><th className="border-b border-neutral-300 px-3 py-2">Title</th><th className="border-b border-neutral-300 px-3 py-2">Status</th><th className="border-b border-neutral-300 px-3 py-2">Category</th><th className="border-b border-neutral-300 px-3 py-2">Department</th><th className="border-b border-neutral-300 px-3 py-2">Coordinators</th><th className="border-b border-neutral-300 px-3 py-2">External Orgs</th><th className="border-b border-neutral-300 px-3 py-2">Attachments</th><th className="border-b border-neutral-300 px-3 py-2">Last Updated</th></tr></thead><tbody> {visibleEventRows.map((event) => { const internalCount = eventIndicators[event.id]?.internalContacts ?? 0; const externalOrgs = eventIndicators[event.id]?.externalContacts ?? 0; const attachmentCount = eventIndicators[event.id]?.assets ?? 0; return ( <tr key={event.id} className="cursor-pointer hover:bg-neutral-50" onClick={() => { void loadEventBundle(event.id); }} onKeyDown={(keyboardEvent) => { if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') { keyboardEvent.preventDefault(); void loadEventBundle(event.id); } }} role="button" tabIndex={0} >
+<td className="border-b border-neutral-200 px-3 py-2">{formatDate(event.starts_at)}</td><td className="border-b border-neutral-200 px-3 py-2 underline-offset-2 hover:underline">{event.title}</td><td className="border-b border-neutral-200 px-3 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_CLASSES[event.status]}`}> {formatLabel(event.status)} </span>
+</td><td className="border-b border-neutral-200 px-3 py-2">{event.category ?? '-'}</td><td className="border-b border-neutral-200 px-3 py-2">{event.location ?? '-'}</td><td className="border-b border-neutral-200 px-3 py-2">{internalCount}</td><td className="border-b border-neutral-200 px-3 py-2">{externalOrgs}</td><td className="border-b border-neutral-200 px-3 py-2">{attachmentCount}</td><td className="border-b border-neutral-200 px-3 py-2">{formatDateTime(event.updated_at)}</td></tr> ); })} </tbody></table></div>
 </section> )} {activeTab === 'contacts' && ( <section className="space-y-3">
 <div className="flex gap-2 border border-neutral-300 bg-white p-3">
 <input className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm" onChange={(event) => setContactSearch(event.target.value)} placeholder="Search contacts" value={contactSearch} />
 <button className="min-h-[36px] min-w-[148px] border border-neutral-700 bg-neutral-800 px-4 text-sm text-white" onClick={() => { setContactCreateDraft({ organization: '', person_name: '', role_title: '', email: '', phone: '', instagram_handle: '', linkedin_url: '', other_social: '', notes: '' }); setContactCreateModalOpen(true); }} type="button" > Add Contact </button>
 </div>
 <div className="max-h-[68vh] border border-neutral-300 bg-white">
-<table className="min-w-full text-left text-sm">
-<thead className="bg-neutral-50">
-<tr>
-<th className="border-b border-neutral-300 px-3 py-2">Organization</th>
-<th className="border-b border-neutral-300 px-3 py-2">Name</th>
-<th className="border-b border-neutral-300 px-3 py-2">Role</th>
-<th className="border-b border-neutral-300 px-3 py-2">Email</th>
-</tr>
-</thead>
-<tbody> {contacts.map((contact) => { const expanded = selectedContactId === contact.id; return ( <Fragment key={contact.id}>
+<table className="min-w-full text-left text-sm"><thead className="bg-neutral-50"><tr><th className="border-b border-neutral-300 px-3 py-2">Organization</th><th className="border-b border-neutral-300 px-3 py-2">Name</th><th className="border-b border-neutral-300 px-3 py-2">Role</th><th className="border-b border-neutral-300 px-3 py-2">Email</th></tr></thead><tbody> {contacts.map((contact) => { const expanded = selectedContactId === contact.id; return ( <Fragment key={contact.id}>
 <tr className={`cursor-pointer ${expanded ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`} onClick={() => setSelectedContactId(expanded ? null : contact.id)}>
-<td className="border-b border-neutral-200 px-3 py-2">{contact.organization}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{contact.person_name}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{contact.role_title ?? '-'}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{contact.email ?? '-'}</td>
-</tr> {expanded ? ( <tr>
-<td className="border-b border-neutral-200 px-3 py-3" colSpan={4}>
-<div className="grid gap-2 md:grid-cols-2">
+<td className="border-b border-neutral-200 px-3 py-2">{contact.organization}</td><td className="border-b border-neutral-200 px-3 py-2">{contact.person_name}</td><td className="border-b border-neutral-200 px-3 py-2">{contact.role_title ?? '-'}</td><td className="border-b border-neutral-200 px-3 py-2">{contact.email ?? '-'}</td></tr> {expanded ? ( <tr><td className="border-b border-neutral-200 px-3 py-3" colSpan={4}><div className="grid gap-2 md:grid-cols-2">
 <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, organization: event.target.value }))} placeholder="Organization" value={contactDraft.organization} />
 <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, person_name: event.target.value }))} placeholder="Person name" value={contactDraft.person_name} />
 <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setContactDraft((prev) => ({ ...prev, role_title: event.target.value }))} placeholder="Role/title" value={contactDraft.role_title} />
@@ -192,34 +131,16 @@ type ReportDraft = MarketingReportRow; const TABS: Array<{ id: DashboardTab; lab
 <CustomSelect className="min-w-[260px]" onChange={setContactEventToLink} options={[ { value: '', label: 'Link to event...' }, ...events.map((entry) => ({ value: entry.id, label: `${entry.title} (${formatDate(entry.starts_at)})` })) ]} value={contactEventToLink} />
 <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => { void linkSelectedContactToEvent(); }} type="button">Link</button>
 </div>
-</td>
-</tr> ) : null} </Fragment> ); })} </tbody>
-</table>
-</div>
+</td></tr> ) : null} </Fragment> ); })} </tbody></table></div>
 </section> )} {activeTab === 'coordinators' && ( <section className="space-y-3">
 <div className="flex gap-2 border border-neutral-300 bg-white p-3">
 <input className="min-h-[36px] w-full border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorSearch(event.target.value)} placeholder="Search coordinators" value={internalCoordinatorSearch} />
 <button className="min-h-[36px] min-w-[168px] border border-neutral-700 bg-neutral-800 px-4 text-sm text-white" onClick={() => { setInternalCoordinatorCreateDraft({ full_name: '', role_title: '', email: '', phone: '', instagram_handle: '', linkedin_url: '', other_social: '', notes: '' }); setCoordinatorCreateModalOpen(true); }} type="button" > Add Coordinator </button>
 </div>
 <div className="max-h-[68vh] border border-neutral-300 bg-white">
-<table className="min-w-full text-left text-sm">
-<thead className="bg-neutral-50">
-<tr>
-<th className="border-b border-neutral-300 px-3 py-2">Name</th>
-<th className="border-b border-neutral-300 px-3 py-2">Role</th>
-<th className="border-b border-neutral-300 px-3 py-2">Email</th>
-<th className="border-b border-neutral-300 px-3 py-2">Phone</th>
-</tr>
-</thead>
-<tbody> {internalCoordinators.map((coordinator) => { const expanded = selectedInternalCoordinatorId === coordinator.id; return ( <Fragment key={coordinator.id}>
+<table className="min-w-full text-left text-sm"><thead className="bg-neutral-50"><tr><th className="border-b border-neutral-300 px-3 py-2">Name</th><th className="border-b border-neutral-300 px-3 py-2">Role</th><th className="border-b border-neutral-300 px-3 py-2">Email</th><th className="border-b border-neutral-300 px-3 py-2">Phone</th></tr></thead><tbody> {internalCoordinators.map((coordinator) => { const expanded = selectedInternalCoordinatorId === coordinator.id; return ( <Fragment key={coordinator.id}>
 <tr className={`cursor-pointer ${expanded ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`} onClick={() => setSelectedInternalCoordinatorId(expanded ? null : coordinator.id)}>
-<td className="border-b border-neutral-200 px-3 py-2">{coordinator.full_name}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{coordinator.role_title ?? '-'}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{coordinator.email ?? '-'}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{coordinator.phone ?? '-'}</td>
-</tr> {expanded ? ( <tr>
-<td className="border-b border-neutral-200 px-3 py-3" colSpan={4}>
-<div className="grid gap-2 md:grid-cols-2">
+<td className="border-b border-neutral-200 px-3 py-2">{coordinator.full_name}</td><td className="border-b border-neutral-200 px-3 py-2">{coordinator.role_title ?? '-'}</td><td className="border-b border-neutral-200 px-3 py-2">{coordinator.email ?? '-'}</td><td className="border-b border-neutral-200 px-3 py-2">{coordinator.phone ?? '-'}</td></tr> {expanded ? ( <tr><td className="border-b border-neutral-200 px-3 py-3" colSpan={4}><div className="grid gap-2 md:grid-cols-2">
 <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, full_name: event.target.value }))} placeholder="Full name" value={internalCoordinatorDraft.full_name} />
 <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, role_title: event.target.value }))} placeholder="Role/title" value={internalCoordinatorDraft.role_title} />
 <input className="min-h-[34px] border border-neutral-300 px-2 text-sm" onChange={(event) => setInternalCoordinatorDraft((prev) => ({ ...prev, email: event.target.value }))} placeholder="Email" value={internalCoordinatorDraft.email} />
@@ -234,10 +155,7 @@ type ReportDraft = MarketingReportRow; const TABS: Array<{ id: DashboardTab; lab
 <CustomSelect className="min-w-[260px]" onChange={setCoordinatorEventToLink} options={[ { value: '', label: 'Link to event...' }, ...events.map((entry) => ({ value: entry.id, label: `${entry.title} (${formatDate(entry.starts_at)})` })) ]} value={coordinatorEventToLink} />
 <button className="min-h-[34px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => { void linkSelectedCoordinatorToEvent(); }} type="button">Link</button>
 </div>
-</td>
-</tr> ) : null} </Fragment> ); })} </tbody>
-</table>
-</div>
+</td></tr> ) : null} </Fragment> ); })} </tbody></table></div>
 </section> )} {activeTab === 'settings' && ( <section className="space-y-3">
 <div className="border border-neutral-300 bg-white p-3">
 <h3 className="text-sm font-semibold text-neutral-900">Category Settings</h3>
@@ -247,17 +165,7 @@ type ReportDraft = MarketingReportRow; const TABS: Array<{ id: DashboardTab; lab
 <button className="min-h-[36px] min-w-[120px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white" onClick={() => { void createCategory(); }} type="button" > Add Category </button>
 </div>
 <div className="mt-3 max-h-64 border border-neutral-300">
-<table className="min-w-full text-left text-sm">
-<thead className="bg-neutral-50">
-<tr>
-<th className="border-b border-neutral-300 px-2 py-2">Category</th>
-</tr>
-</thead>
-<tbody> {eventCategories.map((entry) => ( <tr key={entry.id}>
-<td className="border-b border-neutral-200 px-2 py-2">{entry.name}</td>
-</tr> ))} </tbody>
-</table>
-</div>
+<table className="min-w-full text-left text-sm"><thead className="bg-neutral-50"><tr><th className="border-b border-neutral-300 px-2 py-2">Category</th></tr></thead><tbody> {eventCategories.map((entry) => ( <tr key={entry.id}><td className="border-b border-neutral-200 px-2 py-2">{entry.name}</td></tr> ))} </tbody></table></div>
 </div>
 <div className="border border-neutral-300 bg-white p-3">
 <h3 className="text-sm font-semibold text-neutral-900">Optional Info Settings</h3>
@@ -288,29 +196,8 @@ type ReportDraft = MarketingReportRow; const TABS: Array<{ id: DashboardTab; lab
 <button className="min-h-[36px] border border-neutral-300 bg-white px-3 text-sm" onClick={() => { setReportSearch(''); setReportDateFrom(''); setReportDateTo(''); setReportCategoryFilter('all'); }} type="button" > Reset Filters </button>
 </div>
 <div className=" border border-neutral-300 bg-white">
-<table className="min-w-full text-left text-sm">
-<thead className="bg-neutral-50">
-<tr>
-<th className="border-b border-neutral-300 px-3 py-2">Date</th>
-<th className="border-b border-neutral-300 px-3 py-2">Title</th>
-<th className="border-b border-neutral-300 px-3 py-2">Category</th>
-<th className="border-b border-neutral-300 px-3 py-2">Linked Event</th>
-<th className="border-b border-neutral-300 px-3 py-2">Notes</th>
-<th className="border-b border-neutral-300 px-3 py-2">Perceived Impact</th>
-<th className="border-b border-neutral-300 px-3 py-2">Optional Cost</th>
-</tr>
-</thead>
-<tbody> {reports.map((entry) => ( <tr key={entry.id} className="cursor-pointer hover:bg-neutral-50" onClick={() => { openReportEditor(entry); }} onKeyDown={(keyboardEvent) => { if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') { keyboardEvent.preventDefault(); openReportEditor(entry); } }} role="button" tabIndex={0} >
-<td className="border-b border-neutral-200 px-3 py-2">{formatDate(entry.report_date)}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{entry.title}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{entry.category ?? '-'}</td>
-<td className="border-b border-neutral-200 px-3 py-2"> {entry.linked_event_title ? `${entry.linked_event_title} (${formatDate(entry.linked_event_starts_at)})` : '-'} </td>
-<td className="border-b border-neutral-200 px-3 py-2">{entry.notes ?? '-'}</td>
-<td className="border-b border-neutral-200 px-3 py-2">{entry.perceived_impact ?? '-'}</td>
-<td className="border-b border-neutral-200 px-3 py-2"> {entry.optional_cost !== null ? `$${entry.optional_cost.toFixed(2)}` : '-'} </td>
-</tr> ))} </tbody>
-</table>
-</div>
+<table className="min-w-full text-left text-sm"><thead className="bg-neutral-50"><tr><th className="border-b border-neutral-300 px-3 py-2">Date</th><th className="border-b border-neutral-300 px-3 py-2">Title</th><th className="border-b border-neutral-300 px-3 py-2">Category</th><th className="border-b border-neutral-300 px-3 py-2">Linked Event</th><th className="border-b border-neutral-300 px-3 py-2">Notes</th><th className="border-b border-neutral-300 px-3 py-2">Perceived Impact</th><th className="border-b border-neutral-300 px-3 py-2">Optional Cost</th></tr></thead><tbody> {reports.map((entry) => ( <tr key={entry.id} className="cursor-pointer hover:bg-neutral-50" onClick={() => { openReportEditor(entry); }} onKeyDown={(keyboardEvent) => { if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') { keyboardEvent.preventDefault(); openReportEditor(entry); } }} role="button" tabIndex={0} >
+<td className="border-b border-neutral-200 px-3 py-2">{formatDate(entry.report_date)}</td><td className="border-b border-neutral-200 px-3 py-2">{entry.title}</td><td className="border-b border-neutral-200 px-3 py-2">{entry.category ?? '-'}</td><td className="border-b border-neutral-200 px-3 py-2"> {entry.linked_event_title ? `${entry.linked_event_title} (${formatDate(entry.linked_event_starts_at)})` : '-'} </td><td className="border-b border-neutral-200 px-3 py-2">{entry.notes ?? '-'}</td><td className="border-b border-neutral-200 px-3 py-2">{entry.perceived_impact ?? '-'}</td><td className="border-b border-neutral-200 px-3 py-2"> {entry.optional_cost !== null ? `$${entry.optional_cost.toFixed(2)}` : '-'} </td></tr> ))} </tbody></table></div>
 </section> )} </section>
 </section> {contactCreateModalOpen ? ( <>
 <button className="fixed inset-0 z-[60] bg-black/25" onClick={() => setContactCreateModalOpen(false)} type="button" aria-label="Close contact modal" />
@@ -516,35 +403,8 @@ type ReportDraft = MarketingReportRow; const TABS: Array<{ id: DashboardTab; lab
 </div>
 </div>
 <div className=" border border-neutral-300">
-<table className="min-w-full text-left text-xs">
-<thead className="bg-neutral-50">
-<tr>
-<th className="border-b border-neutral-300 px-2 py-2">Type</th>
-<th className="border-b border-neutral-300 px-2 py-2">Name/Person</th>
-<th className="border-b border-neutral-300 px-2 py-2">Organization</th>
-<th className="border-b border-neutral-300 px-2 py-2">Role</th>
-<th className="border-b border-neutral-300 px-2 py-2">Contact Method</th>
-<th className="border-b border-neutral-300 px-2 py-2">Email</th>
-<th className="border-b border-neutral-300 px-2 py-2">Phone</th>
-<th className="border-b border-neutral-300 px-2 py-2">Notes</th>
-<th className="border-b border-neutral-300 px-2 py-2">Action</th>
-</tr>
-</thead>
-<tbody> {eventBundle.eventContacts.map((entry: EventContactRow) => ( <tr key={entry.id}>
-<td className="border-b border-neutral-200 px-2 py-2">{entry.is_internal ? 'Internal' : 'External'}</td>
-<td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.full_name ?? entry.coordinator_name ?? '-' : entry.contact?.person_name ?? '-'} </td>
-<td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? 'Internal Team' : entry.contact?.organization ?? '-'} </td>
-<td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.role_title ?? entry.coordinator_role ?? '-' : entry.contact?.role_title ?? '-'} </td>
-<td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.coordinator_contact ?? '-' : '-'} </td>
-<td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.email ?? '-' : entry.contact?.email ?? '-'} </td>
-<td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.phone ?? '-' : entry.contact?.phone ?? '-'} </td>
-<td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.notes ?? entry.coordinator_notes ?? '-' : entry.contact?.notes ?? '-'} </td>
-<td className="border-b border-neutral-200 px-2 py-2">
-<button className="border border-neutral-400 bg-white px-2 py-1" onClick={() => { void removeEventContact(entry.id); }} type="button" > Remove </button>
-</td>
-</tr> ))} </tbody>
-</table>
-</div>
+<table className="min-w-full text-left text-xs"><thead className="bg-neutral-50"><tr><th className="border-b border-neutral-300 px-2 py-2">Type</th><th className="border-b border-neutral-300 px-2 py-2">Name/Person</th><th className="border-b border-neutral-300 px-2 py-2">Organization</th><th className="border-b border-neutral-300 px-2 py-2">Role</th><th className="border-b border-neutral-300 px-2 py-2">Contact Method</th><th className="border-b border-neutral-300 px-2 py-2">Email</th><th className="border-b border-neutral-300 px-2 py-2">Phone</th><th className="border-b border-neutral-300 px-2 py-2">Notes</th><th className="border-b border-neutral-300 px-2 py-2">Action</th></tr></thead><tbody> {eventBundle.eventContacts.map((entry: EventContactRow) => ( <tr key={entry.id}><td className="border-b border-neutral-200 px-2 py-2">{entry.is_internal ? 'Internal' : 'External'}</td><td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.full_name ?? entry.coordinator_name ?? '-' : entry.contact?.person_name ?? '-'} </td><td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? 'Internal Team' : entry.contact?.organization ?? '-'} </td><td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.role_title ?? entry.coordinator_role ?? '-' : entry.contact?.role_title ?? '-'} </td><td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.coordinator_contact ?? '-' : '-'} </td><td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.email ?? '-' : entry.contact?.email ?? '-'} </td><td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.phone ?? '-' : entry.contact?.phone ?? '-'} </td><td className="border-b border-neutral-200 px-2 py-2"> {entry.is_internal ? entry.internal_coordinator?.notes ?? entry.coordinator_notes ?? '-' : entry.contact?.notes ?? '-'} </td><td className="border-b border-neutral-200 px-2 py-2"><button className="border border-neutral-400 bg-white px-2 py-1" onClick={() => { void removeEventContact(entry.id); }} type="button" > Remove </button>
+</td></tr> ))} </tbody></table></div>
 </section>
 <section className="space-y-2 border-t border-neutral-300 pt-4">
 <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">Assets (Reference Media)</h3>

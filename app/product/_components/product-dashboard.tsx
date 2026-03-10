@@ -67,36 +67,11 @@ const ORDERING_METHODS: DbOrderingMethod[] = ['online', 'in_store', 'phone', 'ot
 </div>
 </section>
 <div className="">
-<table className="min-w-full text-sm">
-<thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
-<tr>
-<th className="border-b border-neutral-300 px-4 py-3">Order #</th>
-<th className="border-b border-neutral-300 px-4 py-3">Vendor</th>
-<th className="border-b border-neutral-300 px-4 py-3">Status</th>
-<th className="border-b border-neutral-300 px-4 py-3">Date Placed</th>
-<th className="border-b border-neutral-300 px-4 py-3">Requested Date</th>
-<th className="border-b border-neutral-300 px-4 py-3">Total</th>
-<th className="border-b border-neutral-300 px-4 py-3">Priority</th>
-<th className="border-b border-neutral-300 px-4 py-3">Reason</th>
-<th className="border-b border-neutral-300 px-4 py-3 text-right">Quick Cancel</th>
-</tr>
-</thead>
-<tbody> {filteredOrders.map((order) => { const isSelected = selectedOrderId === order.id; return ( <Fragment key={order.id}>
+<table className="min-w-full text-sm"><thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600"><tr><th className="border-b border-neutral-300 px-4 py-3">Order #</th><th className="border-b border-neutral-300 px-4 py-3">Vendor</th><th className="border-b border-neutral-300 px-4 py-3">Status</th><th className="border-b border-neutral-300 px-4 py-3">Date Placed</th><th className="border-b border-neutral-300 px-4 py-3">Requested Date</th><th className="border-b border-neutral-300 px-4 py-3">Total</th><th className="border-b border-neutral-300 px-4 py-3">Priority</th><th className="border-b border-neutral-300 px-4 py-3">Reason</th><th className="border-b border-neutral-300 px-4 py-3 text-right">Quick Cancel</th></tr></thead><tbody> {filteredOrders.map((order) => { const isSelected = selectedOrderId === order.id; return ( <Fragment key={order.id}>
 <tr className={`cursor-pointer border-b border-neutral-200 ${isSelected ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`} onClick={() => setSelectedOrderId((prev) => (prev === order.id ? null : order.id))} >
-<td className="px-4 py-3 font-medium">{order.order_number}</td>
-<td className="px-4 py-3">{vendorById.get(order.vendor_id)?.name ?? 'Unknown'}</td>
-<td className="px-4 py-3">
-<span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(order.status)}`}> {formatLabel(order.status)} </span>
-</td>
-<td className="px-4 py-3">{order.date_placed ?? '-'}</td>
-<td className="px-4 py-3">{order.requested_pickup_date ?? (order.asap ? 'ASAP' : '-')}</td>
-<td className="px-4 py-3">{currency.format(Number(order.total_amount || 0))}</td>
-<td className="px-4 py-3">
-<span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${getPriorityBadgeClass(order.priority)}`}> {formatLabel(order.priority)} </span>
-</td>
-<td className="max-w-[220px] px-4 py-3 text-sm text-neutral-700">{summarizeReason(order.reason)}</td>
-<td className="px-4 py-3 text-right">
-<button aria-label={`Cancel order ${order.order_number}`} className="inline-flex min-h-[30px] min-w-[30px] items-center justify-center rounded border border-red-700 text-red-700 hover:bg-red-50 disabled:opacity-50" disabled={order.status === 'cancelled'} onClick={(event) => { event.stopPropagation(); setCancelOrderTarget(order); }} type="button" >
+<td className="px-4 py-3 font-medium">{order.order_number}</td><td className="px-4 py-3">{vendorById.get(order.vendor_id)?.name ?? 'Unknown'}</td><td className="px-4 py-3"><span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(order.status)}`}> {formatLabel(order.status)} </span>
+</td><td className="px-4 py-3">{order.date_placed ?? '-'}</td><td className="px-4 py-3">{order.requested_pickup_date ?? (order.asap ? 'ASAP' : '-')}</td><td className="px-4 py-3">{currency.format(Number(order.total_amount || 0))}</td><td className="px-4 py-3"><span className={`inline-flex rounded px-2 py-1 text-xs font-semibold ${getPriorityBadgeClass(order.priority)}`}> {formatLabel(order.priority)} </span>
+</td><td className="max-w-[220px] px-4 py-3 text-sm text-neutral-700">{summarizeReason(order.reason)}</td><td className="px-4 py-3 text-right"><button aria-label={`Cancel order ${order.order_number}`} className="inline-flex min-h-[30px] min-w-[30px] items-center justify-center rounded border border-red-700 text-red-700 hover:bg-red-50 disabled:opacity-50" disabled={order.status === 'cancelled'} onClick={(event) => { event.stopPropagation(); setCancelOrderTarget(order); }} type="button" >
 <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
 <path d="M4 7h16" strokeLinecap="round" />
 <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" strokeLinecap="round" />
@@ -104,10 +79,7 @@ const ORDERING_METHODS: DbOrderingMethod[] = ['online', 'in_store', 'phone', 'ot
 <path d="M10 11v5M14 11v5" strokeLinecap="round" />
 </svg>
 </button>
-</td>
-</tr> {isSelected ? ( <tr className="border-b border-neutral-300 bg-neutral-50">
-<td className="px-4 py-4" colSpan={9}>
-<div className="space-y-5 rounded border border-neutral-300 bg-white p-4 shadow-sm">
+</td></tr> {isSelected ? ( <tr className="border-b border-neutral-300 bg-neutral-50"><td className="px-4 py-4" colSpan={9}><div className="space-y-5 rounded border border-neutral-300 bg-white p-4 shadow-sm">
 <section>
 <div className="mb-2 flex items-center justify-between">
 <h3 className="text-base font-semibold">Order Details</h3>
@@ -135,85 +107,31 @@ const ORDERING_METHODS: DbOrderingMethod[] = ['online', 'in_store', 'phone', 'ot
 <button className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]" onClick={() => openAddLineItemModal(order.id)} type="button" > Add Existing Catalog Item </button>
 </div>
 <div className="">
-<table className="min-w-full text-xs">
-<thead className="bg-neutral-100 text-left uppercase tracking-wide text-neutral-600">
-<tr>
-<th className="border-b border-neutral-300 px-2 py-2">Product</th>
-<th className="border-b border-neutral-300 px-2 py-2">How Many Ordered</th>
-<th className="border-b border-neutral-300 px-2 py-2">Cost Of 1 Ordered Item</th>
-<th className="border-b border-neutral-300 px-2 py-2">Items Per Ordered Item</th>
-<th className="border-b border-neutral-300 px-2 py-2">Link</th>
-<th className="border-b border-neutral-300 px-2 py-2">Notes</th>
-<th className="border-b border-neutral-300 px-2 py-2">Line Total</th>
-<th className="border-b border-neutral-300 px-2 py-2">Actions</th>
-</tr>
-</thead>
-<tbody> {order.lines.map((line) => ( <tr className="border-b border-neutral-200" key={line.id}>
-<td className="px-2 py-2">{line.product_id ? productById.get(line.product_id)?.name ?? 'Unknown' : '-'}</td>
-<td className="px-2 py-2">{line.quantity}</td>
-<td className="px-2 py-2">{currency.format(line.unit_price)}</td>
-<td className="px-2 py-2">{line.units_per_purchase}</td>
-<td className="px-2 py-2"> {line.product_link ? ( <a className="underline hover:no-underline" href={line.product_link} rel="noreferrer" target="_blank">Open</a> ) : '-'} </td>
-<td className="px-2 py-2">{line.notes ?? '-'}</td>
-<td className="px-2 py-2">{currency.format(Math.max(Number(line.quantity) || 0, 0) * Math.max(Number(line.unit_price) || 0, 0))}</td>
-<td className="px-2 py-2">
-<div className="flex gap-1">
+<table className="min-w-full text-xs"><thead className="bg-neutral-100 text-left uppercase tracking-wide text-neutral-600"><tr><th className="border-b border-neutral-300 px-2 py-2">Product</th><th className="border-b border-neutral-300 px-2 py-2">How Many Ordered</th><th className="border-b border-neutral-300 px-2 py-2">Cost Of 1 Ordered Item</th><th className="border-b border-neutral-300 px-2 py-2">Items Per Ordered Item</th><th className="border-b border-neutral-300 px-2 py-2">Link</th><th className="border-b border-neutral-300 px-2 py-2">Notes</th><th className="border-b border-neutral-300 px-2 py-2">Line Total</th><th className="border-b border-neutral-300 px-2 py-2">Actions</th></tr></thead><tbody> {order.lines.map((line) => ( <tr className="border-b border-neutral-200" key={line.id}><td className="px-2 py-2">{line.product_id ? productById.get(line.product_id)?.name ?? 'Unknown' : '-'}</td><td className="px-2 py-2">{line.quantity}</td><td className="px-2 py-2">{currency.format(line.unit_price)}</td><td className="px-2 py-2">{line.units_per_purchase}</td><td className="px-2 py-2"> {line.product_link ? ( <a className="underline hover:no-underline" href={line.product_link} rel="noreferrer" target="_blank">Open</a> ) : '-'} </td><td className="px-2 py-2">{line.notes ?? '-'}</td><td className="px-2 py-2">{currency.format(Math.max(Number(line.quantity) || 0, 0) * Math.max(Number(line.unit_price) || 0, 0))}</td><td className="px-2 py-2"><div className="flex gap-1">
 <button className="min-h-[30px] border border-neutral-300 px-2 text-[11px] hover:bg-neutral-100" onClick={() => { setLineFilesModalLineId(line.id); setLineAttachmentDrafts((prev) => ({ ...prev, [line.id]: prev[line.id] ?? { file: null, description: '' } })); }} type="button" > Files ({lineAttachmentsByLine.get(line.id)?.length ?? 0}) </button>
 <button className="min-h-[30px] border border-neutral-300 px-2 text-[11px] hover:bg-neutral-100" onClick={() => openEditLineItemModal(order.id, line)} type="button" > Edit </button>
 <button className="min-h-[30px] border border-red-700 px-2 text-[11px] text-red-700 hover:bg-red-50" onClick={() => void removeOrderLine(line.id)} type="button" > Remove </button>
 </div>
-</td>
-</tr> ))} </tbody>
-</table>
-</div>
+</td></tr> ))} </tbody></table></div>
 </section>
 </div>
-</td>
-</tr> ) : null} </Fragment> ); })} </tbody>
-</table>
-</div>
+</td></tr> ) : null} </Fragment> ); })} </tbody></table></div>
 </section> )} {activeView === 'prompts' && ( <section className="w-full bg-white">
 <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
 <h2 className="text-lg font-semibold">Prompts</h2>
 <p className="mt-1 text-sm text-neutral-600"> Low-stock prompts are generated automatically from Inventory Dashboard upload checks. </p>
 </header>
 <div className="">
-<table className="min-w-full text-sm">
-<thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
-<tr>
-<th className="border-b border-neutral-300 px-4 py-3">Product</th>
-<th className="border-b border-neutral-300 px-4 py-3">Current Stock</th>
-<th className="border-b border-neutral-300 px-4 py-3">On Order</th>
-<th className="border-b border-neutral-300 px-4 py-3">Suggested Qty</th>
-<th className="border-b border-neutral-300 px-4 py-3">Vendor</th>
-<th className="border-b border-neutral-300 px-4 py-3">Last Price</th>
-<th className="border-b border-neutral-300 px-4 py-3">Actions</th>
-</tr>
-</thead>
-<tbody> {prompts.map((prompt) => { const product = productById.get(prompt.product_id); const currentVendorId = prompt.vendor_id ?? product?.preferred_vendor_id ?? ''; return ( <tr className="border-b border-neutral-200" key={prompt.id}>
-<td className="px-4 py-3 font-medium">{product?.name ?? prompt.product_id}</td>
-<td className="px-4 py-3">{prompt.current_stock}</td>
-<td className="px-4 py-3">{prompt.on_order_qty}</td>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-24 border border-neutral-300 px-2" min={0} onChange={(event) => { const nextValue = Math.max(Number(event.target.value) || 0, 0); setPrompts((prev) => prev.map((entry) => entry.id === prompt.id ? { ...entry, suggested_qty: nextValue } : entry ) ); }} step={1} type="number" value={prompt.suggested_qty} />
-</td>
-<td className="px-4 py-3">
-<Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setPrompts((prev) => prev.map((entry) => entry.id === prompt.id ? { ...entry, vendor_id: event.target.value || null } : entry ) ); }} value={currentVendorId} >
+<table className="min-w-full text-sm"><thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600"><tr><th className="border-b border-neutral-300 px-4 py-3">Product</th><th className="border-b border-neutral-300 px-4 py-3">Current Stock</th><th className="border-b border-neutral-300 px-4 py-3">On Order</th><th className="border-b border-neutral-300 px-4 py-3">Suggested Qty</th><th className="border-b border-neutral-300 px-4 py-3">Vendor</th><th className="border-b border-neutral-300 px-4 py-3">Last Price</th><th className="border-b border-neutral-300 px-4 py-3">Actions</th></tr></thead><tbody> {prompts.map((prompt) => { const product = productById.get(prompt.product_id); const currentVendorId = prompt.vendor_id ?? product?.preferred_vendor_id ?? ''; return ( <tr className="border-b border-neutral-200" key={prompt.id}><td className="px-4 py-3 font-medium">{product?.name ?? prompt.product_id}</td><td className="px-4 py-3">{prompt.current_stock}</td><td className="px-4 py-3">{prompt.on_order_qty}</td><td className="px-4 py-3"><input className="min-h-[34px] w-24 border border-neutral-300 px-2" min={0} onChange={(event) => { const nextValue = Math.max(Number(event.target.value) || 0, 0); setPrompts((prev) => prev.map((entry) => entry.id === prompt.id ? { ...entry, suggested_qty: nextValue } : entry ) ); }} step={1} type="number" value={prompt.suggested_qty} />
+</td><td className="px-4 py-3"><Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setPrompts((prev) => prev.map((entry) => entry.id === prompt.id ? { ...entry, vendor_id: event.target.value || null } : entry ) ); }} value={currentVendorId} >
 <option value="">Unassigned</option> {vendors.map((vendor) => ( <option key={vendor.id} value={vendor.id}> {vendor.name} </option> ))} </Select>
-</td>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-28 border border-neutral-300 px-2" min={0} onChange={(event) => { const next = event.target.value; setPrompts((prev) => prev.map((entry) => entry.id === prompt.id ? { ...entry, last_price: next ? Number(next) : null } : entry ) ); }} step="0.01" type="number" value={prompt.last_price ?? ''} />
-</td>
-<td className="px-4 py-3">
-<div className="flex flex-wrap gap-2">
+</td><td className="px-4 py-3"><input className="min-h-[34px] w-28 border border-neutral-300 px-2" min={0} onChange={(event) => { const next = event.target.value; setPrompts((prev) => prev.map((entry) => entry.id === prompt.id ? { ...entry, last_price: next ? Number(next) : null } : entry ) ); }} step="0.01" type="number" value={prompt.last_price ?? ''} />
+</td><td className="px-4 py-3"><div className="flex flex-wrap gap-2">
 <button className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100" onClick={() => void savePrompt(prompt)} type="button" > Save </button>
 <button className="min-h-[32px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]" onClick={() => openPromptConvertModal(prompt)} type="button" > Convert to Order </button>
 <button className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100" onClick={() => void dismissPrompt(prompt.id)} type="button" > Dismiss </button>
 </div>
-</td>
-</tr> ); })} </tbody>
-</table>
-</div>
+</td></tr> ); })} </tbody></table></div>
 </section> )} {activeView === 'products' && ( <section className="w-full bg-white">
 <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
 <div className="flex items-center justify-between gap-3">
@@ -231,28 +149,9 @@ const ORDERING_METHODS: DbOrderingMethod[] = ['online', 'in_store', 'phone', 'ot
 <input className="min-h-[36px] border border-neutral-300 px-2 text-sm" onChange={(event) => setProductFilters((prev) => ({ ...prev, search: event.target.value }))} placeholder="Search catalog" type="search" value={productFilters.search} />
 </div>
 <div className=" border border-neutral-300">
-<table className="min-w-full text-sm">
-<thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
-<tr>
-<th className="border-b border-neutral-200 px-3 py-2">Name</th>
-<th className="border-b border-neutral-200 px-3 py-2">Category</th>
-<th className="border-b border-neutral-200 px-3 py-2">Default Qty</th>
-<th className="border-b border-neutral-200 px-3 py-2">Cost</th>
-<th className="border-b border-neutral-200 px-3 py-2">Vendor</th>
-<th className="border-b border-neutral-200 px-3 py-2">Expand</th>
-</tr>
-</thead>
-<tbody> {productsByCategory.map((product) => { const isExpanded = expandedProductId === product.id; return ( <Fragment key={product.id}>
+<table className="min-w-full text-sm"><thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600"><tr><th className="border-b border-neutral-200 px-3 py-2">Name</th><th className="border-b border-neutral-200 px-3 py-2">Category</th><th className="border-b border-neutral-200 px-3 py-2">Default Qty</th><th className="border-b border-neutral-200 px-3 py-2">Cost</th><th className="border-b border-neutral-200 px-3 py-2">Vendor</th><th className="border-b border-neutral-200 px-3 py-2">Expand</th></tr></thead><tbody> {productsByCategory.map((product) => { const isExpanded = expandedProductId === product.id; return ( <Fragment key={product.id}>
 <tr className="cursor-pointer border-b border-neutral-100 hover:bg-neutral-50" onClick={() => setExpandedProductId((prev) => (prev === product.id ? null : product.id))} >
-<td className="px-3 py-2 font-medium"> {product.vendor_product_link && /^https?:\/\//i.test(product.vendor_product_link) ? ( <a className="underline hover:no-underline" href={product.vendor_product_link} onClick={(event) => event.stopPropagation()} rel="noreferrer" target="_blank" > {product.name} </a> ) : ( product.name )} </td>
-<td className="px-3 py-2"> {product.category_id ? ( <span className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${getCategoryColorClass(categoryById.get(product.category_id)?.color_key)}`} > {categoryById.get(product.category_id)?.name ?? '-'} </span> ) : ( '-' )} </td>
-<td className="px-3 py-2">{product.default_order_quantity}</td>
-<td className="px-3 py-2">{currency.format(Number(product.default_unit_cost ?? 0))}</td>
-<td className="px-3 py-2">{product.preferred_vendor_id ? vendorById.get(product.preferred_vendor_id)?.name ?? '-' : '-'}</td>
-<td className="px-3 py-2">{isExpanded ? 'Hide' : 'Edit'}</td>
-</tr> {isExpanded ? ( <tr className="border-b border-neutral-200 bg-neutral-50">
-<td className="px-3 py-3" colSpan={6}>
-<div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+<td className="px-3 py-2 font-medium"> {product.vendor_product_link && /^https?:\/\//i.test(product.vendor_product_link) ? ( <a className="underline hover:no-underline" href={product.vendor_product_link} onClick={(event) => event.stopPropagation()} rel="noreferrer" target="_blank" > {product.name} </a> ) : ( product.name )} </td><td className="px-3 py-2"> {product.category_id ? ( <span className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${getCategoryColorClass(categoryById.get(product.category_id)?.color_key)}`} > {categoryById.get(product.category_id)?.name ?? '-'} </span> ) : ( '-' )} </td><td className="px-3 py-2">{product.default_order_quantity}</td><td className="px-3 py-2">{currency.format(Number(product.default_unit_cost ?? 0))}</td><td className="px-3 py-2">{product.preferred_vendor_id ? vendorById.get(product.preferred_vendor_id)?.name ?? '-' : '-'}</td><td className="px-3 py-2">{isExpanded ? 'Hide' : 'Edit'}</td></tr> {isExpanded ? ( <tr className="border-b border-neutral-200 bg-neutral-50"><td className="px-3 py-3" colSpan={6}><div className="grid grid-cols-1 gap-3 md:grid-cols-4">
 <div>
 <input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setProducts((prev) => prev.map((entry) => (entry.id === product.id ? { ...entry, name: event.target.value } : entry))); }} value={product.name} />
 <p className="mt-1 text-xs text-neutral-600">Product Name</p>
@@ -291,10 +190,7 @@ const ORDERING_METHODS: DbOrderingMethod[] = ['online', 'in_store', 'phone', 'ot
 <div className="mt-2">
 <button className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100" onClick={() => void saveProduct(product)} type="button" > Save Product </button>
 </div>
-</td>
-</tr> ) : null} </Fragment> ); })} </tbody>
-</table>
-</div>
+</td></tr> ) : null} </Fragment> ); })} </tbody></table></div>
 </section>
 </section> )} {activeView === 'vendors' && ( <section className="w-full bg-white">
 <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
@@ -312,35 +208,12 @@ const ORDERING_METHODS: DbOrderingMethod[] = ['online', 'in_store', 'phone', 'ot
 <button className="mt-3 min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]" onClick={() => void addVendor()} type="button" > Add Vendor </button>
 </section>
 <div className=" px-4 py-4 md:px-6">
-<table className="min-w-full text-sm">
-<thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
-<tr>
-<th className="border-b border-neutral-300 px-4 py-3">Vendor</th>
-<th className="border-b border-neutral-300 px-4 py-3">Ordering Method</th>
-<th className="border-b border-neutral-300 px-4 py-3">Default Link</th>
-<th className="border-b border-neutral-300 px-4 py-3">Notes</th>
-<th className="border-b border-neutral-300 px-4 py-3">Save</th>
-</tr>
-</thead>
-<tbody> {vendors.map((vendor) => ( <tr className="border-b border-neutral-200" key={vendor.id}>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, name: event.target.value } : entry)); }} value={vendor.name} />
-</td>
-<td className="px-4 py-3">
-<Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, ordering_method: event.target.value as DbOrderingMethod } : entry)); }} value={vendor.ordering_method} > {ORDERING_METHODS.map((method) => ( <option key={method} value={method}>{formatLabel(method)}</option> ))} </Select>
-</td>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, default_link: event.target.value } : entry)); }} value={vendor.default_link ?? ''} />
-</td>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, notes: event.target.value } : entry)); }} value={vendor.notes ?? ''} />
-</td>
-<td className="px-4 py-3">
-<button className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100" onClick={() => void saveVendor(vendor)} type="button" > Save </button>
-</td>
-</tr> ))} </tbody>
-</table>
-</div>
+<table className="min-w-full text-sm"><thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600"><tr><th className="border-b border-neutral-300 px-4 py-3">Vendor</th><th className="border-b border-neutral-300 px-4 py-3">Ordering Method</th><th className="border-b border-neutral-300 px-4 py-3">Default Link</th><th className="border-b border-neutral-300 px-4 py-3">Notes</th><th className="border-b border-neutral-300 px-4 py-3">Save</th></tr></thead><tbody> {vendors.map((vendor) => ( <tr className="border-b border-neutral-200" key={vendor.id}><td className="px-4 py-3"><input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, name: event.target.value } : entry)); }} value={vendor.name} />
+</td><td className="px-4 py-3"><Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, ordering_method: event.target.value as DbOrderingMethod } : entry)); }} value={vendor.ordering_method} > {ORDERING_METHODS.map((method) => ( <option key={method} value={method}>{formatLabel(method)}</option> ))} </Select>
+</td><td className="px-4 py-3"><input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, default_link: event.target.value } : entry)); }} value={vendor.default_link ?? ''} />
+</td><td className="px-4 py-3"><input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setVendors((prev) => prev.map((entry) => entry.id === vendor.id ? { ...entry, notes: event.target.value } : entry)); }} value={vendor.notes ?? ''} />
+</td><td className="px-4 py-3"><button className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100" onClick={() => void saveVendor(vendor)} type="button" > Save </button>
+</td></tr> ))} </tbody></table></div>
 </section> )} {activeView === 'designs' && ( <section className="w-full bg-white">
 <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
 <h2 className="text-lg font-semibold">Designs</h2>
@@ -403,51 +276,19 @@ const ORDERING_METHODS: DbOrderingMethod[] = ['online', 'in_store', 'phone', 'ot
 <button className="mt-3 min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-sm text-white hover:bg-[#6a0000]" onClick={() => void addWishlistItem()} type="button" > Add Wishlist Item </button>
 </section>
 <div className=" px-4 py-4 md:px-6">
-<table className="min-w-full text-sm">
-<thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
-<tr>
-<th className="border-b border-neutral-300 px-4 py-3">Item</th>
-<th className="border-b border-neutral-300 px-4 py-3">Category</th>
-<th className="border-b border-neutral-300 px-4 py-3">Vendor</th>
-<th className="border-b border-neutral-300 px-4 py-3">Estimated Cost</th>
-<th className="border-b border-neutral-300 px-4 py-3">Priority</th>
-<th className="border-b border-neutral-300 px-4 py-3">Status</th>
-<th className="border-b border-neutral-300 px-4 py-3">Notes</th>
-<th className="border-b border-neutral-300 px-4 py-3">Actions</th>
-</tr>
-</thead>
-<tbody> {wishlist.map((item) => ( <tr className="border-b border-neutral-200" key={item.id}>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, item_name: event.target.value } : entry)); }} value={item.item_name} />
-</td>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, category: event.target.value } : entry)); }} value={item.category ?? ''} />
-</td>
-<td className="px-4 py-3">
-<Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, vendor_id: event.target.value || null } : entry)); }} value={item.vendor_id ?? ''} >
+<table className="min-w-full text-sm"><thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600"><tr><th className="border-b border-neutral-300 px-4 py-3">Item</th><th className="border-b border-neutral-300 px-4 py-3">Category</th><th className="border-b border-neutral-300 px-4 py-3">Vendor</th><th className="border-b border-neutral-300 px-4 py-3">Estimated Cost</th><th className="border-b border-neutral-300 px-4 py-3">Priority</th><th className="border-b border-neutral-300 px-4 py-3">Status</th><th className="border-b border-neutral-300 px-4 py-3">Notes</th><th className="border-b border-neutral-300 px-4 py-3">Actions</th></tr></thead><tbody> {wishlist.map((item) => ( <tr className="border-b border-neutral-200" key={item.id}><td className="px-4 py-3"><input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, item_name: event.target.value } : entry)); }} value={item.item_name} />
+</td><td className="px-4 py-3"><input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, category: event.target.value } : entry)); }} value={item.category ?? ''} />
+</td><td className="px-4 py-3"><Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, vendor_id: event.target.value || null } : entry)); }} value={item.vendor_id ?? ''} >
 <option value="">None</option> {vendors.map((vendor) => ( <option key={vendor.id} value={vendor.id}>{vendor.name}</option> ))} </Select>
-</td>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-28 border border-neutral-300 px-2" min={0} onChange={(event) => { const next = event.target.value; setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, estimated_cost: next ? Number(next) : null } : entry)); }} step="0.01" type="number" value={item.estimated_cost ?? ''} />
-</td>
-<td className="px-4 py-3">
-<Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, priority: event.target.value as DbDesignPriority } : entry)); }} value={item.priority} > {PRIORITIES.map((priority) => ( <option key={priority} value={priority}>{formatLabel(priority)}</option> ))} </Select>
-</td>
-<td className="px-4 py-3">
-<Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, status: event.target.value as DbWishlistStatus } : entry)); }} value={item.status} > {WISHLIST_STATUSES.map((status) => ( <option key={status} value={status}>{formatLabel(status)}</option> ))} </Select>
-</td>
-<td className="px-4 py-3">
-<input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, notes: event.target.value } : entry)); }} value={item.notes ?? ''} />
-</td>
-<td className="px-4 py-3">
-<div className="flex flex-wrap gap-2">
+</td><td className="px-4 py-3"><input className="min-h-[34px] w-28 border border-neutral-300 px-2" min={0} onChange={(event) => { const next = event.target.value; setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, estimated_cost: next ? Number(next) : null } : entry)); }} step="0.01" type="number" value={item.estimated_cost ?? ''} />
+</td><td className="px-4 py-3"><Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, priority: event.target.value as DbDesignPriority } : entry)); }} value={item.priority} > {PRIORITIES.map((priority) => ( <option key={priority} value={priority}>{formatLabel(priority)}</option> ))} </Select>
+</td><td className="px-4 py-3"><Select className="min-h-[34px] w-full border border-neutral-300 bg-white px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, status: event.target.value as DbWishlistStatus } : entry)); }} value={item.status} > {WISHLIST_STATUSES.map((status) => ( <option key={status} value={status}>{formatLabel(status)}</option> ))} </Select>
+</td><td className="px-4 py-3"><input className="min-h-[34px] w-full border border-neutral-300 px-2" onChange={(event) => { setWishlist((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, notes: event.target.value } : entry)); }} value={item.notes ?? ''} />
+</td><td className="px-4 py-3"><div className="flex flex-wrap gap-2">
 <button className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100" onClick={() => void saveWishlistItem(item)} type="button" > Edit/Save </button>
 <button className="min-h-[32px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white hover:bg-[#6a0000]" onClick={() => void convertWishlistToCatalogProduct(item)} type="button" > Convert to Catalog </button>
 </div>
-</td>
-</tr> ))} </tbody>
-</table>
-</div>
+</td></tr> ))} </tbody></table></div>
 </section> )} {activeView === 'settings' && ( <section className="w-full bg-white">
 <header className="border-b border-neutral-300 px-4 py-4 md:px-6">
 <h2 className="text-lg font-semibold">Settings</h2>
@@ -474,28 +315,12 @@ const ORDERING_METHODS: DbOrderingMethod[] = ['online', 'in_store', 'phone', 'ot
 <button className="min-h-[38px] border border-brand-maroon bg-brand-maroon px-4 text-sm text-white hover:bg-[#6a0000] md:self-end" onClick={() => void addProductCategory(newCategoryDraft.name, newCategoryDraft.color_key)} type="button" > Add Category </button>
 </div>
 <div className="mt-4 border border-neutral-300">
-<table className="min-w-full text-sm">
-<thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600">
-<tr>
-<th className="border-b border-neutral-200 px-3 py-2">Category Name</th>
-<th className="border-b border-neutral-200 px-3 py-2">Color</th>
-<th className="border-b border-neutral-200 px-3 py-2">Actions</th>
-</tr>
-</thead>
-<tbody> {categoryOptions.map((category) => ( <tr className="border-b border-neutral-200" key={category.id}>
-<td className="px-3 py-2 font-medium">{category.name}</td>
-<td className="px-3 py-2">
-<span className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${getCategoryColorClass(category.color_key)}`}> {CATEGORY_COLOR_OPTIONS.find((option) => option.key === (category.color_key ?? 'slate'))?.label ?? 'Slate'} </span>
-</td>
-<td className="px-3 py-2">
-<div className="flex gap-2">
+<table className="min-w-full text-sm"><thead className="bg-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-600"><tr><th className="border-b border-neutral-200 px-3 py-2">Category Name</th><th className="border-b border-neutral-200 px-3 py-2">Color</th><th className="border-b border-neutral-200 px-3 py-2">Actions</th></tr></thead><tbody> {categoryOptions.map((category) => ( <tr className="border-b border-neutral-200" key={category.id}><td className="px-3 py-2 font-medium">{category.name}</td><td className="px-3 py-2"><span className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${getCategoryColorClass(category.color_key)}`}> {CATEGORY_COLOR_OPTIONS.find((option) => option.key === (category.color_key ?? 'slate'))?.label ?? 'Slate'} </span>
+</td><td className="px-3 py-2"><div className="flex gap-2">
 <button className="min-h-[32px] border border-neutral-300 px-3 text-xs hover:bg-neutral-100" onClick={() => setEditingCategoryDraft({ id: category.id, name: category.name, color_key: category.color_key ?? 'slate' })} type="button" > Edit </button>
 <button className="min-h-[32px] border border-red-700 px-3 text-xs text-red-700 hover:bg-red-50" onClick={() => void deleteProductCategory(category.id)} type="button" > Delete </button>
 </div>
-</td>
-</tr> ))} </tbody>
-</table>
-</div>
+</td></tr> ))} </tbody></table></div>
 </section>
 </section> )} </section> {showAddProductModal ? ( <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
 <div className="w-full max-w-5xl border border-neutral-300 bg-white">

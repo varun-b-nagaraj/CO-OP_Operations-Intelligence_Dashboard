@@ -318,27 +318,11 @@ export function FinanceUploadTab() {
 
             {preview.issues.length ? (
               <div className="mt-4 max-h-48 overflow-auto border border-neutral-200">
-                <table className="min-w-full text-left text-xs">
-                  <thead className="bg-neutral-100">
-                    <tr>
-                      <th className="border-b border-neutral-300 px-2 py-1">Row</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Severity</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Message</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Field</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <table className="min-w-full text-left text-xs"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 px-2 py-1">Row</th><th className="border-b border-neutral-300 px-2 py-1">Severity</th><th className="border-b border-neutral-300 px-2 py-1">Message</th><th className="border-b border-neutral-300 px-2 py-1">Field</th></tr></thead><tbody>
                     {preview.issues.map((issue, index) => (
-                      <tr key={`${issue.row_index ?? 'global'}-${index}`}>
-                        <td className="border-b border-neutral-200 px-2 py-1">{issue.row_index ?? 'Global'}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{issue.severity}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{issue.message}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{issue.field_name ?? '-'}</td>
-                      </tr>
+                      <tr key={`${issue.row_index ?? 'global'}-${index}`}><td className="border-b border-neutral-200 px-2 py-1">{issue.row_index ?? 'Global'}</td><td className="border-b border-neutral-200 px-2 py-1">{issue.severity}</td><td className="border-b border-neutral-200 px-2 py-1">{issue.message}</td><td className="border-b border-neutral-200 px-2 py-1">{issue.field_name ?? '-'}</td></tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </tbody></table></div>
             ) : (
               <p className="mt-4 text-sm text-emerald-700">No validation issues.</p>
             )}
@@ -368,43 +352,11 @@ export function FinanceUploadTab() {
               <h3 className="text-sm font-semibold text-neutral-900">Generated Report Preview</h3>
             </div>
             <div className="max-h-[420px] overflow-auto">
-              <table className="min-w-[1450px] text-left text-xs">
-                <thead className="bg-neutral-100">
-                  <tr>
-                    <th className="border-b border-neutral-300 px-2 py-2">Sales Date</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Payout Date</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Collected</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Fee</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Payout</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Credit Taxed</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Credit Tax</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Credit Non-Taxed</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Debit Fee</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">Debit Cash</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">ACH Bank Date</th>
-                    <th className="border-b border-neutral-300 px-2 py-2">GCR/GNI</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <table className="min-w-[1450px] text-left text-xs"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 px-2 py-2">Sales Date</th><th className="border-b border-neutral-300 px-2 py-2">Payout Date</th><th className="border-b border-neutral-300 px-2 py-2">Collected</th><th className="border-b border-neutral-300 px-2 py-2">Fee</th><th className="border-b border-neutral-300 px-2 py-2">Payout</th><th className="border-b border-neutral-300 px-2 py-2">Credit Taxed</th><th className="border-b border-neutral-300 px-2 py-2">Credit Tax</th><th className="border-b border-neutral-300 px-2 py-2">Credit Non-Taxed</th><th className="border-b border-neutral-300 px-2 py-2">Debit Fee</th><th className="border-b border-neutral-300 px-2 py-2">Debit Cash</th><th className="border-b border-neutral-300 px-2 py-2">ACH Bank Date</th><th className="border-b border-neutral-300 px-2 py-2">GCR/GNI</th></tr></thead><tbody>
                   {preview.rows.map((row) => (
-                    <tr key={row.row_index}>
-                      <td className="border-b border-neutral-200 px-2 py-1">{row.business_sales_date}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{row.payout_date ?? '-'}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{currency(row.collected_amount)}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{currency(row.fee_amount)}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{currency(row.payout_amount)}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{currency(row.taxed_sales_amount)}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{currency(row.sales_tax_amount)}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{currency(row.non_taxed_sales_amount)}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{currency(row.lightspeed_fee_debit)}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{currency(row.cash_account_debit)}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{row.ach_bank_date ?? '-'}</td>
-                      <td className="border-b border-neutral-200 px-2 py-1">{row.gcr_gni ?? '-'}</td>
-                    </tr>
+                    <tr key={row.row_index}><td className="border-b border-neutral-200 px-2 py-1">{row.business_sales_date}</td><td className="border-b border-neutral-200 px-2 py-1">{row.payout_date ?? '-'}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.collected_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.fee_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.payout_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.taxed_sales_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.sales_tax_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.non_taxed_sales_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.lightspeed_fee_debit)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.cash_account_debit)}</td><td className="border-b border-neutral-200 px-2 py-1">{row.ach_bank_date ?? '-'}</td><td className="border-b border-neutral-200 px-2 py-1">{row.gcr_gni ?? '-'}</td></tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </tbody></table></div>
           </div>
         </section>
       ) : null}

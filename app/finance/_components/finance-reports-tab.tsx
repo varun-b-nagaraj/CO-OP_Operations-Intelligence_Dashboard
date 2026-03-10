@@ -176,16 +176,7 @@ export function FinanceReportsTab() {
           ) : null}
 
           <div className="max-h-[520px] overflow-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead className="bg-neutral-100">
-                <tr>
-                  <th className="border-b border-neutral-300 px-2 py-2">Report</th>
-                  <th className="border-b border-neutral-300 px-2 py-2">Period</th>
-                  <th className="border-b border-neutral-300 px-2 py-2">Status</th>
-                  <th className="border-b border-neutral-300 px-2 py-2">Totals</th>
-                </tr>
-              </thead>
-              <tbody>
+            <table className="min-w-full text-left text-xs"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 px-2 py-2">Report</th><th className="border-b border-neutral-300 px-2 py-2">Period</th><th className="border-b border-neutral-300 px-2 py-2">Status</th><th className="border-b border-neutral-300 px-2 py-2">Totals</th></tr></thead><tbody>
                 {(reportsQuery.data ?? []).map((report) => {
                   const isActive = report.id === selectedReportId;
                   return (
@@ -194,37 +185,26 @@ export function FinanceReportsTab() {
                       key={report.id}
                       onClick={() => setSelectedReportId(report.id)}
                     >
-                      <td className="border-b border-neutral-200 px-2 py-2">
-                        <p className="font-medium text-neutral-900">{report.report_name}</p>
+                      <td className="border-b border-neutral-200 px-2 py-2"><p className="font-medium text-neutral-900">{report.report_name}</p>
                         <p className="text-neutral-600">{new Date(report.uploaded_at).toLocaleString()}</p>
-                      </td>
-                      <td className="border-b border-neutral-200 px-2 py-2">
+                      </td><td className="border-b border-neutral-200 px-2 py-2">
                         {report.report_period_start ?? '-'} to {report.report_period_end ?? '-'}
-                      </td>
-                      <td className="border-b border-neutral-200 px-2 py-2">
-                        <span
+                      </td><td className="border-b border-neutral-200 px-2 py-2"><span
                           className={`inline-flex rounded-full border px-2 py-0.5 font-semibold ${statusBadgeClass(report.status)}`}
                         >
                           {report.status}
                         </span>
-                      </td>
-                      <td className="border-b border-neutral-200 px-2 py-2">
-                        <p>{currency(report.total_collected)}</p>
+                      </td><td className="border-b border-neutral-200 px-2 py-2"><p>{currency(report.total_collected)}</p>
                         <p className="text-neutral-600">{report.total_row_count} rows</p>
-                      </td>
-                    </tr>
+                      </td></tr>
                   );
                 })}
                 {!reportsQuery.isLoading && (reportsQuery.data?.length ?? 0) === 0 ? (
-                  <tr>
-                    <td className="px-2 py-3 text-sm text-neutral-700" colSpan={4}>
+                  <tr><td className="px-2 py-3 text-sm text-neutral-700" colSpan={4}>
                       No reports match your filters.
-                    </td>
-                  </tr>
+                    </td></tr>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </tbody></table></div>
         </div>
 
         <div className="space-y-3">
@@ -275,31 +255,11 @@ export function FinanceReportsTab() {
                 <h4 className="text-sm font-semibold text-neutral-900">Generated Rows</h4>
               </div>
               <div className="max-h-[300px] overflow-auto">
-                <table className="min-w-[760px] text-left text-xs">
-                  <thead className="bg-neutral-100">
-                    <tr>
-                      <th className="border-b border-neutral-300 px-2 py-1">Sales Date</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Collected</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Fee</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Payout</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Taxed</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Tax</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <table className="min-w-[760px] text-left text-xs"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 px-2 py-1">Sales Date</th><th className="border-b border-neutral-300 px-2 py-1">Collected</th><th className="border-b border-neutral-300 px-2 py-1">Fee</th><th className="border-b border-neutral-300 px-2 py-1">Payout</th><th className="border-b border-neutral-300 px-2 py-1">Taxed</th><th className="border-b border-neutral-300 px-2 py-1">Tax</th></tr></thead><tbody>
                     {detailQuery.data.rows.map((row) => (
-                      <tr key={row.row_index}>
-                        <td className="border-b border-neutral-200 px-2 py-1">{row.business_sales_date}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{currency(row.collected_amount)}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{currency(row.fee_amount)}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{currency(row.payout_amount)}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{currency(row.taxed_sales_amount)}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{currency(row.sales_tax_amount)}</td>
-                      </tr>
+                      <tr key={row.row_index}><td className="border-b border-neutral-200 px-2 py-1">{row.business_sales_date}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.collected_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.fee_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.payout_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.taxed_sales_amount)}</td><td className="border-b border-neutral-200 px-2 py-1">{currency(row.sales_tax_amount)}</td></tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </tbody></table></div>
             </div>
           ) : null}
 
@@ -309,25 +269,11 @@ export function FinanceReportsTab() {
                 <h4 className="text-sm font-semibold text-neutral-900">Validation Issues</h4>
               </div>
               <div className="max-h-[220px] overflow-auto">
-                <table className="min-w-full text-left text-xs">
-                  <thead className="bg-neutral-100">
-                    <tr>
-                      <th className="border-b border-neutral-300 px-2 py-1">Row</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Severity</th>
-                      <th className="border-b border-neutral-300 px-2 py-1">Message</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <table className="min-w-full text-left text-xs"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 px-2 py-1">Row</th><th className="border-b border-neutral-300 px-2 py-1">Severity</th><th className="border-b border-neutral-300 px-2 py-1">Message</th></tr></thead><tbody>
                     {detailQuery.data.issues.map((issue, index) => (
-                      <tr key={`${issue.row_index ?? 'global'}-${index}`}>
-                        <td className="border-b border-neutral-200 px-2 py-1">{issue.row_index ?? 'Global'}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{issue.severity}</td>
-                        <td className="border-b border-neutral-200 px-2 py-1">{issue.message}</td>
-                      </tr>
+                      <tr key={`${issue.row_index ?? 'global'}-${index}`}><td className="border-b border-neutral-200 px-2 py-1">{issue.row_index ?? 'Global'}</td><td className="border-b border-neutral-200 px-2 py-1">{issue.severity}</td><td className="border-b border-neutral-200 px-2 py-1">{issue.message}</td></tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </tbody></table></div>
             </div>
           ) : selectedReport ? (
             <div className="border border-neutral-300 bg-white p-3 text-sm text-emerald-700">
