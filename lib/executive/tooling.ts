@@ -8,6 +8,11 @@ export interface ExecutiveToolSpec {
 
 export const EXECUTIVE_TOOL_SPECS: ExecutiveToolSpec[] = [
   {
+    id: 'get_user_preferences',
+    label: 'User Preferences',
+    runningText: 'Fetching saved user preferences and critical facts...'
+  },
+  {
     id: 'get_executive_overview',
     label: 'Executive Overview',
     runningText: 'Building cross-department executive overview...'
@@ -51,6 +56,11 @@ export const EXECUTIVE_TOOL_SPECS: ExecutiveToolSpec[] = [
     id: 'get_calendar_conflicts',
     label: 'Calendar Conflicts',
     runningText: 'Checking cross-department calendar conflicts...'
+  },
+  {
+    id: 'sync_user_memory',
+    label: 'Memory Writer',
+    runningText: 'Condensing critical facts with qwen3:8b and writing to memory...'
   }
 ];
 
@@ -60,7 +70,12 @@ function includesAny(normalizedPrompt: string, keywords: string[]): boolean {
 
 export function planExecutiveTools(prompt: string): ExecutiveToolSpec[] {
   const normalized = prompt.toLowerCase();
-  const planned = new Set<string>(['get_executive_overview', 'get_department_updates']);
+  const planned = new Set<string>([
+    'get_user_preferences',
+    'get_executive_overview',
+    'get_department_updates',
+    'sync_user_memory'
+  ]);
 
   if (includesAny(normalized, ['hr', 'attendance', 'employee', 'strike', 'shift'])) {
     planned.add('get_hr_insights');

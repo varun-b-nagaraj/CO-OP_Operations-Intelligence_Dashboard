@@ -543,7 +543,9 @@ export async function runExecutiveTooling(prompt: string): Promise<{
   toolContext: string;
   overview: ExecutiveOverviewData;
 }> {
-  const selectedTools = planExecutiveTools(prompt);
+  const selectedTools = planExecutiveTools(prompt).filter(
+    (tool) => tool.id !== 'get_user_preferences' && tool.id !== 'sync_user_memory'
+  );
   const overview = await fetchExecutiveOverview();
   const toolTrace: ExecutiveToolTraceItem[] = [];
   const contextLines: string[] = [];
