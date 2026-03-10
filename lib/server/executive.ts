@@ -688,6 +688,15 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       timestamp: formatDateTime(session.updated_at),
       severity: inventorySeverity(session.status),
       href: '/inventory'
+    })),
+    ...cfaLogs.slice(0, 2).map((log) => ({
+      id: `feed-cfa-${log.id}`,
+      department: 'Chick-fil-A',
+      title: `CFA daily log (${formatDate(log.log_date)})`,
+      detail: `Log captured at ${formatDateTime(log.created_at)}.`,
+      timestamp: formatDateTime(log.created_at),
+      severity: 'info' as const,
+      href: '/hr?module=cfa'
     }))
   ].slice(0, 12);
 
@@ -763,6 +772,15 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       updatedAt: formatDateTime(event.updated_at),
       owner: 'marketing',
       href: '/marketing'
+    })),
+    ...cfaLogs.slice(0, 2).map((log) => ({
+      id: `report-cfa-${log.id}`,
+      type: 'Chick-fil-A',
+      title: `Daily operations log (${formatDate(log.log_date)})`,
+      status: 'captured',
+      updatedAt: formatDateTime(log.created_at),
+      owner: 'cfa',
+      href: '/hr?module=cfa'
     }))
   ];
 
