@@ -20,13 +20,14 @@ function normalizeBaseUrl(baseUrlRaw: string | undefined): string {
 
 function resolveOllamaChatUrlCandidates(baseUrlRaw: string | undefined): string[] {
   const baseUrl = normalizeBaseUrl(baseUrlRaw);
+  const addUnique = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
   if (baseUrl.endsWith('/api/chat')) {
-    return [baseUrl, baseUrl.replace(/\/api\/chat$/, '/api/api/chat')];
+    return addUnique([baseUrl]);
   }
   if (baseUrl.endsWith('/api')) {
-    return [`${baseUrl}/chat`, `${baseUrl}/api/chat`];
+    return addUnique([`${baseUrl}/chat`]);
   }
-  return [`${baseUrl}/api/chat`, `${baseUrl}/api/api/chat`];
+  return addUnique([`${baseUrl}/api/chat`]);
 }
 
 function copyResponseHeaders(sourceHeaders: Headers): Headers {
@@ -59,7 +60,8 @@ export async function POST(request: NextRequest) {
 
   const requestBody = new Uint8Array(await request.arrayBuffer());
   const attempts: Array<{ url: string; status: number }> = [];
-  let lastResponse: Response | null = null;
+  let bestFailureResponse: Response | null = null;
+  let bestFailureStatus = -1;
   let lastError: unknown = null;
 
   for (const targetUrl of targetCandidates) {
@@ -76,7 +78,6 @@ export async function POST(request: NextRequest) {
       clearTimeout(timeout);
       timeout = null;
       attempts.push({ url: targetUrl, status: upstreamResponse.status });
-      lastResponse = upstreamResponse;
 
       if (upstreamResponse.ok) {
         const headers = copyResponseHeaders(upstreamResponse.headers);
@@ -88,6 +89,12 @@ export async function POST(request: NextRequest) {
           headers
         });
       }
+
+      // Keep the most relevant upstream failure status for diagnostics.
+      if (upstreamResponse.status > bestFailureStatus) {
+        bestFailureStatus = upstreamResponse.status;
+        bestFailureResponse = upstreamResponse;
+      }
     } catch (error) {
       lastError = error;
       attempts.push({ url: targetUrl, status: 0 });
@@ -96,12 +103,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (lastResponse) {
-    const headers = copyResponseHeaders(lastResponse.headers);
+  if (bestFailureResponse) {
+    const headers = copyResponseHeaders(bestFailureResponse.headers);
     headers.set('x-coop-backend-proxy-attempts', JSON.stringify(attempts));
-    return new Response(lastResponse.body, {
-      status: lastResponse.status,
-      statusText: lastResponse.statusText,
+    return new Response(bestFailureResponse.body, {
+      status: bestFailureResponse.status,
+      statusText: bestFailureResponse.statusText,
       headers
     });
   }
