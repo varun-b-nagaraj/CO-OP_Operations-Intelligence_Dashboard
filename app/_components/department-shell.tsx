@@ -293,7 +293,9 @@ export function DepartmentShell({
           <div className="border-t border-neutral-300 p-2">
             <Link
               aria-label="Home"
-              className="ui-click mb-2 flex min-h-[40px] w-full items-center justify-center gap-2 border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+              className={`ui-click mb-2 flex min-h-[40px] w-full items-center justify-center border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-800 hover:bg-neutral-50 ${
+                isCollapsed ? 'gap-0' : 'gap-2'
+              }`}
               href="/"
               title="Home"
             >
@@ -326,30 +328,14 @@ export function DepartmentShell({
                 <span>Menu</span>
               </button>
               <h2 className="truncate text-base font-semibold">{contentHeading ?? title}</h2>
-              <Link
-                aria-label="Home"
-                className="inline-flex h-9 w-9 items-center justify-center border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-100"
-                href="/"
-                title="Home"
-              >
-                <Home className="h-4 w-4" />
-              </Link>
+              <span className="h-9 w-9" aria-hidden="true" />
             </div>
           </header>
           {contentHeading ? (
             <header className="hidden border-b border-neutral-300 bg-white px-4 py-4 md:block md:px-6">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold">{contentHeading}</h2>
-                <div className="flex items-center gap-2">
-                  <Link
-                    aria-label="Home"
-                    className="inline-flex h-9 w-9 items-center justify-center border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-100"
-                    href="/"
-                    title="Home"
-                  >
-                    <Home className="h-4 w-4" />
-                  </Link>
-                </div>
+                <div aria-hidden="true" />
               </div>
             </header>
           ) : null}
