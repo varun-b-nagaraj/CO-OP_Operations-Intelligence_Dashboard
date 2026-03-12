@@ -4,12 +4,18 @@ import { parseCsv } from '@/lib/finance/csv';
 import { loadFinanceTransformationConfig } from '@/lib/finance/config';
 import { FinanceColumnMappingSchema } from '@/lib/finance/schemas';
 import { transformFinanceRows } from '@/lib/finance/transform';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { createServerClient } from '@/lib/supabase';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   try {
+    const allowed = await ensureServerPermission('finance.upload.edit');
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const formData = await request.formData();
     const file = formData.get('file');
     const mappingRaw = formData.get('columnMapping');

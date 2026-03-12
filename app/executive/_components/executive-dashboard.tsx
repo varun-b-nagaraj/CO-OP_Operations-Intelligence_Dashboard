@@ -5,7 +5,9 @@ import { ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
 import { SharedCalendarTab } from '@/app/_components/shared-calendar-tab';
+import { AccessControlTab } from '@/app/executive/_components/access-control-tab';
 import { planExecutiveTools } from '@/lib/executive/tooling';
+import { usePermission } from '@/lib/permissions';
 
 type ExecutiveTabId =
   | 'ai-agent'
@@ -14,7 +16,8 @@ type ExecutiveTabId =
   | 'alerts'
   | 'metrics'
   | 'reports'
-  | 'calendar';
+  | 'calendar'
+  | 'access-control';
 
 interface ExecutiveSummaryCard {
   id: string;
@@ -97,7 +100,7 @@ const USER_KEY_STORAGE = 'executive_agent_user_key_v1';
 const EXECUTIVE_TABS: Array<{
   id: ExecutiveTabId;
   label: string;
-  icon: 'dashboard' | 'analysis' | 'history' | 'prompts' | 'reports' | 'calendar';
+  icon: 'dashboard' | 'analysis' | 'history' | 'prompts' | 'reports' | 'calendar' | 'settings';
 }> = [
   { id: 'ai-agent', label: 'AI Agent', icon: 'dashboard' },
   { id: 'overview', label: 'Overview', icon: 'analysis' },
@@ -105,7 +108,8 @@ const EXECUTIVE_TABS: Array<{
   { id: 'alerts', label: 'Alerts', icon: 'prompts' },
   { id: 'metrics', label: 'Metrics', icon: 'reports' },
   { id: 'reports', label: 'Reports', icon: 'history' },
-  { id: 'calendar', label: 'Calendar', icon: 'calendar' }
+  { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+  { id: 'access-control', label: 'Access Control', icon: 'settings' }
 ];
 
 const QUICK_PROMPTS = [
@@ -218,9 +222,18 @@ function renderMessageContent(content: string): ReactNode[] {
 
 export function ExecutiveDashboard() {
   const [activeTab, setActiveTab] = useState<ExecutiveTabId>('ai-agent');
+  const canViewAccessControl =
+    usePermission('executive.access_control.view') || usePermission('executive.access_control.edit');
+  const navTabs = useMemo(
+    () =>
+      canViewAccessControl
+        ? EXECUTIVE_TABS
+        : EXECUTIVE_TABS.filter((tab) => tab.id !== 'access-control'),
+    [canViewAccessControl]
+  );
   const activeLabel = useMemo(
-    () => EXECUTIVE_TABS.find((tab) => tab.id === activeTab)?.label ?? 'Executive Dashboard',
-    [activeTab]
+    () => navTabs.find((tab) => tab.id === activeTab)?.label ?? 'Executive Dashboard',
+    [activeTab, navTabs]
   );
 
   const [overview, setOverview] = useState<ExecutiveOverviewData | null>(null);
@@ -366,6 +379,12 @@ export function ExecutiveDashboard() {
     return () => window.clearInterval(timer);
   }, [sending, activeBreadcrumbs]);
 
+  useEffect(() => {
+    if (!canViewAccessControl && activeTab === 'access-control') {
+      setActiveTab('ai-agent');
+    }
+  }, [activeTab, canViewAccessControl]);
+
   const startNewConversation = () => {
     const newSessionId = createSessionId();
     setActiveSessionId(newSessionId);
@@ -487,7 +506,7 @@ export function ExecutiveDashboard() {
       contentHeading={activeLabel}
       departmentIcon="dashboard"
       navAriaLabel="Executive dashboard navigation"
-      navItems={EXECUTIVE_TABS}
+      navItems={navTabs}
       onNavSelect={(id) => setActiveTab(id as ExecutiveTabId)}
       subtitle="Cross-department intelligence with AI-assisted executive operations"
       title="Executive Dashboard"
@@ -771,6 +790,12 @@ export function ExecutiveDashboard() {
           <div className="border border-neutral-300 bg-white">
             <SharedCalendarTab sourceDepartment="exec" />
           </div>
+          </section>
+        ) : null}
+
+        {activeTab === 'access-control' && canViewAccessControl ? (
+          <section className="w-full">
+            <AccessControlTab />
           </section>
         ) : null}
       </section>

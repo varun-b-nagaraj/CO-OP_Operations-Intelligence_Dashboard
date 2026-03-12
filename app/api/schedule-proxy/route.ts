@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { buildExpectedShiftsInternal } from '@/lib/server/expected-shifts';
 import { fetchScheduleWithCache } from '@/lib/server/external-apis';
 import {
@@ -34,6 +35,13 @@ export async function GET(request: NextRequest) {
   const correlationId = getCorrelationId(request.headers.get('x-correlation-id'));
 
   try {
+    const canHrView = await ensureServerPermission('hr.schedule.view');
+    const canHrEdit = await ensureServerPermission('hr.schedule.edit');
+    const canEmployeeView = await ensureServerPermission('employee.schedule.view');
+    if (!canHrView && !canHrEdit && !canEmployeeView) {
+      return jsonResult(errorResult(correlationId, 'FORBIDDEN', 'Forbidden'), 403);
+    }
+
     const defaults = buildDefaultScheduleParams();
     const rawParams = {
       year: Number(request.nextUrl.searchParams.get('year') ?? defaults.year),

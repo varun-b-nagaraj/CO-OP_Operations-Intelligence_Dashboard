@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { listCatalog } from '@/lib/server/inventory';
 import { createServerClient } from '@/lib/supabase';
 
 export async function GET(request: NextRequest) {
   try {
+    const allowed = await ensureServerPermission('inventory.catalog.view');
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const supabase = createServerClient();
     const query = request.nextUrl.searchParams.get('q') ?? '';
     const items = await listCatalog(supabase, query);

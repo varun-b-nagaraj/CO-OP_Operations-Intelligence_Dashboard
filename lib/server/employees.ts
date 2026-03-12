@@ -15,7 +15,6 @@ function normalizeStudentRow(row: Record<string, unknown>): Employee {
       (typeof row.student_number === 'string' && row.student_number) ||
       (typeof row.snumber === 'string' && row.snumber) ||
       '',
-    username: typeof row.username === 'string' ? row.username : null,
     assigned_periods:
       typeof row.assigned_periods === 'string'
         ? row.assigned_periods
@@ -43,10 +42,34 @@ export async function getStudentBySNumber(
   supabase: SupabaseClient,
   sNumber: string
 ): Promise<Employee | null> {
+  const raw = String(sNumber ?? '').trim();
+  if (!raw) return null;
+
+  const withoutPrefix = raw.replace(/^s/i, '');
+  const candidates = Array.from(
+    new Set(
+      [
+        raw,
+        raw.toLowerCase(),
+        raw.toUpperCase(),
+        withoutPrefix,
+        `s${withoutPrefix}`,
+        `S${withoutPrefix}`
+      ].filter(Boolean)
+    )
+  );
+
+  const orFilters = candidates.flatMap((value) => [
+    `s_number.eq.${value}`,
+    `student_number.eq.${value}`,
+    `snumber.eq.${value}`
+  ]);
+
   const { data, error } = await supabase
     .from('students')
     .select('*')
-    .or(`s_number.eq.${sNumber},student_number.eq.${sNumber},snumber.eq.${sNumber}`)
+    .or(orFilters.join(','))
+    .limit(1)
     .maybeSingle();
 
   if (error || !data) return null;

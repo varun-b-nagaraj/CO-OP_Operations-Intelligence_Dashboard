@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 
-import { ensureServerPermission } from '@/lib/permissions';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { buildExpectedShiftsInternal } from '@/lib/server/expected-shifts';
 import { logError, logInfo } from '@/lib/server/common';
 import { createServerClient } from '@/lib/supabase';

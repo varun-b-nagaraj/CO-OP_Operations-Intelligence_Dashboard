@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { ensureServerPermission } from '@/lib/server/permissions';
 import {
   getToolSpecById,
   isGreetingPrompt,
@@ -228,6 +229,11 @@ async function extractMemoryFactsWithSmallModel(params: {
 
 export async function POST(request: NextRequest) {
   try {
+    const allowed = await ensureServerPermission('executive.ai_agent.view');
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const body = (await request.json()) as {
       message?: unknown;
       sessionId?: unknown;

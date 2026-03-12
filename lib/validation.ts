@@ -103,7 +103,6 @@ export const EmployeeSettingsSchema = z.object({
 
 export const EmployeeLoginCredentialsSchema = z.object({
   employee_id: EmployeeIdSchema,
-  username: z.string().trim().min(3).max(120),
   password: z.string().min(8).max(256)
 });
 

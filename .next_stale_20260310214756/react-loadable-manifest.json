@@ -1,0 +1,49 @@
+{
+  "app/hr/_components/hr-module.tsx -> ./audit-tab": {
+    "id": 4179,
+    "files": [
+      "static/chunks/4179.acc687d228b95e27.js"
+    ]
+  },
+  "app/hr/_components/hr-module.tsx -> ./employees-tab": {
+    "id": 2069,
+    "files": [
+      "static/chunks/2069.e1ebc748c90d1c92.js"
+    ]
+  },
+  "app/hr/_components/hr-module.tsx -> ./meeting-attendance-tab": {
+    "id": 2273,
+    "files": [
+      "static/chunks/2273.4f9d36c8c89723c0.js"
+    ]
+  },
+  "app/hr/_components/hr-module.tsx -> ./requests-tab": {
+    "id": 4138,
+    "files": [
+      "static/chunks/7692-173cbd27efeb674a.js",
+      "static/chunks/4138.0f4a2f6fdccc9f82.js"
+    ]
+  },
+  "app/hr/_components/hr-module.tsx -> ./schedule-tab": {
+    "id": 5771,
+    "files": [
+      "static/chunks/5771-caa6646ee85bddd4.js"
+    ]
+  },
+  "app/hr/_components/hr-module.tsx -> ./shift-attendance-tab": {
+    "id": 244,
+    "files": [
+      "static/chunks/244.40e16ba380759e9a.js"
+    ]
+  },
+  "app/hr/_components/hr-module.tsx -> @/app/_components/shared-calendar-tab": {
+    "id": 6007,
+    "files": []
+  },
+  "app/inventory/_components/barcode-scanner.tsx -> @zxing/browser": {
+    "id": 896,
+    "files": [
+      "static/chunks/896.138e02a9a442d50e.js"
+    ]
+  }
+}

@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 
-import { ensureServerPermission } from '@/lib/permissions';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { insertAuditEntry } from '@/lib/server/audit';
 import { logError, logInfo } from '@/lib/server/common';
 import { createServerClient } from '@/lib/supabase';

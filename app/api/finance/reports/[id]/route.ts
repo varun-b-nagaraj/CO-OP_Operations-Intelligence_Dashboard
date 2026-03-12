@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { buildFinanceReportCsv } from '@/lib/finance/export';
 import { FinanceGeneratedRowSchema } from '@/lib/finance/schemas';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { createServerClient } from '@/lib/supabase';
 
 type RouteContext = {
@@ -10,12 +11,21 @@ type RouteContext = {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    const canView = await ensureServerPermission('finance.reports.view');
+    const canEdit = await ensureServerPermission('finance.reports.edit');
+    if (!canView && !canEdit) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const { id } = await context.params;
     if (!id) {
       return NextResponse.json({ ok: false, error: 'Missing report id.' }, { status: 400 });
     }
 
     const format = request.nextUrl.searchParams.get('format');
+    if (format === 'csv' && !canEdit) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
     const supabase = createServerClient();
 
     const { data: header, error: headerError } = await supabase

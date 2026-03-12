@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { getSessionState } from '@/lib/server/inventory';
 import { createServerClient } from '@/lib/supabase';
 
@@ -8,6 +9,12 @@ export async function GET(
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
+    const canView = await ensureServerPermission('inventory.sessions.view');
+    const canEdit = await ensureServerPermission('inventory.sessions.edit');
+    if (!canView && !canEdit) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const { sessionId } = await params;
     if (!sessionId) {
       return NextResponse.json({ ok: false, error: 'sessionId is required' }, { status: 400 });

@@ -1,6 +1,6 @@
 'use server';
 
-import { ensureServerPermission } from '@/lib/permissions';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { insertAuditEntry } from '@/lib/server/audit';
 import { getStudentBySNumber } from '@/lib/server/employees';
 import { calculateShiftAttendanceRate } from '@/lib/server/attendance';

@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { parseInventoryCsv } from '@/lib/inventory/csv';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { upsertCatalogItem } from '@/lib/server/inventory';
 import { createServerClient } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
   try {
+    const allowed = await ensureServerPermission('inventory.catalog.edit');
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const supabase = createServerClient();
     const formData = await request.formData();
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { FinanceReportsQuerySchema, FinanceSaveReportSchema } from '@/lib/finance/schemas';
 import { computeFinanceTotals } from '@/lib/finance/totals';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { createServerClient } from '@/lib/supabase';
 
 function buildStoragePath(reportName: string, sourceFileName: string): string {
@@ -16,6 +17,11 @@ function buildStoragePath(reportName: string, sourceFileName: string): string {
 
 export async function GET(request: NextRequest) {
   try {
+    const allowed = await ensureServerPermission('finance.reports.view');
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const rawFilters = {
       search: request.nextUrl.searchParams.get('search') ?? undefined,
       status: request.nextUrl.searchParams.get('status') ?? undefined,
@@ -67,6 +73,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const allowed = await ensureServerPermission('finance.reports.edit');
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const body = await request.json();
     const parsed = FinanceSaveReportSchema.safeParse(body);
 

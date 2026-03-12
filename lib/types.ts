@@ -1,19 +1,6 @@
-export type PermissionFlag =
-  | 'hr.schedule.view'
-  | 'hr.schedule.edit'
-  | 'hr.strikes.manage'
-  | 'hr.attendance.view'
-  | 'hr.attendance.override'
-  | 'hr.requests.view'
-  | 'hr.audit.view'
-  | 'hr.settings.edit'
-  | 'cfa.logs.read'
-  | 'cfa.logs.write'
-  | 'cfa.menu.manage'
-  | 'cfa.day_type.override'
-  | 'cfa.exports';
+export type PermissionFlag = string;
 
-export type Role = 'employee' | 'manager' | 'HR_lead' | 'exec';
+export type Role = string;
 
 export interface UserContext {
   id: string | null;
@@ -68,7 +55,6 @@ export interface Employee {
   id: string;
   name: string;
   s_number: string;
-  username?: string | null;
   assigned_periods?: string | null;
 }
 
@@ -154,7 +140,6 @@ export interface EmployeeSettings {
 
 export interface EmployeeLoginProfile {
   employee_id: string;
-  username: string;
   password_updated_at: string;
 }
 

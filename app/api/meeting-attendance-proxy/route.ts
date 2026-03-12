@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 
+import { ensureServerPermission } from '@/lib/server/permissions';
 import {
   getCorrelationId,
   jsonResult,
@@ -144,6 +145,13 @@ export async function GET(request: NextRequest) {
   const correlationId = getCorrelationId(request.headers.get('x-correlation-id'));
 
   try {
+    const canHrView = await ensureServerPermission('hr.attendance.view');
+    const canHrOverride = await ensureServerPermission('hr.attendance.override');
+    const canEmployeeView = await ensureServerPermission('employee.accountability.view');
+    if (!canHrView && !canHrOverride && !canEmployeeView) {
+      return jsonResult(errorResult(correlationId, 'FORBIDDEN', 'Forbidden'), 403);
+    }
+
     const rawParams = {
       date: request.nextUrl.searchParams.get('date') ?? undefined,
       from: request.nextUrl.searchParams.get('from') ?? undefined,

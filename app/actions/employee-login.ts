@@ -2,7 +2,7 @@
 
 import { randomBytes, scryptSync } from 'crypto';
 
-import { ensureServerPermission } from '@/lib/permissions';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { insertAuditEntry } from '@/lib/server/audit';
 import { getStudentById } from '@/lib/server/employees';
 import { logError, logInfo } from '@/lib/server/common';
@@ -24,7 +24,6 @@ function hashPassword(password: string): string {
 
 export async function updateEmployeeLoginCredentials(
   employeeId: string,
-  username: string,
   password: string
 ): Promise<Result<EmployeeLoginProfile>> {
   const correlationId = generateCorrelationId();
@@ -41,7 +40,6 @@ export async function updateEmployeeLoginCredentials(
 
     const parsed = EmployeeLoginCredentialsSchema.safeParse({
       employee_id: employeeId,
-      username,
       password
     });
 
@@ -64,7 +62,7 @@ export async function updateEmployeeLoginCredentials(
 
     const { data: existing } = await supabase
       .from('hr_employee_login_credentials')
-      .select('employee_id, username, password_updated_at')
+      .select('employee_id, password_updated_at')
       .eq('employee_id', parsed.data.employee_id)
       .maybeSingle();
 
@@ -73,7 +71,6 @@ export async function updateEmployeeLoginCredentials(
       .upsert(
         {
           employee_id: parsed.data.employee_id,
-          username: parsed.data.username,
           password_hash: hashPassword(parsed.data.password),
           password_updated_at: new Date().toISOString()
         },
@@ -81,7 +78,7 @@ export async function updateEmployeeLoginCredentials(
           onConflict: 'employee_id'
         }
       )
-      .select('employee_id, username, password_updated_at')
+      .select('employee_id, password_updated_at')
       .single();
 
     if (error || !data) {
@@ -101,7 +98,6 @@ export async function updateEmployeeLoginCredentials(
         oldValue: existing ?? null,
         newValue: {
           employee_id: data.employee_id,
-          username: data.username,
           password_updated_at: data.password_updated_at
         },
         userId: 'open_access'
@@ -111,8 +107,7 @@ export async function updateEmployeeLoginCredentials(
 
     logInfo('employee_login_credentials_updated', {
       correlationId,
-      employeeId: parsed.data.employee_id,
-      username: parsed.data.username
+      employeeId: parsed.data.employee_id
     });
 
     return successResult(data as EmployeeLoginProfile, correlationId);
@@ -141,8 +136,8 @@ export async function getEmployeeLoginProfiles(): Promise<Result<EmployeeLoginPr
     const supabase = createServerClient();
     const { data, error } = await supabase
       .from('hr_employee_login_credentials')
-      .select('employee_id, username, password_updated_at')
-      .order('username', { ascending: true });
+      .select('employee_id, password_updated_at')
+      .order('employee_id', { ascending: true });
 
     if (error) {
       return errorResult(correlationId, 'DB_ERROR', error.message);

@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { CatalogUpsertInput } from '@/lib/inventory/types';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { softDeleteCatalogItem, upsertCatalogItem } from '@/lib/server/inventory';
 import { createServerClient } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
   try {
+    const allowed = await ensureServerPermission('inventory.catalog.edit');
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const supabase = createServerClient();
     const body = (await request.json()) as {
       action?: 'upsert' | 'remove';

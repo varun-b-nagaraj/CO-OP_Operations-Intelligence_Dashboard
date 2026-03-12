@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { createInventorySession, upsertParticipant } from '@/lib/server/inventory';
+import { ensureServerPermission } from '@/lib/server/permissions';
 import { createServerClient } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
   try {
+    const allowed = await ensureServerPermission('inventory.sessions.edit');
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const body = (await request.json()) as {
       session_name?: string;
       host_id?: string;

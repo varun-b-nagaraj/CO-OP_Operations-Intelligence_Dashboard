@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getServerAuthContext } from '@/lib/server/auth';
+
 export type BackendDepartment = 'hr' | 'marketing' | 'product' | 'inventory' | 'shared';
 
 type RouteContext = { params: Promise<{ supabasePath: string[] }> };
@@ -36,6 +38,11 @@ async function proxySupabaseRequest(
   department: BackendDepartment
 ) {
   try {
+    const auth = await getServerAuthContext();
+    if (!auth) {
+      return NextResponse.json({ ok: false, error: 'Unauthorized', department }, { status: 401 });
+    }
+
     const targetUrl = buildTargetUrl(request, params.supabasePath);
     const requestHeaders = new Headers(request.headers);
     requestHeaders.delete('host');
