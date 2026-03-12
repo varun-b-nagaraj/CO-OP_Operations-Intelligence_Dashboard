@@ -46,7 +46,8 @@ export async function getStudentBySNumber(
   if (!raw) return null;
 
   const withoutPrefix = raw.replace(/^s/i, '');
-  const candidates = Array.from(
+  const numericCandidate = /^\d+$/.test(withoutPrefix) ? withoutPrefix : '';
+  const textCandidates = Array.from(
     new Set(
       [
         raw,
@@ -58,20 +59,41 @@ export async function getStudentBySNumber(
       ].filter(Boolean)
     )
   );
+  const orderedCandidates = Array.from(
+    new Set([numericCandidate, ...textCandidates].filter(Boolean))
+  );
 
-  const orFilters = candidates.flatMap((value) => [
-    `s_number.eq.${value}`,
-    `student_number.eq.${value}`,
-    `snumber.eq.${value}`
-  ]);
+  for (const column of ['s_number', 'student_number', 'snumber']) {
+    for (const candidate of orderedCandidates) {
+      const { data, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq(column, candidate)
+        .limit(1)
+        .maybeSingle();
 
-  const { data, error } = await supabase
-    .from('students')
-    .select('*')
-    .or(orFilters.join(','))
-    .limit(1)
-    .maybeSingle();
+      if (data) {
+        return normalizeStudentRow(data as Record<string, unknown>);
+      }
 
-  if (error || !data) return null;
-  return normalizeStudentRow(data as Record<string, unknown>);
+      if (!error) {
+        continue;
+      }
+
+      const message = String(error.message ?? '').toLowerCase();
+      if (
+        message.includes('does not exist') ||
+        message.includes('column') ||
+        message.includes('schema cache')
+      ) {
+        break;
+      }
+
+      if (message.includes('invalid input syntax')) {
+        continue;
+      }
+    }
+  }
+
+  return null;
 }
