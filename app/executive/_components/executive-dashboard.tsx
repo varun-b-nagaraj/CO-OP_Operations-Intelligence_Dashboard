@@ -455,6 +455,7 @@ export function ExecutiveDashboard() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const currentRequestControllerRef = useRef<AbortController | null>(null);
+  const draftSessionIdRef = useRef<string | null>(null);
 
   const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
@@ -525,12 +526,35 @@ export function ExecutiveDashboard() {
       }
 
       const nextSessions = payload.sessions ?? [];
+      const draftSessionId = draftSessionIdRef.current;
+      const shouldPreserveDraft =
+        !preferredSessionId &&
+        Boolean(draftSessionId) &&
+        activeSessionId === draftSessionId &&
+        !nextSessions.some((session) => session.sessionId === draftSessionId);
+
+      if (shouldPreserveDraft && draftSessionId) {
+        setSessions((current) => {
+          const draftSession = current.find((session) => session.sessionId === draftSessionId) ?? {
+            sessionId: draftSessionId,
+            updatedAt: new Date().toISOString(),
+            lastMessagePreview: 'New conversation',
+            messageCount: 0
+          };
+          return [draftSession, ...nextSessions];
+        });
+        return;
+      }
+
       setSessions(nextSessions);
 
       const preferred =
         preferredSessionId && nextSessions.some((session) => session.sessionId === preferredSessionId)
           ? preferredSessionId
           : '';
+      if (preferred) {
+        draftSessionIdRef.current = null;
+      }
       const keepCurrent =
         !preferred &&
         activeSessionId &&
@@ -642,6 +666,7 @@ export function ExecutiveDashboard() {
   const startNewConversation = () => {
     const newSessionId = createSessionId();
     shouldStickToBottomRef.current = true;
+    draftSessionIdRef.current = newSessionId;
     setActiveSessionId(newSessionId);
     setMessages([]);
     setInput('');
@@ -659,6 +684,7 @@ export function ExecutiveDashboard() {
   const openSession = async (sessionId: string) => {
     if (!userKey) return;
     shouldStickToBottomRef.current = true;
+    draftSessionIdRef.current = null;
     setActiveSessionId(sessionId);
     await loadMessagesForSession(userKey, sessionId);
   };
@@ -859,6 +885,7 @@ export function ExecutiveDashboard() {
       );
 
       setActiveSessionId(finalSessionId);
+      draftSessionIdRef.current = null;
       await loadSessions(userKey, finalSessionId);
       void loadOverview();
     } catch (error) {
