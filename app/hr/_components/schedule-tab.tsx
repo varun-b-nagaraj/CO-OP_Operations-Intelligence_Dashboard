@@ -224,12 +224,6 @@ function resolvePeriodForDay(periods: number[], dayType: string | undefined): nu
   return periods[0] ?? 0;
 }
 
-function pairedPeriod(period: number): number | null {
-  if (period >= 1 && period <= 4) return period + 4;
-  if (period >= 5 && period <= 8) return period - 4;
-  return null;
-}
-
 function buildManualShiftSlotKey(
   date: string,
   period: number,
@@ -992,23 +986,16 @@ export function ScheduleTab(props: ScheduleTabProps = {}) {
       const rosterMeta = rosterMetaBySNumber.get(employeeSNumber);
       if (!rosterMeta || !rosterMeta.scheduleable) return false;
       if (period === 0) return true;
-      const partnerPeriod = pairedPeriod(period);
       const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
-      return (
-        rosterMeta.classPeriod === period ||
-        (partnerPeriod !== null && rosterMeta.classPeriod === partnerPeriod) ||
-        offPeriods.includes(period) ||
-        (partnerPeriod !== null && offPeriods.includes(partnerPeriod))
-      );
+      return rosterMeta.classPeriod === period || offPeriods.includes(period);
     },
     [rosterMetaBySNumber, settingsMap]
   );
 
   const isEmployeeOffPeriod = useCallback(
     (employeeSNumber: string, period: number): boolean => {
-      const partnerPeriod = pairedPeriod(period);
       const offPeriods = settingsMap.get(employeeSNumber) ?? [4, 8];
-      return offPeriods.includes(period) || (partnerPeriod !== null && offPeriods.includes(partnerPeriod));
+      return offPeriods.includes(period);
     },
     [settingsMap]
   );
