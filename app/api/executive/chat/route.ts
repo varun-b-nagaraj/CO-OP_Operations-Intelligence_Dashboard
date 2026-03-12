@@ -63,10 +63,27 @@ function buildScheduleAssistantReply(message: string, overview: ExecutiveOvervie
   }
 
   const uniqueWorkers = Array.from(new Map(schedule.workers.map((worker) => [worker.sNumber, worker])).values());
+  const alternateWorkers = Array.from(
+    new Map(
+      schedule.workers.filter((worker) => worker.isAlternate).map((worker) => [worker.sNumber, worker])
+    ).values()
+  );
   const workerList = uniqueWorkers
     .slice(0, 40)
     .map((worker) => `${worker.name} (P${worker.period})`)
     .join(', ');
+  const alternateList = alternateWorkers
+    .slice(0, 20)
+    .map((worker) => `${worker.name} (P${worker.period})`)
+    .join(', ');
+
+  const asksAlternate = /\balternate\b|\balt\b/.test(message.toLowerCase());
+  if (asksAlternate) {
+    if (!alternateWorkers.length) {
+      return `No alternate workers are flagged in the schedule rows for ${schedule.date}.`;
+    }
+    return `Alternates on ${schedule.date}: ${alternateList}. Total alternates: ${alternateWorkers.length}.`;
+  }
 
   const asksWho = /\bwho\b/.test(message.toLowerCase());
   if (asksWho) {

@@ -115,6 +115,7 @@ export interface ExecutiveOverviewData {
       period: number;
       shiftSlotKey: string;
       source: string;
+      isAlternate: boolean;
     }>;
   };
 }
@@ -325,6 +326,12 @@ function formatEmployeeName(
   studentBySNumber: Map<string, string>
 ): string {
   return studentBySNumber.get(sNumber) ?? sNumber;
+}
+
+function isAlternateShiftSlotKey(shiftSlotKey: string): boolean {
+  if (!shiftSlotKey) return false;
+  const normalized = shiftSlotKey.toLowerCase();
+  return normalized.startsWith('manual_alt|') || /\balternate\b/.test(normalized) || /\balt\b/.test(normalized);
 }
 
 function readStringValue(row: Record<string, unknown>, keys: string[]): string {
@@ -684,6 +691,10 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       period: Number(row.shift_period ?? 0),
       shiftSlotKey: String(row.shift_slot_key ?? ''),
       source: String(row.source ?? 'scheduler')
+    }))
+    .map((row) => ({
+      ...row,
+      isAlternate: isAlternateShiftSlotKey(row.shiftSlotKey)
     }))
     .filter((row) => row.sNumber && row.period > 0)
     .sort((left, right) => {
