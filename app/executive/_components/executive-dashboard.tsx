@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
 import { AccessControlTab } from '@/app/executive/_components/access-control-tab';
@@ -99,6 +99,7 @@ interface ConversationSession {
 }
 
 const USER_KEY_STORAGE = 'executive_agent_user_key_v1';
+const CHAT_STICKY_THRESHOLD_PX = 48;
 
 const EXECUTIVE_TABS: Array<{
   id: ExecutiveTabId;
@@ -450,6 +451,10 @@ export function ExecutiveDashboard() {
   const [sending, setSending] = useState(false);
   const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<string[]>([]);
   const [breadcrumbIndex, setBreadcrumbIndex] = useState(0);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
 
   const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
@@ -546,6 +551,20 @@ export function ExecutiveDashboard() {
     }
   }, [activeSessionId, loadMessagesForSession]);
 
+  const scrollChatToBottom = useCallback((force = false) => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    if (!force && !shouldStickToBottomRef.current) return;
+    container.scrollTop = container.scrollHeight;
+  }, []);
+
+  const handleChatScroll = useCallback(() => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom <= CHAT_STICKY_THRESHOLD_PX;
+  }, []);
+
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
@@ -606,8 +625,23 @@ export function ExecutiveDashboard() {
     }
   }, [activeTab, departmentTabAccess, firstAllowedTab]);
 
+  useEffect(() => {
+    window.requestAnimationFrame(() => {
+      scrollChatToBottom();
+    });
+  }, [messages, scrollChatToBottom]);
+
+  useEffect(() => {
+    if (loadingMessages) return;
+    shouldStickToBottomRef.current = true;
+    window.requestAnimationFrame(() => {
+      scrollChatToBottom(true);
+    });
+  }, [loadingMessages, scrollChatToBottom]);
+
   const startNewConversation = () => {
     const newSessionId = createSessionId();
+    shouldStickToBottomRef.current = true;
     setActiveSessionId(newSessionId);
     setMessages([]);
     setInput('');
@@ -624,8 +658,72 @@ export function ExecutiveDashboard() {
 
   const openSession = async (sessionId: string) => {
     if (!userKey) return;
+    shouldStickToBottomRef.current = true;
     setActiveSessionId(sessionId);
     await loadMessagesForSession(userKey, sessionId);
+  };
+
+  const deleteSession = async (sessionId: string) => {
+    if (!userKey || deletingSessionId || sending) return;
+    setDeletingSessionId(sessionId);
+    try {
+      const params = new URLSearchParams({ userKey, sessionId });
+      const response = await fetch(`/api/executive/history/sessions?${params.toString()}`, {
+        method: 'DELETE'
+      });
+      const payload = (await response.json()) as { ok: boolean; error?: string };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? 'Failed to delete conversation.');
+      }
+
+      if (activeSessionId === sessionId) {
+        setActiveSessionId('');
+        setMessages([]);
+      }
+      await loadSessions(userKey);
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `delete-session-error-${Date.now()}`,
+          role: 'assistant',
+          content: error instanceof Error ? error.message : 'Failed to delete conversation.',
+          pending: false
+        }
+      ]);
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
+
+  const deleteMessage = async (messageId: string) => {
+    if (!userKey || deletingMessageId || !activeSessionId || sending) return;
+    setDeletingMessageId(messageId);
+    try {
+      const params = new URLSearchParams({ userKey, messageId });
+      const response = await fetch(`/api/executive/history/messages?${params.toString()}`, {
+        method: 'DELETE'
+      });
+      const payload = (await response.json()) as { ok: boolean; error?: string };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? 'Failed to delete message.');
+      }
+
+      setMessages((current) => current.filter((message) => message.id !== messageId));
+      await loadSessions(userKey, activeSessionId);
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `delete-message-error-${Date.now()}`,
+          role: 'assistant',
+          content: error instanceof Error ? error.message : 'Failed to delete message.',
+          pending: false
+        }
+      ]);
+    } finally {
+      setDeletingMessageId(null);
+    }
   };
 
   const sendPrompt = async (promptText: string) => {
@@ -651,6 +749,7 @@ export function ExecutiveDashboard() {
       pending: true
     };
     const snapshot = [...messages];
+    shouldStickToBottomRef.current = true;
     setMessages([...snapshot, userMessage, pendingAssistant]);
     setInput('');
     setSending(true);
@@ -851,21 +950,35 @@ export function ExecutiveDashboard() {
                   {sessions.map((session) => {
                     const isActive = session.sessionId === activeSessionId;
                     return (
-                      <button
-                        key={session.sessionId}
-                        className={`w-full border p-2 text-left ${
-                          isActive ? 'border-brand-maroon bg-[#fff5f5]' : 'border-neutral-300 bg-white hover:bg-neutral-100'
+                      <article
+                        className={`w-full border p-2 ${
+                          isActive ? 'border-brand-maroon bg-[#fff5f5]' : 'border-neutral-300 bg-white'
                         }`}
-                        onClick={() => void openSession(session.sessionId)}
-                        type="button"
+                        key={session.sessionId}
                       >
-                        <p className="truncate text-xs font-medium text-neutral-900">
-                          {session.lastMessagePreview || 'Conversation'}
-                        </p>
-                        <p className="mt-1 text-[11px] text-neutral-500">
-                          {formatSessionTimestamp(session.updatedAt)} | {session.messageCount}
-                        </p>
-                      </button>
+                        <button
+                          className={`w-full text-left ${!isActive ? 'hover:bg-neutral-100' : ''}`}
+                          onClick={() => void openSession(session.sessionId)}
+                          type="button"
+                        >
+                          <p className="truncate text-xs font-medium text-neutral-900">
+                            {session.lastMessagePreview || 'Conversation'}
+                          </p>
+                          <p className="mt-1 text-[11px] text-neutral-500">
+                            {formatSessionTimestamp(session.updatedAt)} | {session.messageCount}
+                          </p>
+                        </button>
+                        <div className="mt-2 flex justify-end">
+                          <button
+                            className="min-h-[26px] border border-neutral-300 bg-white px-2 text-[11px] text-neutral-700 hover:bg-neutral-100 disabled:opacity-60"
+                            disabled={Boolean(deletingSessionId) || sending}
+                            onClick={() => void deleteSession(session.sessionId)}
+                            type="button"
+                          >
+                            {deletingSessionId === session.sessionId ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </div>
+                      </article>
                     );
                   })}
                 </div>
@@ -892,7 +1005,7 @@ export function ExecutiveDashboard() {
                   </button>
                 ) : null}
               </div>
-              <div className="flex-1 overflow-y-auto px-4 py-2">
+              <div className="flex-1 overflow-y-auto px-4 py-2" onScroll={handleChatScroll} ref={chatScrollRef}>
                 <div className="mx-auto w-full max-w-5xl space-y-6">
                   {!loadingMessages && messages.length === 0 ? (
                     <section className="space-y-4 py-16 text-center">
@@ -918,30 +1031,53 @@ export function ExecutiveDashboard() {
 
                   {loadingMessages ? <p className="text-sm text-neutral-600">Loading conversation...</p> : null}
 
-                  {messages.map((message) => (
-                    <article
-                      key={message.id}
-                      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div
-                        className={`max-w-[84%] rounded-2xl px-4 py-3 text-[15px] leading-6 shadow-sm ${
-                          message.role === 'user'
-                            ? 'bg-neutral-900 text-white'
-                            : 'border border-neutral-200 bg-white text-neutral-900'
-                        }`}
+                  {messages.map((message) => {
+                    const isPersistedMessage =
+                      !message.id.startsWith('user-') &&
+                      !message.id.startsWith('assistant-pending-') &&
+                      !message.id.startsWith('history-error-') &&
+                      !message.id.startsWith('delete-session-error-') &&
+                      !message.id.startsWith('delete-message-error-');
+                    const canDeleteMessage = isPersistedMessage && !message.pending && !deletingMessageId && !sending;
+
+                    return (
+                      <article
+                        key={message.id}
+                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
-                        {message.pending ? (
-                          <div className="flex items-center gap-1.5 text-sm text-neutral-500">
-                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
-                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:120ms]" />
-                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:240ms]" />
+                        <div
+                          className={`max-w-[84%] rounded-2xl px-4 py-3 text-[15px] leading-6 shadow-sm ${
+                            message.role === 'user'
+                              ? 'bg-neutral-900 text-white'
+                              : 'border border-neutral-200 bg-white text-neutral-900'
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            {message.content ? <div className="space-y-1">{renderMessageContent(message.content)}</div> : null}
+                            {message.pending ? (
+                              <div className="mt-1 flex items-center gap-1.5 text-sm text-neutral-500">
+                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
+                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:120ms]" />
+                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:240ms]" />
+                              </div>
+                            ) : null}
                           </div>
-                        ) : (
-                          <div className="space-y-1">{renderMessageContent(message.content)}</div>
-                        )}
-                      </div>
-                    </article>
-                  ))}
+                          {canDeleteMessage || deletingMessageId === message.id ? (
+                            <div className="mt-2 flex justify-end">
+                              <button
+                                className="min-h-[26px] border border-neutral-300 bg-white px-2 text-[11px] text-neutral-700 hover:bg-neutral-100 disabled:opacity-60"
+                                disabled={!canDeleteMessage && deletingMessageId !== message.id}
+                                onClick={() => void deleteMessage(message.id)}
+                                type="button"
+                              >
+                                {deletingMessageId === message.id ? 'Deleting...' : 'Delete'}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               </div>
 

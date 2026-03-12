@@ -208,6 +208,42 @@ export async function listRecentConversationContext(params: {
   return rows.map((row) => ({ role: row.role, content: row.content }));
 }
 
+export async function deleteConversationSession(params: {
+  userKey: string;
+  sessionId: string;
+}): Promise<void> {
+  const supabase = createServerClient();
+  const userKey = normalizeUserKey(params.userKey);
+
+  const { error } = await supabase
+    .from('executive_agent_messages')
+    .delete()
+    .eq('user_key', userKey)
+    .eq('session_id', params.sessionId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function deleteConversationMessage(params: {
+  userKey: string;
+  messageId: string;
+}): Promise<void> {
+  const supabase = createServerClient();
+  const userKey = normalizeUserKey(params.userKey);
+
+  const { error } = await supabase
+    .from('executive_agent_messages')
+    .delete()
+    .eq('user_key', userKey)
+    .eq('id', params.messageId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 export async function getLatestAssistantMessageState(params: {
   userKey: string;
   sessionId: string;
