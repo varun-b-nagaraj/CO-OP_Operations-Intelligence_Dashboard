@@ -455,6 +455,7 @@ export function ExecutiveDashboard() {
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
+  const currentRequestControllerRef = useRef<AbortController | null>(null);
 
   const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
@@ -726,6 +727,10 @@ export function ExecutiveDashboard() {
     }
   };
 
+  const cancelCurrentRequest = useCallback(() => {
+    currentRequestControllerRef.current?.abort();
+  }, []);
+
   const sendPrompt = async (promptText: string) => {
     const trimmed = promptText.trim();
     if (!trimmed || sending || !userKey) return;
@@ -757,11 +762,16 @@ export function ExecutiveDashboard() {
     const planned = planExecutiveTools(trimmed).map((tool) => tool.runningText);
     setActiveBreadcrumbs(planned);
     setBreadcrumbIndex(0);
+    let assistantText = '';
+    let finalSessionId = workingSessionId;
+    const controller = new AbortController();
+    currentRequestControllerRef.current = controller;
 
     try {
       const response = await fetch('/api/executive/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           message: trimmed,
           conversation: toConversation(snapshot),
@@ -783,8 +793,6 @@ export function ExecutiveDashboard() {
         throw new Error(message);
       }
 
-      let assistantText = '';
-      let finalSessionId = workingSessionId;
       if (contentType.includes('text/event-stream')) {
         const reader = response.body?.getReader();
         if (!reader) {
@@ -885,6 +893,20 @@ export function ExecutiveDashboard() {
       await loadSessions(userKey, finalSessionId);
       void loadOverview();
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === pendingAssistantId
+              ? {
+                  ...message,
+                  pending: false,
+                  content: assistantText.trim() ? `${assistantText}\n\n[Stopped]` : 'Stopped.'
+                }
+              : message
+          )
+        );
+        return;
+      }
       const fallback =
         error instanceof Error ? error.message : 'Unable to complete chat request right now.';
       setMessages((current) =>
@@ -902,6 +924,7 @@ export function ExecutiveDashboard() {
       setSending(false);
       setActiveBreadcrumbs([]);
       setBreadcrumbIndex(0);
+      currentRequestControllerRef.current = null;
     }
   };
 
@@ -1093,6 +1116,10 @@ export function ExecutiveDashboard() {
                   <form
                     onSubmit={(event) => {
                       event.preventDefault();
+                      if (sending) {
+                        cancelCurrentRequest();
+                        return;
+                      }
                       void sendPrompt(input);
                     }}
                   >
@@ -1103,6 +1130,10 @@ export function ExecutiveDashboard() {
                         onKeyDown={(event) => {
                           if (event.key === 'Enter' && !event.shiftKey) {
                             event.preventDefault();
+                            if (sending) {
+                              cancelCurrentRequest();
+                              return;
+                            }
                             void sendPrompt(input);
                           }
                         }}
@@ -1113,10 +1144,10 @@ export function ExecutiveDashboard() {
                         <p className="text-[11px] text-neutral-500">Enter to send, Shift+Enter for new line</p>
                         <button
                           className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-4 text-xs font-medium text-white hover:bg-[#6a0000] disabled:opacity-60"
-                          disabled={sending || !input.trim() || loadingMessages}
+                          disabled={loadingMessages || (!sending && !input.trim())}
                           type="submit"
                         >
-                          {sending ? 'Working...' : 'Send'}
+                          {sending ? 'Stop' : 'Send'}
                         </button>
                       </div>
                     </div>
