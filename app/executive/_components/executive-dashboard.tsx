@@ -414,6 +414,7 @@ export function ExecutiveDashboard() {
       EXECUTIVE_TABS.filter((tab) => departmentTabAccess[tab.id]),
     [departmentTabAccess]
   );
+  const firstAllowedTab: ExecutiveTabId = navTabs[0]?.id ?? 'ai-agent';
   const activeLabel = useMemo(
     () => navTabs.find((tab) => tab.id === activeTab)?.label ?? 'Executive Dashboard',
     [activeTab, navTabs]
@@ -587,9 +588,9 @@ export function ExecutiveDashboard() {
 
   useEffect(() => {
     if (!departmentTabAccess[activeTab]) {
-      setActiveTab('overview');
+      setActiveTab(firstAllowedTab);
     }
-  }, [activeTab, departmentTabAccess]);
+  }, [activeTab, departmentTabAccess, firstAllowedTab]);
 
   const startNewConversation = () => {
     const newSessionId = createSessionId();

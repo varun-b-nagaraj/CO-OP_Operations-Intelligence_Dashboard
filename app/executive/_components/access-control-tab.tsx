@@ -2,11 +2,15 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 
+import {
+  AccessMode,
+  DepartmentKey,
+  DEPARTMENT_OPTIONS,
+  FEATURE_CAPABILITIES
+} from '@/lib/access/feature-capabilities';
 import { useCurrentUser, usePermission } from '@/lib/permissions';
 
 type EditorMode = 'employees' | 'roles';
-type DepartmentKey = 'executive' | 'hr' | 'cfa' | 'finance' | 'marketing' | 'product' | 'inventory' | 'employee';
-type AccessMode = 'none' | 'view' | 'edit';
 
 type RoleRow = {
   id: string;
@@ -27,6 +31,7 @@ type EmployeeRow = {
   role_name: string | null;
   permissions: string[];
   overrides: Array<{ permission_key: string; effect: 'allow' | 'deny' }>;
+  feature_modes?: Record<string, AccessMode>;
 };
 
 type FeaturePermission = {
@@ -37,63 +42,14 @@ type FeaturePermission = {
   editPermission?: string;
 };
 
-const DEPARTMENTS: Array<{ key: DepartmentKey; label: string }> = [
-  { key: 'executive', label: 'Executive' },
-  { key: 'hr', label: 'HR' },
-  { key: 'cfa', label: 'CFA' },
-  { key: 'finance', label: 'Finance' },
-  { key: 'marketing', label: 'Marketing' },
-  { key: 'product', label: 'Product' },
-  { key: 'inventory', label: 'Inventory' },
-  { key: 'employee', label: 'Employee' }
-];
-
-const FEATURE_CATALOG: FeaturePermission[] = [
-  { id: 'executive_ai_agent', department: 'executive', label: 'AI Agent', viewPermission: 'executive.ai_agent.view', editPermission: 'executive.ai_agent.edit' },
-  { id: 'executive_overview', department: 'executive', label: 'Overview', viewPermission: 'executive.overview.view' },
-  { id: 'executive_feed', department: 'executive', label: 'Department Feed', viewPermission: 'executive.department_feed.view' },
-  { id: 'executive_alerts', department: 'executive', label: 'Alerts', viewPermission: 'executive.alerts.view' },
-  { id: 'executive_metrics', department: 'executive', label: 'Metrics', viewPermission: 'executive.metrics.view' },
-  { id: 'executive_reports', department: 'executive', label: 'Reports', viewPermission: 'executive.reports.view' },
-  { id: 'executive_calendar', department: 'executive', label: 'Calendar', viewPermission: 'executive.calendar.view' },
-  { id: 'executive_access', department: 'executive', label: 'Access Control', viewPermission: 'executive.access_control.view', editPermission: 'executive.access_control.edit' },
-  { id: 'hr_schedule', department: 'hr', label: 'Schedule', viewPermission: 'hr.schedule.view', editPermission: 'hr.schedule.edit' },
-  { id: 'hr_attendance', department: 'hr', label: 'Attendance', viewPermission: 'hr.attendance.view', editPermission: 'hr.attendance.override' },
-  { id: 'hr_requests', department: 'hr', label: 'Requests', viewPermission: 'hr.requests.view', editPermission: 'hr.requests.edit' },
-  { id: 'hr_settings', department: 'hr', label: 'Settings', editPermission: 'hr.settings.edit' },
-  { id: 'hr_strikes', department: 'hr', label: 'Strikes', editPermission: 'hr.strikes.manage' },
-  { id: 'hr_calendar', department: 'hr', label: 'Calendar', viewPermission: 'hr.calendar.view' },
-  { id: 'cfa_logs', department: 'cfa', label: 'Logs', viewPermission: 'cfa.logs.read', editPermission: 'cfa.logs.write' },
-  { id: 'cfa_menu', department: 'cfa', label: 'Menu', editPermission: 'cfa.menu.manage' },
-  { id: 'cfa_day_type', department: 'cfa', label: 'Day Type Override', editPermission: 'cfa.day_type.override' },
-  { id: 'cfa_exports', department: 'cfa', label: 'Exports', editPermission: 'cfa.exports' },
-  { id: 'finance_upload', department: 'finance', label: 'Upload', viewPermission: 'finance.upload.view', editPermission: 'finance.upload.edit' },
-  { id: 'finance_reports', department: 'finance', label: 'Reports', viewPermission: 'finance.reports.view', editPermission: 'finance.reports.edit' },
-  { id: 'finance_calendar', department: 'finance', label: 'Calendar', viewPermission: 'finance.calendar.view' },
-  { id: 'marketing_events', department: 'marketing', label: 'Events', viewPermission: 'marketing.events.view', editPermission: 'marketing.events.edit' },
-  { id: 'marketing_contacts', department: 'marketing', label: 'Contacts', viewPermission: 'marketing.contacts.view', editPermission: 'marketing.contacts.edit' },
-  { id: 'marketing_coordinators', department: 'marketing', label: 'Coordinators', viewPermission: 'marketing.coordinators.view', editPermission: 'marketing.coordinators.edit' },
-  { id: 'marketing_reports', department: 'marketing', label: 'Reports', viewPermission: 'marketing.reports.view', editPermission: 'marketing.reports.edit' },
-  { id: 'marketing_settings', department: 'marketing', label: 'Settings', viewPermission: 'marketing.settings.view', editPermission: 'marketing.settings.edit' },
-  { id: 'marketing_calendar', department: 'marketing', label: 'Calendars', viewPermission: 'marketing.calendar.view', editPermission: 'marketing.shared_calendar.view' },
-  { id: 'product_orders', department: 'product', label: 'Orders', viewPermission: 'product.orders.view', editPermission: 'product.orders.edit' },
-  { id: 'product_prompts', department: 'product', label: 'Prompts', viewPermission: 'product.prompts.view', editPermission: 'product.prompts.edit' },
-  { id: 'product_products', department: 'product', label: 'Products', viewPermission: 'product.products.view', editPermission: 'product.products.edit' },
-  { id: 'product_vendors', department: 'product', label: 'Vendors', viewPermission: 'product.vendors.view', editPermission: 'product.vendors.edit' },
-  { id: 'product_designs', department: 'product', label: 'Designs', viewPermission: 'product.designs.view', editPermission: 'product.designs.edit' },
-  { id: 'product_wishlist', department: 'product', label: 'Wishlist', viewPermission: 'product.wishlist.view', editPermission: 'product.wishlist.edit' },
-  { id: 'product_settings', department: 'product', label: 'Settings', viewPermission: 'product.settings.view', editPermission: 'product.settings.edit' },
-  { id: 'product_calendar', department: 'product', label: 'Calendar', viewPermission: 'product.calendar.view' },
-  { id: 'inventory_catalog', department: 'inventory', label: 'Catalog', viewPermission: 'inventory.catalog.view', editPermission: 'inventory.catalog.edit' },
-  { id: 'inventory_sessions', department: 'inventory', label: 'Sessions', viewPermission: 'inventory.sessions.view', editPermission: 'inventory.sessions.edit' },
-  { id: 'inventory_count', department: 'inventory', label: 'Count View', viewPermission: 'inventory.count_view.view', editPermission: 'inventory.count_view.edit' },
-  { id: 'inventory_finalize', department: 'inventory', label: 'Finalize & Upload', viewPermission: 'inventory.finalize_upload.view', editPermission: 'inventory.finalize_upload.edit' },
-  { id: 'inventory_calendar', department: 'inventory', label: 'Calendar', viewPermission: 'inventory.calendar.view' },
-  { id: 'employee_calendar', department: 'employee', label: 'Calendar', viewPermission: 'employee.calendar.view' },
-  { id: 'employee_schedule', department: 'employee', label: 'Schedule', viewPermission: 'employee.schedule.view' },
-  { id: 'employee_accountability', department: 'employee', label: 'Accountability', viewPermission: 'employee.accountability.view' },
-  { id: 'employee_requests', department: 'employee', label: 'Requests', viewPermission: 'employee.requests.view', editPermission: 'employee.requests.edit' }
-];
+const DEPARTMENTS = DEPARTMENT_OPTIONS;
+const FEATURE_CATALOG: FeaturePermission[] = FEATURE_CAPABILITIES.map((capability) => ({
+  id: capability.featureKey,
+  department: capability.department,
+  label: capability.label,
+  viewPermission: capability.viewPermission,
+  editPermission: capability.editPermission
+}));
 
 function modeFromPermissions(feature: FeaturePermission, permissions: string[]): AccessMode {
   const hasView = feature.viewPermission ? permissions.includes(feature.viewPermission) : false;
@@ -112,6 +68,16 @@ function featureModesFromPermissions(permissions: string[]): Record<string, Acce
 }
 
 function featureModesFromEmployeeRecord(employee: EmployeeRow): Record<string, AccessMode> {
+  if (employee.feature_modes && Object.keys(employee.feature_modes).length > 0) {
+    const fromServer: Record<string, AccessMode> = {};
+    for (const feature of FEATURE_CATALOG) {
+      const candidate = employee.feature_modes[feature.id];
+      fromServer[feature.id] =
+        candidate === 'view' || candidate === 'edit' || candidate === 'none' ? candidate : 'none';
+    }
+    return fromServer;
+  }
+
   const fallback = featureModesFromPermissions(employee.permissions);
   if (!Array.isArray(employee.overrides) || employee.overrides.length === 0) {
     return fallback;

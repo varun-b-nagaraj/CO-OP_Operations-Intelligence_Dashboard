@@ -1,5 +1,6 @@
 import { createServerClient } from '@/lib/supabase';
 import { resolveEffectivePermissions } from '@/lib/server/auth';
+import { AccessMode, featureModesFromPermissionsAndOverrides } from '@/lib/access/feature-capabilities';
 
 export interface AccessRoleTemplate {
   id: string;
@@ -22,6 +23,7 @@ export interface EmployeeAccessRecord {
   role_name: string | null;
   permissions: string[];
   overrides: Array<{ permission_key: string; effect: 'allow' | 'deny' }>;
+  feature_modes: Record<string, AccessMode>;
 }
 
 export async function listRoleTemplates(): Promise<AccessRoleTemplate[]> {
@@ -170,7 +172,11 @@ export async function listEmployeeAccess(): Promise<EmployeeAccessRecord[]> {
       role_key: templateMeta?.role_key ?? null,
       role_name: templateMeta?.role_name ?? null,
       permissions: resolved.permissions,
-      overrides: overridesByEmployeeId.get(employeeId) ?? []
+      overrides: overridesByEmployeeId.get(employeeId) ?? [],
+      feature_modes: featureModesFromPermissionsAndOverrides({
+        permissions: resolved.permissions,
+        overrides: overridesByEmployeeId.get(employeeId) ?? []
+      })
     });
   }
 

@@ -53,9 +53,7 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
   const [openAddEmployeeSignal, setOpenAddEmployeeSignal] = useState(0);
   const [panelVisible, setPanelVisible] = useState(false);
 
-  const requestedModule = searchParams.get('module');
-  const resolvedModule: PrimaryModule =
-    props?.forcedModule ?? (requestedModule === 'cfa' ? 'cfa' : 'hr');
+  const resolvedModule: PrimaryModule = props?.forcedModule ?? 'hr';
 
   const requestedTabRaw = searchParams.get('tab');
   const requestedTab =
@@ -67,6 +65,15 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
   const resolvedHRTab = visibleTabs.some((tab) => tab.id === activeHRTab) ? activeHRTab : visibleTabs[0]?.id;
 
   const activeCFATab: CFATabId = isCFATab(requestedTabRaw) ? requestedTabRaw : 'daily-log';
+  const canReadCfaLogs = hasPermission('cfa.logs.read');
+  const canManageCfaMenu = hasPermission('cfa.menu.manage');
+  const cfaVisibleTabs = CFA_TABS.filter((tab) => {
+    if (tab.id === 'menu') return canManageCfaMenu;
+    return canReadCfaLogs;
+  });
+  const resolvedCFATab = cfaVisibleTabs.some((tab) => tab.id === activeCFATab)
+    ? activeCFATab
+    : cfaVisibleTabs[0]?.id;
 
   useEffect(() => {
     try {
@@ -89,6 +96,21 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
     const frame = window.requestAnimationFrame(() => setPanelVisible(true));
     return () => window.cancelAnimationFrame(frame);
   }, [resolvedModule, resolvedHRTab, activeCFATab]);
+
+  useEffect(() => {
+    if (resolvedModule !== 'cfa') return;
+    if (!resolvedCFATab) return;
+    if (requestedTabRaw === resolvedCFATab) return;
+    const nextParams = new URLSearchParams(searchParams.toString());
+    if (!props?.forcedModule) {
+      nextParams.set('module', 'cfa');
+    } else {
+      nextParams.delete('module');
+    }
+    nextParams.set('tab', resolvedCFATab);
+    replaceWithParams(nextParams);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedModule, resolvedCFATab, requestedTabRaw, searchParams, props?.forcedModule]);
 
   const replaceWithParams = (nextParams: URLSearchParams) => {
     const href = `${pathname}?${nextParams.toString()}` as Route;
@@ -113,11 +135,11 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
     replaceWithParams(nextParams);
   };
 
-  const activeNavId = resolvedModule === 'hr' ? (resolvedHRTab ?? 'schedule') : activeCFATab;
+  const activeNavId = resolvedModule === 'hr' ? (resolvedHRTab ?? 'schedule') : (resolvedCFATab ?? 'daily-log');
   const navItems =
     resolvedModule === 'hr'
       ? visibleTabs.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }))
-      : CFA_TABS.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }));
+      : cfaVisibleTabs.map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon }));
   const activeNavLabel = navItems.find((item) => item.id === activeNavId)?.label ?? 'Overview';
   const canEditHRSettings = hasPermission('hr.settings.edit');
   const showHRDateRange = resolvedModule === 'hr' && resolvedHRTab !== 'schedule';
@@ -205,7 +227,13 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
           </section>
         ) : (
           <section id="module-panel-cfa">
-            <CFAModule activeTab={activeCFATab} />
+            {resolvedCFATab ? (
+              <CFAModule activeTab={resolvedCFATab} />
+            ) : (
+              <p className="p-4 text-sm text-neutral-700">
+                You do not have permission to access CFA modules.
+              </p>
+            )}
           </section>
         )}
       </section>

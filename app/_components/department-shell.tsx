@@ -20,6 +20,7 @@ import {
   Handshake,
   HeartHandshake,
   History,
+  Home,
   ListChecks,
   LayoutDashboard,
   LineChart,
@@ -40,6 +41,7 @@ import {
   Users,
   UserCog
 } from 'lucide-react';
+import Link from 'next/link';
 import { ReactNode, useEffect, useState } from 'react';
 
 import { LogoutButton } from '@/app/_components/logout-button';
@@ -250,7 +252,7 @@ export function DepartmentShell({
           </nav>
           <div className="border-t border-neutral-300 p-2">
             <LogoutButton
-              className="ui-click min-h-[40px] w-full border border-neutral-300 bg-white px-3 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+              className="ui-click min-h-[40px] w-full border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-800 hover:bg-neutral-50 flex items-center justify-center"
               label="Log out"
             />
           </div>
@@ -259,7 +261,19 @@ export function DepartmentShell({
         <section className="ui-fade-in min-w-0 w-full flex-1 md:pl-16">
           {contentHeading ? (
             <header className="border-b border-neutral-300 bg-white px-4 py-4 md:px-6">
-              <h2 className="text-lg font-semibold">{contentHeading}</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">{contentHeading}</h2>
+                <div className="flex items-center gap-2">
+                  <Link
+                    aria-label="Home"
+                    className="inline-flex h-9 w-9 items-center justify-center border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-100"
+                    href="/"
+                    title="Home"
+                  >
+                    <Home className="h-4 w-4" />
+                  </Link>
+                </div>
+              </div>
             </header>
           ) : null}
           {children}
