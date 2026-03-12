@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
@@ -19,6 +20,7 @@ type ExecutiveTabId =
   | 'department-marketing'
   | 'department-inventory'
   | 'department-cfa'
+  | 'audit-log'
   | 'access-control';
 
 interface ExecutiveSummaryCard {
@@ -112,6 +114,7 @@ const EXECUTIVE_TABS: Array<{
   { id: 'department-marketing', label: 'Marketing', icon: 'reports' },
   { id: 'department-inventory', label: 'Inventory', icon: 'reports' },
   { id: 'department-cfa', label: 'Chick-fil-A', icon: 'reports' },
+  { id: 'audit-log', label: 'Audit Log', icon: 'reports' },
   { id: 'access-control', label: 'Access Control', icon: 'settings' }
 ];
 
@@ -123,6 +126,15 @@ const DEPARTMENT_TABS: Array<{ id: ExecutiveTabId; department: string }> = [
   { id: 'department-inventory', department: 'Inventory' },
   { id: 'department-cfa', department: 'Chick-fil-A' }
 ];
+
+const DEPARTMENT_IMAGES: Record<string, string> = {
+  HR: '/department-images/hr.svg',
+  Product: '/department-images/product.svg',
+  Finance: '/department-images/finance.svg',
+  Marketing: '/department-images/marketing.svg',
+  Inventory: '/department-images/inventory.svg',
+  'Chick-fil-A': '/department-images/cfa.svg'
+};
 
 const DEPARTMENT_PAGE_LINKS: Record<string, string> = {
   HR: '/hr',
@@ -360,7 +372,7 @@ export function ExecutiveDashboard() {
     () =>
       canViewAccessControl
         ? EXECUTIVE_TABS
-        : EXECUTIVE_TABS.filter((tab) => tab.id !== 'access-control'),
+        : EXECUTIVE_TABS.filter((tab) => tab.id !== 'access-control' && tab.id !== 'audit-log'),
     [canViewAccessControl]
   );
   const activeLabel = useMemo(
@@ -521,7 +533,7 @@ export function ExecutiveDashboard() {
   }, [sending, activeBreadcrumbs]);
 
   useEffect(() => {
-    if (!canViewAccessControl && activeTab === 'access-control') {
+    if (!canViewAccessControl && (activeTab === 'access-control' || activeTab === 'audit-log')) {
       setActiveTab('overview');
     }
   }, [activeTab, canViewAccessControl]);
@@ -867,6 +879,15 @@ export function ExecutiveDashboard() {
                   <p className="mt-1 text-xs text-neutral-600">
                     Focused important updates for {selectedDepartment}.
                   </p>
+                  <div className="mt-3 overflow-hidden border border-neutral-200">
+                    <Image
+                      alt={`${selectedDepartment} department visual`}
+                      className="h-auto w-full object-cover"
+                      height={240}
+                      src={DEPARTMENT_IMAGES[selectedDepartment] ?? '/department-images/hr.svg'}
+                      width={960}
+                    />
+                  </div>
                   <div className="mt-2">
                     <ExpandableText
                       limit={420}
@@ -959,10 +980,15 @@ export function ExecutiveDashboard() {
                 </div>
               </div>
             ) : null}
-            <ExecutiveAuditLog />
             <div className="border border-neutral-300 bg-white">
               <AccessControlTab />
             </div>
+          </section>
+        ) : null}
+
+        {activeTab === 'audit-log' && canViewAccessControl ? (
+          <section className="w-full space-y-4 p-4 md:p-6">
+            <ExecutiveAuditLog />
           </section>
         ) : null}
       </section>

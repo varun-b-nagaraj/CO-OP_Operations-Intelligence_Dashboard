@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Chick-fil-A Department</title>
+  <desc id="desc">Restaurant operations themed abstract illustration</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7A0019"/>
+      <stop offset="100%" stop-color="#C1121F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="360" fill="url(#bg)"/>
+  <circle cx="180" cy="180" r="72" fill="#FFFFFF" opacity="0.22"/>
+  <circle cx="280" cy="180" r="72" fill="#FFFFFF" opacity="0.16"/>
+  <circle cx="380" cy="180" r="72" fill="#FFFFFF" opacity="0.12"/>
+  <text x="520" y="210" fill="#FFFFFF" font-family="Verdana, sans-serif" font-size="56" font-weight="700">CHICK-FIL-A</text>
+</svg>
