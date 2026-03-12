@@ -9,6 +9,7 @@ export interface AccessRoleRecordV2 {
   role_key: string;
   role_name: string;
   description: string | null;
+  role_priority: number;
   is_system: boolean;
   is_active: boolean;
   role_permissions: string[];
@@ -49,8 +50,9 @@ export async function listRolesV2(): Promise<AccessRoleRecordV2[]> {
   const [rolesResult, rolePermissionsMap] = await Promise.all([
     supabase
       .from('access_roles')
-      .select('role_key,role_name,description,is_system,is_active,updated_at')
+      .select('role_key,role_name,description,role_priority,is_system,is_active,updated_at')
       .order('is_system', { ascending: false })
+      .order('role_priority', { ascending: false })
       .order('role_name', { ascending: true }),
     loadRolePermissionsMap()
   ]);
@@ -61,6 +63,7 @@ export async function listRolesV2(): Promise<AccessRoleRecordV2[]> {
       role_key: roleKey,
       role_name: String(role.role_name ?? ''),
       description: role.description ? String(role.description) : null,
+      role_priority: Number(role.role_priority ?? 100),
       is_system: Boolean(role.is_system),
       is_active: Boolean(role.is_active),
       role_permissions: rolePermissionsMap.get(roleKey) ?? [],
@@ -73,6 +76,7 @@ export async function createRoleV2(input: {
   role_key: string;
   role_name: string;
   description?: string | null;
+  role_priority?: number;
   role_permissions: string[];
 }): Promise<AccessRoleRecordV2> {
   const supabase = createServerClient();
@@ -83,10 +87,11 @@ export async function createRoleV2(input: {
       role_key: input.role_key,
       role_name: input.role_name,
       description: input.description ?? null,
+      role_priority: Number.isFinite(input.role_priority) ? Math.trunc(input.role_priority ?? 100) : 100,
       is_system: false,
       is_active: true
     })
-    .select('role_key,role_name,description,is_system,is_active,updated_at')
+    .select('role_key,role_name,description,role_priority,is_system,is_active,updated_at')
     .single();
 
   if (roleError || !role) {
@@ -108,6 +113,7 @@ export async function createRoleV2(input: {
     role_key: String(role.role_key ?? ''),
     role_name: String(role.role_name ?? ''),
     description: role.description ? String(role.description) : null,
+    role_priority: Number(role.role_priority ?? 100),
     is_system: Boolean(role.is_system),
     is_active: Boolean(role.is_active),
     role_permissions: permissionRows.map((row) => row.permission_key),
@@ -120,6 +126,7 @@ export async function updateRoleV2(
   input: {
     role_name?: string;
     description?: string | null;
+    role_priority?: number;
     is_active?: boolean;
     role_permissions?: string[];
   }
@@ -129,6 +136,9 @@ export async function updateRoleV2(
   const patch: Record<string, unknown> = {};
   if (typeof input.role_name === 'string') patch.role_name = input.role_name;
   if ('description' in input) patch.description = input.description ?? null;
+  if (typeof input.role_priority === 'number' && Number.isFinite(input.role_priority)) {
+    patch.role_priority = Math.trunc(input.role_priority);
+  }
   if (typeof input.is_active === 'boolean') patch.is_active = input.is_active;
 
   if (Object.keys(patch).length > 0) {
@@ -164,7 +174,7 @@ export async function updateRoleV2(
   const [roles, permissionsMap] = await Promise.all([
     supabase
       .from('access_roles')
-      .select('role_key,role_name,description,is_system,is_active,updated_at')
+      .select('role_key,role_name,description,role_priority,is_system,is_active,updated_at')
       .eq('role_key', roleKey)
       .single(),
     loadRolePermissionsMap()
@@ -178,6 +188,7 @@ export async function updateRoleV2(
     role_key: String(roles.data.role_key ?? ''),
     role_name: String(roles.data.role_name ?? ''),
     description: roles.data.description ? String(roles.data.description) : null,
+    role_priority: Number(roles.data.role_priority ?? 100),
     is_system: Boolean(roles.data.is_system),
     is_active: Boolean(roles.data.is_active),
     role_permissions: permissionsMap.get(roleKey) ?? [],

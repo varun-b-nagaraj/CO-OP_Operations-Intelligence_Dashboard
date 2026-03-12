@@ -25,6 +25,15 @@ function parseDateMs(value: string | null | undefined): number {
   return new Date(value).getTime();
 }
 
+function normalizeCalendarPriority(value: unknown): 'employee' | 'director' | 'executive' {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'executive' || normalized === 'exec') return 'executive';
+  if (normalized === 'director' || normalized === 'department_manager' || normalized === 'all_managers') {
+    return 'director';
+  }
+  return 'employee';
+}
+
 function rowAsInventoryCheck(row: JsonRecord, event?: JsonRecord | null): InventoryCheck {
   return {
     id: String(row.id),
@@ -82,7 +91,7 @@ export async function createInventoryCheck(
     details?: string | null;
     starts_at: string;
     ends_at?: string | null;
-    priority?: 'employee' | 'department_manager' | 'all_managers' | 'exec';
+    priority?: 'employee' | 'director' | 'executive';
     source_department?: string | null;
     location?: string | null;
     notes?: string | null;
@@ -103,7 +112,7 @@ export async function createInventoryCheck(
       entry_type: 'event',
       starts_at: input.starts_at,
       ends_at: input.ends_at ?? null,
-      priority: input.priority ?? 'employee',
+      priority: normalizeCalendarPriority(input.priority),
       source_department: input.source_department ?? 'inventory',
       created_by: input.created_by ?? 'open_access'
     })

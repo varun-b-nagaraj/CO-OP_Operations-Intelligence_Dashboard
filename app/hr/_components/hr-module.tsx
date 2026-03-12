@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
+import { InventoryAttendanceSummary } from '@/app/_components/inventory-attendance-summary';
 import { hasPermission } from '@/lib/permissions';
 import { PermissionFlag } from '@/lib/types';
 
@@ -217,7 +218,10 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
               {resolvedHRTab === 'schedule' && <ScheduleTab />}
               {resolvedHRTab === 'calendar' && <SharedCalendarTab sourceDepartment="hr" />}
               {resolvedHRTab === 'employees' && (
-                <EmployeesTab dateRange={globalDateRange} openAddEmployeeSignal={openAddEmployeeSignal} />
+                <section className="space-y-3 p-3">
+                  <InventoryAttendanceSummary />
+                  <EmployeesTab dateRange={globalDateRange} openAddEmployeeSignal={openAddEmployeeSignal} />
+                </section>
               )}
               {resolvedHRTab === 'meeting-attendance' && <MeetingAttendanceTab dateRange={globalDateRange} />}
               {resolvedHRTab === 'shift-attendance' && <ShiftAttendanceTab dateRange={globalDateRange} />}

@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { createBrowserClient } from '@/lib/supabase';
 
 type CalendarEntryType = 'event' | 'target' | 'reminder';
-type CalendarPriority = 'employee' | 'department_manager' | 'all_managers' | 'exec';
+type CalendarPriority = 'employee' | 'director' | 'executive';
 type CalendarMode = 'calendar' | 'list';
 type ModalMode = 'create' | 'edit';
 
@@ -18,6 +18,7 @@ interface CalendarEventRow {
   ends_at: string | null;
   priority: CalendarPriority;
   source_department: string | null;
+  inventory_signup_enabled: boolean;
 }
 
 interface CalendarEventDraft {
@@ -28,6 +29,7 @@ interface CalendarEventDraft {
   ends_at: string;
   priority: CalendarPriority;
   source_department: string;
+  inventory_signup_enabled: boolean;
 }
 
 interface InventoryCheckEventState {
@@ -39,9 +41,8 @@ interface InventoryCheckEventState {
 
 const PRIORITY_OPTIONS: Array<{ value: CalendarPriority; label: string }> = [
   { value: 'employee', label: 'Employee' },
-  { value: 'department_manager', label: 'Department Director/Manager' },
-  { value: 'all_managers', label: 'All Director/Manager' },
-  { value: 'exec', label: 'Exec' }
+  { value: 'director', label: 'Director' },
+  { value: 'executive', label: 'Executive' }
 ];
 
 const ENTRY_TYPE_OPTIONS: Array<{ value: CalendarEntryType; label: string }> = [
@@ -60,9 +61,8 @@ const ENTRY_TYPE_PILL_CLASS: Record<CalendarEntryType, string> = {
 
 const PRIORITY_PILL_CLASS: Record<CalendarPriority, string> = {
   employee: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  department_manager: 'border-amber-200 bg-amber-50 text-amber-700',
-  all_managers: 'border-sky-200 bg-sky-50 text-sky-700',
-  exec: 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700'
+  director: 'border-amber-200 bg-amber-50 text-amber-700',
+  executive: 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700'
 };
 
 const DEPARTMENT_COLOR_BY_KEY: Record<string, { label: string; boxClass: string; pillClass: string }> = {
@@ -181,7 +181,8 @@ function createDraftForDay(day?: Date, sourceDepartment?: string) {
     starts_at: toLocalInputDateTime(start.toISOString()),
     ends_at: toLocalInputDateTime(end.toISOString()),
     priority: 'employee' as CalendarPriority,
-    source_department: sourceDepartment ?? ''
+    source_department: sourceDepartment ?? '',
+    inventory_signup_enabled: false
   };
 }
 
@@ -192,9 +193,25 @@ function createDraftFromEvent(entry: CalendarEventRow): CalendarEventDraft {
     entry_type: entry.entry_type,
     starts_at: toLocalInputDateTime(entry.starts_at),
     ends_at: toLocalInputDateTime(entry.ends_at ?? ''),
-    priority: entry.priority,
-    source_department: normalizeDepartmentKey(entry.source_department)
+    priority: normalizeCalendarPriority(entry.priority),
+    source_department: normalizeDepartmentKey(entry.source_department),
+    inventory_signup_enabled: Boolean(entry.inventory_signup_enabled)
   };
+}
+
+function normalizeCalendarPriority(value: unknown): CalendarPriority {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'executive' || normalized === 'exec') return 'executive';
+  if (normalized === 'director' || normalized === 'department_manager' || normalized === 'all_managers') {
+    return 'director';
+  }
+  return 'employee';
+}
+
+function requiredRolePriority(priority: CalendarPriority): number {
+  if (priority === 'executive') return 300;
+  if (priority === 'director') return 200;
+  return 100;
 }
 
 function normalizeDepartmentKey(value: string | null | undefined) {
@@ -240,6 +257,7 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
   const [inventoryCheckByEventId, setInventoryCheckByEventId] = useState<Record<string, InventoryCheckEventState>>({});
   const [createAsInventoryCheck, setCreateAsInventoryCheck] = useState(false);
   const [requestReasonByCheckId, setRequestReasonByCheckId] = useState<Record<string, string>>({});
+  const [userRolePriority, setUserRolePriority] = useState(100);
 
   const defaultDepartment = useMemo(() => {
     const normalized = normalizeDepartmentKey(props.sourceDepartment);
@@ -287,7 +305,7 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
     setMessage(null);
     const { data, error } = await supabase
       .from('general_department_calendar_events')
-      .select('id,title,details,entry_type,starts_at,ends_at,priority,source_department')
+      .select('id,title,details,entry_type,starts_at,ends_at,priority,source_department,inventory_signup_enabled')
       .order('starts_at', { ascending: true })
       .limit(1000);
 
@@ -297,7 +315,12 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
       return;
     }
 
-    setEvents((data ?? []) as CalendarEventRow[]);
+    const normalizedRows = ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      ...row,
+      priority: normalizeCalendarPriority(row.priority),
+      inventory_signup_enabled: Boolean(row.inventory_signup_enabled)
+    })) as CalendarEventRow[];
+    setEvents(normalizedRows);
     void loadInventoryChecks();
     setLoading(false);
   }, [loadInventoryChecks, supabase]);
@@ -306,13 +329,28 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
     void loadEvents();
   }, [loadEvents]);
 
+  useEffect(() => {
+    void fetch('/api/access/priority', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = (await response.json()) as { ok?: boolean; role_priority?: number };
+        if (!payload.ok) return;
+        const nextPriority = Number(payload.role_priority ?? 100);
+        if (Number.isFinite(nextPriority)) {
+          setUserRolePriority(nextPriority);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
   const filteredEvents = useMemo(() => {
     return events.filter((entry) => {
+      if (requiredRolePriority(entry.priority) > userRolePriority) return false;
       if (priorityFilter !== 'all' && entry.priority !== priorityFilter) return false;
       if (entryTypeFilter !== 'all' && entry.entry_type !== entryTypeFilter) return false;
       return true;
     });
-  }, [entryTypeFilter, events, priorityFilter]);
+  }, [entryTypeFilter, events, priorityFilter, userRolePriority]);
 
   useEffect(() => {
     setDayPageByKey({});

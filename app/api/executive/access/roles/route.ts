@@ -23,12 +23,15 @@ export async function POST(request: Request) {
     role_key?: unknown;
     role_name?: unknown;
     description?: unknown;
+    role_priority?: unknown;
     role_permissions?: unknown;
   };
 
   const roleKey = String(payload.role_key ?? '').trim();
   const roleName = String(payload.role_name ?? '').trim();
   const description = String(payload.description ?? '').trim();
+  const rolePriorityRaw = Number(payload.role_priority);
+  const rolePriority = Number.isFinite(rolePriorityRaw) ? Math.trunc(rolePriorityRaw) : 100;
   const rolePermissions = Array.isArray(payload.role_permissions)
     ? payload.role_permissions.map((value) => String(value)).filter(Boolean)
     : [];
@@ -45,6 +48,7 @@ export async function POST(request: Request) {
       role_key: roleKey,
       role_name: roleName,
       description: description || null,
+      role_priority: rolePriority,
       role_permissions: rolePermissions
     });
 

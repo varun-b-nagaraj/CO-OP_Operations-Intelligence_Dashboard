@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getServerAuthContext } from '@/lib/server/auth';
+import { resolveInventoryActor } from '@/lib/server/inventory-auth';
 import {
   canSelfWithdraw,
   getInventoryCheckById,
@@ -16,8 +16,9 @@ export async function POST(
 ) {
   try {
     const canSignupOwn = await ensureServerPermission('employee.inventory_checks:signup:own');
+    const canEmployeeCalendar = await ensureServerPermission('employee.calendar:view:own');
     const canEditAll = await ensureServerPermission('inventory.attendance:edit:all');
-    if (!canSignupOwn && !canEditAll) {
+    if (!canSignupOwn && !canEditAll && !canEmployeeCalendar) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
     }
 
@@ -26,10 +27,8 @@ export async function POST(
       return NextResponse.json({ ok: false, error: 'id is required' }, { status: 400 });
     }
 
-    const user = await getServerAuthContext();
-    const employeeId = user?.employeeId ? Number(user.employeeId) : null;
-    const employeeSNumber = user?.sNumber ? String(user.sNumber).trim() : '';
-    if (!employeeId || !employeeSNumber) {
+    const actor = await resolveInventoryActor();
+    if (!actor) {
       return NextResponse.json({ ok: false, error: 'Missing authenticated employee' }, { status: 401 });
     }
 
@@ -49,16 +48,16 @@ export async function POST(
 
     const signup = await upsertSignup(supabase, {
       inventory_check_id: id,
-      employee_id: employeeId,
-      employee_s_number: employeeSNumber,
+      employee_id: actor.employeeId,
+      employee_s_number: actor.employeeSNumber,
       signup_status: 'withdrawn',
-      actor: employeeSNumber
+      actor: actor.employeeSNumber
     });
 
     await logInventoryCheckAudit(supabase, {
       inventory_check_id: id,
       action: 'inventory_check_withdraw',
-      actor: employeeSNumber,
+      actor: actor.employeeSNumber,
       record_id: signup.id,
       new_value: signup as unknown as Record<string, unknown>
     });

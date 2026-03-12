@@ -13,6 +13,7 @@ type RoleRow = {
   role_key: string;
   role_name: string;
   description: string | null;
+  role_priority: number;
   is_system: boolean;
   is_active: boolean;
   role_permissions: string[];
@@ -33,6 +34,7 @@ type EmployeeRow = {
 type RoleDraft = {
   role_name: string;
   description: string;
+  role_priority: number;
   is_active: boolean;
   role_permissions: string[];
   updated_at: string;
@@ -60,6 +62,7 @@ function toRoleDraft(role: RoleRow): RoleDraft {
   return {
     role_name: role.role_name,
     description: role.description ?? '',
+    role_priority: Number(role.role_priority ?? 100),
     is_active: role.is_active,
     role_permissions: role.role_permissions,
     updated_at: role.updated_at
@@ -89,6 +92,7 @@ function isRoleChanged(role: RoleRow, draft: RoleDraft | undefined): boolean {
   if (draft.updated_at !== role.updated_at) return true;
   if (draft.role_name !== role.role_name) return true;
   if ((draft.description || '') !== (role.description || '')) return true;
+  if (Number(draft.role_priority) !== Number(role.role_priority)) return true;
   if (draft.is_active !== role.is_active) return true;
   const next = [...draft.role_permissions].sort().join('|');
   const current = [...role.role_permissions].sort().join('|');
@@ -136,6 +140,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
 
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleDescription, setNewRoleDescription] = useState('');
+  const [newRolePriority, setNewRolePriority] = useState('100');
 
   const [newEmployeeName, setNewEmployeeName] = useState('');
   const [newEmployeeSNumber, setNewEmployeeSNumber] = useState('');
@@ -304,6 +309,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
       body: JSON.stringify({
         role_name: selectedRoleDraft.role_name,
         description: selectedRoleDraft.description || null,
+        role_priority: selectedRoleDraft.role_priority,
         is_active: selectedRoleDraft.is_active,
         role_permissions: selectedRoleDraft.role_permissions
       })
@@ -340,6 +346,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
         role_key: roleKey,
         role_name: roleName,
         description: newRoleDescription || null,
+        role_priority: Number.isFinite(Number(newRolePriority)) ? Math.trunc(Number(newRolePriority)) : 100,
         role_permissions: []
       })
     });
@@ -352,6 +359,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
 
     setNewRoleName('');
     setNewRoleDescription('');
+    setNewRolePriority('100');
     await loadData();
     setSelectedRoleKey(roleKey);
     setStatus('Role created.');
@@ -368,6 +376,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
         role_key: duplicateKey,
         role_name: `${selectedRole.role_name} Copy`,
         description: selectedRole.description,
+        role_priority: selectedRoleDraft.role_priority,
         role_permissions: selectedRoleDraft.role_permissions
       })
     });
@@ -512,6 +521,13 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                   rows={2}
                   value={newRoleDescription}
                 />
+                <input
+                  className="w-full border border-neutral-300 px-2 py-1.5 text-sm"
+                  inputMode="numeric"
+                  onChange={(event) => setNewRolePriority(event.target.value)}
+                  placeholder="Priority (100 employee, 200 director, 300 executive)"
+                  value={newRolePriority}
+                />
                 <button className="w-full border border-brand-maroon bg-brand-maroon px-3 py-1.5 text-sm text-white" onClick={() => void createRole()} type="button">
                   Create Role
                 </button>
@@ -536,6 +552,22 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                     <label className="text-sm text-neutral-700">
                       Role Key
                       <input className="mt-1 w-full border border-neutral-300 bg-neutral-100 px-2 py-1.5" disabled value={selectedRole.role_key} />
+                    </label>
+                    <label className="text-sm text-neutral-700">
+                      Role Priority
+                      <input
+                        className="mt-1 w-full border border-neutral-300 px-2 py-1.5"
+                        disabled={!canEdit}
+                        inputMode="numeric"
+                        onChange={(event) =>
+                          setRoleDraft({
+                            role_priority: Number.isFinite(Number(event.target.value))
+                              ? Math.trunc(Number(event.target.value))
+                              : 0
+                          })
+                        }
+                        value={String(selectedRoleDraft.role_priority)}
+                      />
                     </label>
                   </div>
                   <label className="mt-3 block text-sm text-neutral-700">

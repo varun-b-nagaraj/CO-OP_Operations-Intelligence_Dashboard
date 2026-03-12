@@ -291,6 +291,19 @@ export function DepartmentShell({
             })}
           </nav>
           <div className="border-t border-neutral-300 p-2">
+            <Link
+              aria-label="Home"
+              className="ui-click mb-2 flex min-h-[40px] w-full items-center justify-center gap-2 border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+              href="/"
+              title="Home"
+            >
+              <Home className="h-4 w-4" />
+              <span
+                className={`transition-all duration-200 ease-out ${isCollapsed ? 'max-w-0 overflow-hidden opacity-0' : 'max-w-[120px] opacity-100'}`}
+              >
+                Home
+              </span>
+            </Link>
             <LogoutButton
               className="ui-click min-h-[40px] w-full border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-800 hover:bg-neutral-50 flex items-center justify-center"
               label="Log out"

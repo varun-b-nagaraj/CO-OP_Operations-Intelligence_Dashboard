@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getServerAuthContext } from '@/lib/server/auth';
+import { resolveInventoryActor } from '@/lib/server/inventory-auth';
 import {
   canSelfWithdraw,
   createInventoryCheck,
@@ -11,11 +11,21 @@ import {
 import { ensureServerPermission } from '@/lib/server/permissions';
 import { createServerClient } from '@/lib/supabase';
 
+function normalizeCalendarPriority(value: unknown): 'employee' | 'director' | 'executive' {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'executive' || normalized === 'exec') return 'executive';
+  if (normalized === 'director' || normalized === 'department_manager' || normalized === 'all_managers') {
+    return 'director';
+  }
+  return 'employee';
+}
+
 export async function GET(request: NextRequest) {
   try {
     const canViewAll = await ensureServerPermission('inventory.attendance:view:all');
     const canViewOwn = await ensureServerPermission('employee.inventory_checks:view:own');
-    if (!canViewAll && !canViewOwn) {
+    const canEmployeeCalendar = await ensureServerPermission('employee.calendar:view:own');
+    if (!canViewAll && !canViewOwn && !canEmployeeCalendar) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
     }
 
@@ -30,8 +40,8 @@ export async function GET(request: NextRequest) {
 
     let currentEmployeeId: number | null = null;
     if (mineOnly || canViewOwn) {
-      const user = await getServerAuthContext();
-      currentEmployeeId = user?.employeeId ? Number(user.employeeId) : null;
+      const actor = await resolveInventoryActor();
+      currentEmployeeId = actor?.employeeId ?? null;
     }
 
     const payload = await Promise.all(
@@ -88,7 +98,7 @@ export async function POST(request: NextRequest) {
       details?: string;
       starts_at?: string;
       ends_at?: string | null;
-      priority?: 'employee' | 'department_manager' | 'all_managers' | 'exec';
+      priority?: string;
       location?: string;
       notes?: string;
       capacity?: number | null;
@@ -100,19 +110,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'title and starts_at are required' }, { status: 400 });
     }
 
-    const user = await getServerAuthContext();
+    const actor = await resolveInventoryActor();
     const supabase = createServerClient();
     const check = await createInventoryCheck(supabase, {
       title,
       details: body.details?.trim() || null,
       starts_at: startsAt,
       ends_at: body.ends_at ?? null,
-      priority: body.priority ?? 'employee',
+      priority: normalizeCalendarPriority(body.priority),
       source_department: 'inventory',
       location: body.location?.trim() || null,
       notes: body.notes?.trim() || null,
       capacity: body.capacity ?? null,
-      created_by: user?.sNumber ?? 'open_access'
+      created_by: actor?.employeeSNumber ?? 'open_access'
     });
 
     return NextResponse.json({ ok: true, check });

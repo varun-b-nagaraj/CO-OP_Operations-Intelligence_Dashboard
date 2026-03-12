@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getServerAuthContext } from '@/lib/server/auth';
 import {
   createChangeRequest,
   getInventoryCheckById,
   logInventoryCheckAudit
 } from '@/lib/server/inventory-checks';
+import { resolveInventoryActor } from '@/lib/server/inventory-auth';
 import { ensureServerPermission } from '@/lib/server/permissions';
 import { createServerClient } from '@/lib/supabase';
 
@@ -15,8 +15,9 @@ export async function POST(
 ) {
   try {
     const canRequestOwn = await ensureServerPermission('employee.inventory_checks:request_change:own');
+    const canEmployeeCalendar = await ensureServerPermission('employee.calendar:view:own');
     const canEditAll = await ensureServerPermission('inventory.attendance:edit:all');
-    if (!canRequestOwn && !canEditAll) {
+    if (!canRequestOwn && !canEditAll && !canEmployeeCalendar) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
     }
 
@@ -34,10 +35,8 @@ export async function POST(
       return NextResponse.json({ ok: false, error: 'request_type and reason are required' }, { status: 400 });
     }
 
-    const user = await getServerAuthContext();
-    const employeeId = user?.employeeId ? Number(user.employeeId) : null;
-    const employeeSNumber = user?.sNumber ? String(user.sNumber).trim() : '';
-    if (!employeeId || !employeeSNumber) {
+    const actor = await resolveInventoryActor();
+    if (!actor) {
       return NextResponse.json({ ok: false, error: 'Missing authenticated employee' }, { status: 401 });
     }
 
@@ -47,8 +46,8 @@ export async function POST(
 
     const row = await createChangeRequest(supabase, {
       inventory_check_id: id,
-      employee_id: employeeId,
-      employee_s_number: employeeSNumber,
+      employee_id: actor.employeeId,
+      employee_s_number: actor.employeeSNumber,
       request_type: requestType,
       reason
     });
@@ -56,7 +55,7 @@ export async function POST(
     await logInventoryCheckAudit(supabase, {
       inventory_check_id: id,
       action: 'inventory_check_change_request_submitted',
-      actor: employeeSNumber,
+      actor: actor.employeeSNumber,
       record_id: row.id,
       new_value: row as unknown as Record<string, unknown>
     });

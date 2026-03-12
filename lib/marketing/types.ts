@@ -1,5 +1,5 @@
 export type MarketingEventStatus = 'draft' | 'scheduled' | 'completed' | 'cancelled';
-export type CalendarAudiencePriority = 'employee' | 'department_manager' | 'all_managers' | 'exec';
+export type CalendarAudiencePriority = 'employee' | 'director' | 'executive';
 
 export type CoordinationMethod = 'email' | 'call' | 'in_person' | 'text' | 'other';
 
