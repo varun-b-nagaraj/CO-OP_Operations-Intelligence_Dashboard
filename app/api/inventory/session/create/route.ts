@@ -19,13 +19,15 @@ export async function POST(request: NextRequest) {
       host_name?: string;
     };
 
-    const sessionName = (body.session_name ?? '').trim();
+    const requestedSessionName = (body.session_name ?? '').trim();
     const hostId = (body.host_id ?? '').trim();
     const createdBy = (body.created_by ?? 'open_access').trim();
     const hostName = (body.host_name ?? 'Host').trim();
+    const generatedDate = new Date().toISOString().slice(0, 10);
+    const sessionName = requestedSessionName || `Inventory Check - ${generatedDate}`;
 
-    if (!sessionName || !hostId) {
-      return NextResponse.json({ ok: false, error: 'session_name and host_id are required' }, { status: 400 });
+    if (!hostId) {
+      return NextResponse.json({ ok: false, error: 'host_id is required' }, { status: 400 });
     }
 
     const supabase = createServerClient();

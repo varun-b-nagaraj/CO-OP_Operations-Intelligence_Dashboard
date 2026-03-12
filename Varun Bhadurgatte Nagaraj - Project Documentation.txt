@@ -47,7 +47,9 @@ They will be able to see the days they have been scheduled either on calendar vi
 Accountability:
 To keep members accountable they will be able to view their off-period shift attendance, their strikes, the amount of warning they have, morning shift attendance, and meeting attendance.
 * Shift Attendance: We can track their morning and off-period shift attendance to gain a universal overview of how many shifts each employee has worked, how many off-period shifts they have worked and they can see a percentage value of their attendance.
-* Strikes/Warnings: 
+   * Employees can only remove themselves from morning or afternoon shifts 7 days in advance, if there is only 7 days left till the shift then they cannot remove anymore.
+* Strikes/Warnings: They can view how many strikes and warnings they have. They can also submit requests/repeals for individual strikes which HR can then view on their dashboard and reject/accept it (this will show up under the HR “requests” tab where they can filter between appeals and shift exchange requests). 
+* They can also view morning meeting attendance and all relevant information about themselves.
 Executive Dashboard
 Executive Dashboard
 
@@ -814,7 +816,7 @@ Frontend Packages
 Frontend Packages (Next.js / React)
 
 
-This section contains the frontend packages that will be used to build the User Interface/User Experience (UI/UX) side of the website. The packages here are only for client-side logic and not for actual data processing or validation but purely for visualization purposes. Only the more prominent packages are currently listed but as development progresses so will the package uses.
+This section contains the frontend packages that will be used to build the User Interface/User Experience (UI/UX) side of the website. The packages here are only for client-side logic and not for actual data processing or validation but purely for visualization purposes. Only the more prominent packages are currently listed but as development progresses so will the package.
 
 
 * Core Framework

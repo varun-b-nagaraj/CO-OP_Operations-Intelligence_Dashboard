@@ -117,12 +117,35 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('inventory.finalize_upload:upload:all', 'Inventory Upload', ['inventory.finalize_upload.edit']),
   permission('inventory.finalize_upload:lock:all', 'Inventory Lock Session'),
   permission('inventory.calendar:view:all', 'Inventory Calendar View', ['inventory.calendar.view']),
+  permission('inventory.attendance:view:all', 'Inventory Attendance View', ['inventory.attendance.view']),
+  permission('inventory.attendance:edit:all', 'Inventory Attendance Edit', ['inventory.attendance.edit']),
+  permission('inventory.attendance:override:all', 'Inventory Attendance Override', ['inventory.attendance.override']),
+  permission(
+    'inventory.attendance:requests:approve:all',
+    'Inventory Attendance Request Approve',
+    ['inventory.attendance.requests.approve']
+  ),
 
   permission('employee.calendar:view:own', 'Employee Calendar View', ['employee.calendar.view']),
   permission('employee.schedule:view:own', 'Employee Schedule View', ['employee.schedule.view']),
   permission('employee.schedule:submit:own', 'Employee Schedule Submit Requests'),
   permission('employee.accountability:view:own', 'Employee Accountability View', ['employee.accountability.view']),
-  permission('employee.requests:submit:own', 'Employee Requests Submit', ['employee.requests.view', 'employee.requests.edit'])
+  permission('employee.requests:submit:own', 'Employee Requests Submit', ['employee.requests.view', 'employee.requests.edit']),
+  permission(
+    'employee.inventory_checks:view:own',
+    'Employee Inventory Checks View',
+    ['employee.inventory_checks.view']
+  ),
+  permission(
+    'employee.inventory_checks:signup:own',
+    'Employee Inventory Checks Signup',
+    ['employee.inventory_checks.signup']
+  ),
+  permission(
+    'employee.inventory_checks:request_change:own',
+    'Employee Inventory Checks Change Request',
+    ['employee.inventory_checks.request_change']
+  )
 ];
 
 export const PERMISSION_BY_KEY = new Map(PERMISSIONS.map((permission) => [permission.permissionKey, permission]));
@@ -230,7 +253,11 @@ export const BASELINE_ROLES: RoleDefinition[] = [
       'inventory.finalize_upload:finalize:all',
       'inventory.finalize_upload:upload:all',
       'inventory.finalize_upload:lock:all',
-      'inventory.calendar:view:all'
+      'inventory.calendar:view:all',
+      'inventory.attendance:view:all',
+      'inventory.attendance:edit:all',
+      'inventory.attendance:override:all',
+      'inventory.attendance:requests:approve:all'
     ]
   },
   {
@@ -318,6 +345,9 @@ export const BASELINE_ROLES: RoleDefinition[] = [
       'employee.schedule:submit:own',
       'employee.accountability:view:own',
       'employee.requests:submit:own',
+      'employee.inventory_checks:view:own',
+      'employee.inventory_checks:signup:own',
+      'employee.inventory_checks:request_change:own',
       'hr.schedule:view:own',
       'hr.requests:submit:own'
     ]

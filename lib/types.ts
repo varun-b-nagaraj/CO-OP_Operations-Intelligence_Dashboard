@@ -365,3 +365,73 @@ export interface CFADailyLogLine {
   created_at: string;
   updated_at: string;
 }
+
+export type InventoryCheckSignupStatus = 'signed_up' | 'withdrawn';
+export type InventoryCheckAttendanceStatus = 'expected' | 'present' | 'absent' | 'excused';
+export type InventoryCheckRequestType = 'add' | 'drop';
+export type InventoryCheckRequestStatus = 'pending' | 'approved' | 'denied';
+
+export interface InventoryCheck {
+  id: string;
+  calendar_event_id: string;
+  check_date: string;
+  starts_at: string;
+  ends_at: string | null;
+  location: string | null;
+  notes: string | null;
+  capacity: number | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  title?: string;
+  details?: string | null;
+  source_department?: string | null;
+}
+
+export interface InventoryCheckSignup {
+  id: string;
+  inventory_check_id: string;
+  employee_id: number;
+  employee_s_number: string;
+  signup_status: InventoryCheckSignupStatus;
+  attendance_status: InventoryCheckAttendanceStatus;
+  attendance_reason: string | null;
+  marked_by: string | null;
+  marked_at: string | null;
+  signed_up_at: string;
+  updated_at: string;
+}
+
+export interface InventoryCheckChangeRequest {
+  id: string;
+  inventory_check_id: string;
+  employee_id: number;
+  employee_s_number: string;
+  request_type: InventoryCheckRequestType;
+  reason: string;
+  status: InventoryCheckRequestStatus;
+  requested_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}
+
+export interface InventoryCheckAnalytics {
+  totalChecks: number;
+  totalSignups: number;
+  totalPresent: number;
+  totalAbsent: number;
+  totalExcused: number;
+  attendanceRate: number;
+  noShowRate: number;
+  excusedRate: number;
+  byCheck: Array<{
+    inventory_check_id: string;
+    title: string;
+    starts_at: string;
+    signups: number;
+    present: number;
+    absent: number;
+    excused: number;
+    attendanceRate: number;
+  }>;
+}

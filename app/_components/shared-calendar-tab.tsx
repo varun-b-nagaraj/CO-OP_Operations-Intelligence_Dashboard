@@ -30,6 +30,13 @@ interface CalendarEventDraft {
   source_department: string;
 }
 
+interface InventoryCheckEventState {
+  id: string;
+  calendar_event_id: string;
+  signup_state: 'none' | 'signed_up' | 'withdrawn' | 'requested_change';
+  can_self_withdraw: boolean;
+}
+
 const PRIORITY_OPTIONS: Array<{ value: CalendarPriority; label: string }> = [
   { value: 'employee', label: 'Employee' },
   { value: 'department_manager', label: 'Department Director/Manager' },
@@ -230,6 +237,9 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [inventoryCheckByEventId, setInventoryCheckByEventId] = useState<Record<string, InventoryCheckEventState>>({});
+  const [createAsInventoryCheck, setCreateAsInventoryCheck] = useState(false);
+  const [requestReasonByCheckId, setRequestReasonByCheckId] = useState<Record<string, string>>({});
 
   const defaultDepartment = useMemo(() => {
     const normalized = normalizeDepartmentKey(props.sourceDepartment);
@@ -240,6 +250,37 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
     const normalized = normalizeDepartmentKey(props.sourceDepartment);
     return createDraftForDay(undefined, normalized === 'unknown' ? '' : normalized);
   });
+
+  const loadInventoryChecks = useCallback(async () => {
+    try {
+      const response = await fetch('/api/inventory/checks', { cache: 'no-store' });
+      if (!response.ok) {
+        setInventoryCheckByEventId({});
+        return;
+      }
+      const payload = (await response.json()) as { ok?: boolean; checks?: Array<Record<string, unknown>> };
+      if (!payload.ok || !Array.isArray(payload.checks)) {
+        setInventoryCheckByEventId({});
+        return;
+      }
+      const next: Record<string, InventoryCheckEventState> = {};
+      for (const row of payload.checks) {
+        const eventId = String(row.calendar_event_id ?? '');
+        const checkId = String(row.id ?? '');
+        if (!eventId || !checkId) continue;
+        next[eventId] = {
+          id: checkId,
+          calendar_event_id: eventId,
+          signup_state:
+            (String(row.signup_state ?? 'none') as InventoryCheckEventState['signup_state']) ?? 'none',
+          can_self_withdraw: Boolean(row.can_self_withdraw)
+        };
+      }
+      setInventoryCheckByEventId(next);
+    } catch {
+      setInventoryCheckByEventId({});
+    }
+  }, []);
 
   const loadEvents = useCallback(async () => {
     setLoading(true);
@@ -257,8 +298,9 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
     }
 
     setEvents((data ?? []) as CalendarEventRow[]);
+    void loadInventoryChecks();
     setLoading(false);
-  }, [supabase]);
+  }, [loadInventoryChecks, supabase]);
 
   useEffect(() => {
     void loadEvents();
@@ -289,8 +331,9 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
     setModalMode('create');
     setEditingEventId(null);
     setCreateModalOpen(true);
+    setCreateAsInventoryCheck(props.sourceDepartment === 'inventory');
     setMessage(null);
-  }, [defaultDepartment]);
+  }, [defaultDepartment, props.sourceDepartment]);
 
   const openEditModal = useCallback((entry: CalendarEventRow) => {
     setDraft(createDraftFromEvent(entry));
@@ -337,19 +380,36 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
       source_department: draft.source_department || defaultDepartment || props.sourceDepartment || null
     };
 
-    const result =
-      modalMode === 'edit' && editingEventId
-        ? await supabase
-            .from('general_department_calendar_events')
-            .update(payload)
-            .eq('id', editingEventId)
-        : await supabase.from('general_department_calendar_events').insert({
-            ...payload,
-            created_by: 'department_dashboard'
-          });
-
-    const { error } = result;
-
+    let error: { message: string } | null = null;
+    if (modalMode === 'create' && createAsInventoryCheck && payload.source_department === 'inventory' && payload.entry_type === 'event') {
+      const response = await fetch('/api/inventory/checks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: payload.title,
+          details: payload.details,
+          starts_at: payload.starts_at,
+          ends_at: payload.ends_at,
+          priority: payload.priority
+        })
+      });
+      if (!response.ok) {
+        const result = (await response.json()) as { error?: string };
+        error = { message: result.error ?? 'Unable to create inventory check' };
+      }
+    } else {
+      const result =
+        modalMode === 'edit' && editingEventId
+          ? await supabase
+              .from('general_department_calendar_events')
+              .update(payload)
+              .eq('id', editingEventId)
+          : await supabase.from('general_department_calendar_events').insert({
+              ...payload,
+              created_by: 'department_dashboard'
+            });
+      error = result.error ? { message: result.error.message } : null;
+    }
     if (error) {
       setMessage(error.message);
       setSaving(false);
@@ -363,6 +423,109 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
     setMessage(modalMode === 'edit' ? 'Calendar entry updated.' : 'Calendar entry created.');
     setSaving(false);
     await loadEvents();
+  };
+
+  const runInventoryAction = async (entry: CalendarEventRow, action: 'signup' | 'withdraw' | 'request') => {
+    const check = inventoryCheckByEventId[entry.id];
+    if (!check) return;
+    const requestReason = requestReasonByCheckId[check.id]?.trim();
+    let endpoint = `/api/inventory/checks/${check.id}/signup`;
+    let body: Record<string, unknown> | undefined;
+    if (action === 'withdraw') endpoint = `/api/inventory/checks/${check.id}/withdraw`;
+    if (action === 'request') {
+      endpoint = `/api/inventory/checks/${check.id}/requests`;
+      body = {
+        request_type: check.signup_state === 'signed_up' ? 'drop' : 'add',
+        reason: requestReason || 'Submitted from shared calendar'
+      };
+    }
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const payload = (await response.json()) as { ok?: boolean; error?: string };
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error ?? 'Request failed');
+    }
+    await loadInventoryChecks();
+    setMessage(
+      action === 'signup'
+        ? 'Signed up for inventory check.'
+        : action === 'withdraw'
+          ? 'Removed from inventory check.'
+          : 'Change request submitted.'
+    );
+  };
+
+  const renderInventoryActions = (entry: CalendarEventRow) => {
+    if (normalizeDepartmentKey(entry.source_department) !== 'inventory') return null;
+    const state = inventoryCheckByEventId[entry.id];
+    if (!state) return null;
+
+    if (state.signup_state === 'requested_change') {
+      return <p className="mt-1 text-[11px] text-amber-700">Pending change request.</p>;
+    }
+
+    if (state.signup_state === 'signed_up' && state.can_self_withdraw) {
+      return (
+        <button
+          className="mt-1 border border-neutral-400 px-1.5 py-0.5 text-[10px]"
+          onClick={(event) => {
+            event.stopPropagation();
+            void runInventoryAction(entry, 'withdraw').catch((error) =>
+              setMessage(error instanceof Error ? error.message : 'Unable to remove signup.')
+            );
+          }}
+          type="button"
+        >
+          Remove
+        </button>
+      );
+    }
+
+    if (state.signup_state === 'signed_up') {
+      return (
+        <div className="mt-1 flex flex-col gap-1">
+          <p className="text-[10px] text-amber-700">24h lock active.</p>
+          <input
+            className="min-h-[24px] border border-neutral-300 px-1 text-[10px]"
+            onChange={(event) =>
+              setRequestReasonByCheckId((prev) => ({ ...prev, [state.id]: event.target.value }))
+            }
+            placeholder="Reason"
+            value={requestReasonByCheckId[state.id] ?? ''}
+          />
+          <button
+            className="border border-neutral-400 px-1.5 py-0.5 text-[10px]"
+            onClick={(event) => {
+              event.stopPropagation();
+              void runInventoryAction(entry, 'request').catch((error) =>
+                setMessage(error instanceof Error ? error.message : 'Unable to submit request.')
+              );
+            }}
+            type="button"
+          >
+            Request Drop
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <button
+        className="mt-1 border border-brand-maroon bg-brand-maroon px-1.5 py-0.5 text-[10px] text-white"
+        onClick={(event) => {
+          event.stopPropagation();
+          void runInventoryAction(entry, 'signup').catch((error) =>
+            setMessage(error instanceof Error ? error.message : 'Unable to sign up.')
+          );
+        }}
+        type="button"
+      >
+        Sign Up
+      </button>
+    );
   };
 
   const deleteEntry = async () => {
@@ -700,6 +863,7 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                           {PRIORITY_OPTIONS.find((item) => item.value === entry.priority)?.label ?? entry.priority}
                         </span>
                       </div>
+                      {renderInventoryActions(entry)}
                     </button>
                   ))}
                   {entries.length > DAY_PAGE_SIZE ? (
@@ -733,6 +897,7 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                       </span>
                     </div>
                     <p className="text-xs text-neutral-600">{entry.details ?? '-'}</p>
+                    {renderInventoryActions(entry)}
                   </td><td className="p-2">{ENTRY_TYPE_OPTIONS.find((item) => item.value === entry.entry_type)?.label ?? entry.entry_type}</td><td className="p-2">{formatDateTime(entry.starts_at)}</td><td className="p-2">{formatDateTime(entry.ends_at)}</td><td className="p-2"><span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${PRIORITY_PILL_CLASS[entry.priority]}`}>
                       {PRIORITY_OPTIONS.find((item) => item.value === entry.priority)?.label ?? entry.priority}
                     </span>
@@ -917,6 +1082,14 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  checked={createAsInventoryCheck}
+                  onChange={(event) => setCreateAsInventoryCheck(event.target.checked)}
+                  type="checkbox"
+                />
+                Create as Inventory Check
               </label>
               <label className="text-sm">
                 Starts At

@@ -27,7 +27,9 @@ export type Action =
   | 'publish'
   | 'lock'
   | 'convert'
-  | 'order';
+  | 'order'
+  | 'signup'
+  | 'request_change';
 
 export type PermissionKey = `${string}:${Action}` | `${string}:${Action}:${Scope}`;
 
