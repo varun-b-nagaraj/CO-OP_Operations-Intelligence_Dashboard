@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
@@ -138,15 +137,6 @@ const DEPARTMENT_TABS: Array<{ id: ExecutiveTabId; department: string }> = [
   { id: 'department-inventory', department: 'Inventory' },
   { id: 'department-cfa', department: 'Chick-fil-A' }
 ];
-
-const DEPARTMENT_IMAGES: Record<string, string> = {
-  HR: '/department-images/hr.svg',
-  Product: '/department-images/product.svg',
-  Finance: '/department-images/finance.svg',
-  Marketing: '/department-images/marketing.svg',
-  Inventory: '/department-images/inventory.svg',
-  'Chick-fil-A': '/department-images/cfa.svg'
-};
 
 const DEPARTMENT_PAGE_LINKS: Record<string, string> = {
   HR: '/hr',
@@ -891,15 +881,6 @@ export function ExecutiveDashboard() {
                   <p className="mt-1 text-xs text-neutral-600">
                     Focused important updates for {selectedDepartment}.
                   </p>
-                  <div className="mt-3 overflow-hidden border border-neutral-200">
-                    <Image
-                      alt={`${selectedDepartment} department visual`}
-                      className="h-auto w-full object-cover"
-                      height={240}
-                      src={DEPARTMENT_IMAGES[selectedDepartment] ?? '/department-images/hr.svg'}
-                      width={960}
-                    />
-                  </div>
                   <div className="mt-2">
                     <ExpandableText
                       limit={420}
