@@ -452,7 +452,6 @@ export function ExecutiveDashboard() {
   const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<string[]>([]);
   const [breadcrumbIndex, setBreadcrumbIndex] = useState(0);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
-  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const currentRequestControllerRef = useRef<AbortController | null>(null);
@@ -694,36 +693,6 @@ export function ExecutiveDashboard() {
       ]);
     } finally {
       setDeletingSessionId(null);
-    }
-  };
-
-  const deleteMessage = async (messageId: string) => {
-    if (!userKey || deletingMessageId || !activeSessionId || sending) return;
-    setDeletingMessageId(messageId);
-    try {
-      const params = new URLSearchParams({ userKey, messageId });
-      const response = await fetch(`/api/executive/history/messages?${params.toString()}`, {
-        method: 'DELETE'
-      });
-      const payload = (await response.json()) as { ok: boolean; error?: string };
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? 'Failed to delete message.');
-      }
-
-      setMessages((current) => current.filter((message) => message.id !== messageId));
-      await loadSessions(userKey, activeSessionId);
-    } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `delete-message-error-${Date.now()}`,
-          role: 'assistant',
-          content: error instanceof Error ? error.message : 'Failed to delete message.',
-          pending: false
-        }
-      ]);
-    } finally {
-      setDeletingMessageId(null);
     }
   };
 
@@ -1054,53 +1023,31 @@ export function ExecutiveDashboard() {
 
                   {loadingMessages ? <p className="text-sm text-neutral-600">Loading conversation...</p> : null}
 
-                  {messages.map((message) => {
-                    const isPersistedMessage =
-                      !message.id.startsWith('user-') &&
-                      !message.id.startsWith('assistant-pending-') &&
-                      !message.id.startsWith('history-error-') &&
-                      !message.id.startsWith('delete-session-error-') &&
-                      !message.id.startsWith('delete-message-error-');
-                    const canDeleteMessage = isPersistedMessage && !message.pending && !deletingMessageId && !sending;
-
-                    return (
-                      <article
-                        key={message.id}
-                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  {messages.map((message) => (
+                    <article
+                      key={message.id}
+                      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[84%] rounded-2xl px-4 py-3 text-[15px] leading-6 shadow-sm ${
+                          message.role === 'user'
+                            ? 'bg-neutral-900 text-white'
+                            : 'border border-neutral-200 bg-white text-neutral-900'
+                        }`}
                       >
-                        <div
-                          className={`max-w-[84%] rounded-2xl px-4 py-3 text-[15px] leading-6 shadow-sm ${
-                            message.role === 'user'
-                              ? 'bg-neutral-900 text-white'
-                              : 'border border-neutral-200 bg-white text-neutral-900'
-                          }`}
-                        >
-                          <div className="space-y-1">
-                            {message.content ? <div className="space-y-1">{renderMessageContent(message.content)}</div> : null}
-                            {message.pending ? (
-                              <div className="mt-1 flex items-center gap-1.5 text-sm text-neutral-500">
-                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
-                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:120ms]" />
-                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:240ms]" />
-                              </div>
-                            ) : null}
-                          </div>
-                          {canDeleteMessage || deletingMessageId === message.id ? (
-                            <div className="mt-2 flex justify-end">
-                              <button
-                                className="min-h-[26px] border border-neutral-300 bg-white px-2 text-[11px] text-neutral-700 hover:bg-neutral-100 disabled:opacity-60"
-                                disabled={!canDeleteMessage && deletingMessageId !== message.id}
-                                onClick={() => void deleteMessage(message.id)}
-                                type="button"
-                              >
-                                {deletingMessageId === message.id ? 'Deleting...' : 'Delete'}
-                              </button>
+                        <div className="space-y-1">
+                          {message.content ? <div className="space-y-1">{renderMessageContent(message.content)}</div> : null}
+                          {message.pending ? (
+                            <div className="mt-1 flex items-center gap-1.5 text-sm text-neutral-500">
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:120ms]" />
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400 [animation-delay:240ms]" />
                             </div>
                           ) : null}
                         </div>
-                      </article>
-                    );
-                  })}
+                      </div>
+                    </article>
+                  ))}
                 </div>
               </div>
 
