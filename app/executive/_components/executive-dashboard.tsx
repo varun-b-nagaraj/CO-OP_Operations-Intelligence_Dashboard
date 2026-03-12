@@ -104,17 +104,29 @@ const USER_KEY_STORAGE = 'executive_agent_user_key_v1';
 const EXECUTIVE_TABS: Array<{
   id: ExecutiveTabId;
   label: string;
-  icon: 'dashboard' | 'analysis' | 'reports' | 'settings';
+  icon:
+    | 'dashboard'
+    | 'analysis'
+    | 'reports'
+    | 'settings'
+    | 'prompts'
+    | 'employees'
+    | 'products'
+    | 'forecast'
+    | 'events'
+    | 'catalog'
+    | 'menu'
+    | 'audit';
 }> = [
-  { id: 'ai-agent', label: 'AI Agent', icon: 'dashboard' },
+  { id: 'ai-agent', label: 'AI Agent', icon: 'prompts' },
   { id: 'overview', label: 'Overview', icon: 'analysis' },
-  { id: 'department-hr', label: 'HR', icon: 'reports' },
-  { id: 'department-product', label: 'Product', icon: 'reports' },
-  { id: 'department-finance', label: 'Finance', icon: 'reports' },
-  { id: 'department-marketing', label: 'Marketing', icon: 'reports' },
-  { id: 'department-inventory', label: 'Inventory', icon: 'reports' },
-  { id: 'department-cfa', label: 'Chick-fil-A', icon: 'reports' },
-  { id: 'audit-log', label: 'Audit Log', icon: 'reports' },
+  { id: 'department-hr', label: 'HR', icon: 'employees' },
+  { id: 'department-product', label: 'Product', icon: 'products' },
+  { id: 'department-finance', label: 'Finance', icon: 'forecast' },
+  { id: 'department-marketing', label: 'Marketing', icon: 'events' },
+  { id: 'department-inventory', label: 'Inventory', icon: 'catalog' },
+  { id: 'department-cfa', label: 'Chick-fil-A', icon: 'menu' },
+  { id: 'audit-log', label: 'Audit Log', icon: 'audit' },
   { id: 'access-control', label: 'Access Control', icon: 'settings' }
 ];
 
