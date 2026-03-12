@@ -111,6 +111,45 @@ function featureModesFromPermissions(permissions: string[]): Record<string, Acce
   return next;
 }
 
+function featureModesFromEmployeeRecord(employee: EmployeeRow): Record<string, AccessMode> {
+  const fallback = featureModesFromPermissions(employee.permissions);
+  if (!Array.isArray(employee.overrides) || employee.overrides.length === 0) {
+    return fallback;
+  }
+
+  const overrideByPermission = new Map<string, 'allow' | 'deny'>();
+  for (const override of employee.overrides) {
+    if (!override?.permission_key) continue;
+    overrideByPermission.set(
+      override.permission_key,
+      override.effect === 'deny' ? 'deny' : 'allow'
+    );
+  }
+
+  const next = { ...fallback };
+  for (const feature of FEATURE_CATALOG) {
+    const viewOverride = feature.viewPermission
+      ? overrideByPermission.get(feature.viewPermission)
+      : undefined;
+    const editOverride = feature.editPermission
+      ? overrideByPermission.get(feature.editPermission)
+      : undefined;
+
+    if (editOverride === 'allow') {
+      next[feature.id] = 'edit';
+      continue;
+    }
+    if (viewOverride === 'allow') {
+      next[feature.id] = 'view';
+      continue;
+    }
+    if (viewOverride === 'deny' || editOverride === 'deny') {
+      next[feature.id] = 'none';
+    }
+  }
+  return next;
+}
+
 function permissionsFromModes(modes: Record<string, AccessMode>): string[] {
   const set = new Set<string>();
   for (const feature of FEATURE_CATALOG) {
@@ -210,21 +249,6 @@ function roleSummary(baseRole: string, hasCustom: boolean): string {
   return hasCustom ? `${base} + extra (custom)` : base;
 }
 
-function replaceWithDepartmentViewOverlay(
-  current: Record<string, AccessMode>,
-  department: DepartmentKey
-): Record<string, AccessMode> {
-  const next: Record<string, AccessMode> = {};
-  for (const feature of FEATURE_CATALOG) {
-    if (feature.department === department && feature.viewPermission) {
-      next[feature.id] = 'view';
-    } else {
-      next[feature.id] = 'none';
-    }
-  }
-  return { ...current, ...next };
-}
-
 interface AccessControlTabProps {
   initialEditorMode?: EditorMode;
   openAddEmployeeSignal?: number;
@@ -312,7 +336,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
       setEmployeeModesById((previous) => {
         const next = { ...previous };
         for (const employee of employeeRows) {
-          next[employee.employee_id] = featureModesFromPermissions(employee.permissions);
+          next[employee.employee_id] = featureModesFromEmployeeRecord(employee);
         }
         return next;
       });
@@ -332,7 +356,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
             previous[employee.employee_id] ??
             (DEPARTMENTS.find(
               (department) =>
-                getDepartmentMode(featureModesFromPermissions(employee.permissions), department.key) !== 'none'
+                getDepartmentMode(featureModesFromEmployeeRecord(employee), department.key) !== 'none'
             )?.key ??
               'employee');
           next[employee.employee_id] = current;
@@ -463,12 +487,8 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
     const baseModes =
       explicitModes ??
       employeeModesById[employee.employee_id] ??
-      featureModesFromPermissions(employee.permissions);
-    const quickDepartment = employeeDepartmentQuickById[employee.employee_id] ?? 'employee';
-    const effectiveModes = explicitModes
-      ? baseModes
-      : replaceWithDepartmentViewOverlay(baseModes, quickDepartment);
-    const overrides = overridesFromModes(effectiveModes);
+      featureModesFromEmployeeRecord(employee);
+    const overrides = overridesFromModes(baseModes);
 
     const response = await fetch(`/api/executive/access/employees/${employee.employee_id}`, {
       method: 'PATCH',
@@ -753,9 +773,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                 {filteredEmployees.map((employee) => {
                   const baseModes =
                     employeeModesById[employee.employee_id] ??
-                    featureModesFromPermissions(employee.permissions);
-                  const quickDepartment = employeeDepartmentQuickById[employee.employee_id] ?? 'employee';
-                  const effectiveModes = replaceWithDepartmentViewOverlay(baseModes, quickDepartment);
+                    featureModesFromEmployeeRecord(employee);
                   const draftedRoleId = employeeRoleDraftById[employee.employee_id];
                   const draftedRoleMeta = draftedRoleId ? roleMetaById.get(draftedRoleId) : null;
                   const roleLabel =
@@ -765,10 +783,10 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                   const hasCustom = Array.isArray(employee.overrides) && employee.overrides.length > 0;
                   const isExpanded = selectedEmployeeId === employee.employee_id;
                   const activeDepartments = DEPARTMENTS.filter((department) => {
-                    return getDepartmentMode(effectiveModes, department.key) !== 'none';
+                    return getDepartmentMode(baseModes, department.key) !== 'none';
                   }).map((department) => ({
                     ...department,
-                    mode: getDepartmentMode(effectiveModes, department.key)
+                    mode: getDepartmentMode(baseModes, department.key)
                   }));
                   const showAll = Boolean(showAllDepartmentsById[employee.employee_id]);
                   const visibleDepartments = showAll ? activeDepartments : activeDepartments.slice(0, 1);
@@ -875,7 +893,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                               </label>
 
                               <label className="text-xs">
-                                Quick Department (view for whole department)
+                                Quick Department (default in Custom Edit)
                                 <select
                                   className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2"
                                   onChange={(event) =>
@@ -1039,19 +1057,8 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                 onClick={async () => {
                   const currentModes =
                     employeeModesById[selectedEmployee.employee_id] ??
-                    featureModesFromPermissions(selectedEmployee.permissions);
-                  const appliedModes = setDepartmentMode(
-                    currentModes,
-                    customDepartment,
-                    customDepartmentMode
-                  );
-
-                  setEmployeeModesById((previous) => ({
-                    ...previous,
-                    [selectedEmployee.employee_id]: appliedModes
-                  }));
-
-                  const saved = await saveEmployee(selectedEmployee, appliedModes);
+                    featureModesFromEmployeeRecord(selectedEmployee);
+                  const saved = await saveEmployee(selectedEmployee, currentModes);
                   if (saved) {
                     setCustomModalOpen(false);
                   }
@@ -1064,6 +1071,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
 
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               {customDepartmentFeatures.map((feature) => {
+                if (feature.id === 'executive_access') return null;
                 const mode = employeeModesById[selectedEmployee.employee_id]?.[feature.id] ?? 'none';
                 return (
                   <label className="text-xs" key={`custom-${selectedEmployee.employee_id}-${feature.id}`}>
