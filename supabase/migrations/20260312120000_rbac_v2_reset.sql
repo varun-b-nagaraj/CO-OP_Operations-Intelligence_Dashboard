@@ -178,7 +178,7 @@ INSERT INTO public.access_permissions (
   ('product.settings:view:all','product','settings','view','all','Product Settings View',TRUE),
   ('product.settings:manage:all','product','settings','manage','all','Product Settings Manage',TRUE),
   ('product.calendar:view:all','product','calendar','view','all','Product Calendar View',TRUE),
-  ('inventory.catalog:view:own','inventory','catalog','view','own','Inventory Catalog View',TRUE),
+  ('inventory.catalog:view:all','inventory','catalog','view','all','Inventory Catalog View',TRUE),
   ('inventory.catalog:edit:all','inventory','catalog','edit','all','Inventory Catalog Edit',TRUE),
   ('inventory.catalog:import:all','inventory','catalog','manage','all','Inventory Catalog Import',TRUE),
   ('inventory.sessions:join:assigned_location','inventory','sessions','join','assigned_location','Inventory Session Join',TRUE),
@@ -275,7 +275,7 @@ INSERT INTO public.access_role_permissions (role_key, permission_key) VALUES
   ('hr_staff','employee.schedule:view:own'),
   ('hr_staff','employee.accountability:view:own'),
   ('hr_staff','employee.requests:submit:own'),
-  ('inventory_admin','inventory.catalog:view:own'),
+  ('inventory_admin','inventory.catalog:view:all'),
   ('inventory_admin','inventory.catalog:edit:all'),
   ('inventory_admin','inventory.catalog:import:all'),
   ('inventory_admin','inventory.sessions:join:assigned_location'),
@@ -290,7 +290,7 @@ INSERT INTO public.access_role_permissions (role_key, permission_key) VALUES
   ('inventory_admin','inventory.calendar:view:all'),
   ('inventory_counter','inventory.sessions:join:assigned_location'),
   ('inventory_counter','inventory.counts:view:own'),
-  ('inventory_counter','inventory.catalog:view:own'),
+  ('inventory_counter','inventory.catalog:view:all'),
   ('inventory_counter','inventory.finalize_upload:view:own'),
   ('finance_manager','finance.upload:view:own'),
   ('finance_manager','finance.upload:upload:all'),
@@ -342,7 +342,7 @@ INSERT INTO public.access_role_permissions (role_key, permission_key) VALUES
   ('viewer','finance.reports:view:all'),
   ('viewer','marketing.events:view:own'),
   ('viewer','product.products:view:all'),
-  ('viewer','inventory.catalog:view:own'),
+  ('viewer','inventory.catalog:view:all'),
   ('viewer','employee.calendar:view:own')
 ON CONFLICT (role_key, permission_key) DO NOTHING;
 

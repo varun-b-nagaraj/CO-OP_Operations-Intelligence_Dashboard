@@ -7,7 +7,7 @@ import { ensureServerPermission } from '@/lib/server/permissions';
 export default async function InventoryPage() {
   const allowed =
     (await ensureServerPermission('inventory.sessions:join:assigned_location')) ||
-    (await ensureServerPermission('inventory.catalog:view:own'));
+    (await ensureServerPermission('inventory.catalog:view:all'));
   if (!allowed) {
     redirect('/');
   }

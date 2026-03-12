@@ -6,7 +6,7 @@ import { createServerClient } from '@/lib/supabase';
 
 export async function GET(request: NextRequest) {
   try {
-    const allowed = await ensureServerPermission('inventory.catalog:view:own');
+    const allowed = await ensureServerPermission('inventory.catalog:view:all');
     if (!allowed) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
     }

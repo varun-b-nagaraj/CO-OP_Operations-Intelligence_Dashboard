@@ -104,7 +104,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('product.settings:manage:all', 'Product Settings Manage', ['product.settings.edit']),
   permission('product.calendar:view:all', 'Product Calendar View', ['product.calendar.view']),
 
-  permission('inventory.catalog:view:own', 'Inventory Catalog View', ['inventory.catalog.view']),
+  permission('inventory.catalog:view:all', 'Inventory Catalog View', ['inventory.catalog.view', 'inventory.catalog:view:own']),
   permission('inventory.catalog:edit:all', 'Inventory Catalog Edit', ['inventory.catalog.edit']),
   permission('inventory.catalog:import:all', 'Inventory Catalog Import'),
   permission('inventory.sessions:join:assigned_location', 'Inventory Session Join', ['inventory.sessions.view']),
@@ -218,7 +218,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     description: 'Full inventory management including session creation/finalize/upload.',
     isSystem: true,
     permissions: [
-      'inventory.catalog:view:own',
+      'inventory.catalog:view:all',
       'inventory.catalog:edit:all',
       'inventory.catalog:import:all',
       'inventory.sessions:join:assigned_location',
@@ -241,7 +241,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     permissions: [
       'inventory.sessions:join:assigned_location',
       'inventory.counts:view:own',
-      'inventory.catalog:view:own',
+      'inventory.catalog:view:all',
       'inventory.finalize_upload:view:own'
     ]
   },
@@ -333,7 +333,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
       'finance.reports:view:all',
       'marketing.events:view:own',
       'product.products:view:all',
-      'inventory.catalog:view:own',
+      'inventory.catalog:view:all',
       'employee.calendar:view:own'
     ]
   }
