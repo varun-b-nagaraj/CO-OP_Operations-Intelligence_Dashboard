@@ -83,6 +83,29 @@ export interface ExecutiveOverviewData {
       totalMeetings: number;
     }>;
   };
+  shiftRequestInsights?: {
+    pendingCount: number;
+    pendingRequests: Array<{
+      requesterSNumber: string;
+      requesterName: string;
+      replacementSNumber: string;
+      replacementName: string;
+      shiftDate: string;
+      shiftPeriod: number;
+      shiftSlotKey: string;
+      requestedAt: string;
+      reason: string;
+    }>;
+    frequentRequesters: Array<{
+      requesterSNumber: string;
+      requesterName: string;
+      totalRequests: number;
+      pendingRequests: number;
+      approvedRequests: number;
+      deniedRequests: number;
+      lastRequestedAt: string;
+    }>;
+  };
 }
 
 export interface ExecutiveToolTraceItem {
@@ -220,6 +243,18 @@ type CalendarEventRow = {
   source_department: string | null;
 };
 
+type ShiftRequestRow = {
+  id: string;
+  shift_date: string;
+  shift_period: number;
+  shift_slot_key: string;
+  from_employee_s_number: string;
+  to_employee_s_number: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'denied';
+  requested_at: string;
+};
+
 interface AttendanceStats {
   expected: number;
   present: number;
@@ -314,6 +349,7 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const [
     newOrdersThisWeek,
     openShiftRequests,
+    shiftRequestRows,
     recentProductOrders,
     morningAttendanceRows,
     offPeriodAttendanceRows,
@@ -338,6 +374,17 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
             .eq('status', 'pending')
         )
       : Promise.resolve(0),
+    shiftRequestsTable
+      ? safeRows<ShiftRequestRow>(() =>
+          supabase
+            .from(shiftRequestsTable)
+            .select(
+              'id,shift_date,shift_period,shift_slot_key,from_employee_s_number,to_employee_s_number,reason,status,requested_at'
+            )
+            .order('requested_at', { ascending: false })
+            .limit(10000)
+        )
+      : Promise.resolve([]),
     safeRows<ProductOrderRow>(() =>
       supabase
         .from('product_purchase_orders')
@@ -455,7 +502,13 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
     new Set(recentMeetingAttendanceRows.map((row) => row.s_number).filter((sNumber): sNumber is string => Boolean(sNumber)))
   );
   const studentLookupSNumbers = Array.from(
-    new Set([...latestMorningSNumbers, ...latestMeetingSNumbers, ...meetingTrendSNumbers])
+    new Set([
+      ...latestMorningSNumbers,
+      ...latestMeetingSNumbers,
+      ...meetingTrendSNumbers,
+      ...shiftRequestRows.map((row) => row.from_employee_s_number),
+      ...shiftRequestRows.map((row) => row.to_employee_s_number)
+    ])
   );
 
   const latestMorningStudents =
@@ -531,6 +584,80 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const consistentMeetingSkipperSample = consistentMeetingSkippers
     .slice(0, 8)
     .map((row) => `${row.name} (${Math.round(row.attendanceRate)}%, ${row.presentExcused}/${row.totalMeetings})`);
+
+  const pendingShiftRequestRows = shiftRequestRows.filter((row) => row.status === 'pending');
+  const pendingShiftRequestDetails = pendingShiftRequestRows.slice(0, 20).map((row) => ({
+    requesterSNumber: row.from_employee_s_number,
+    requesterName: formatEmployeeName(row.from_employee_s_number, studentBySNumber),
+    replacementSNumber: row.to_employee_s_number,
+    replacementName: formatEmployeeName(row.to_employee_s_number, studentBySNumber),
+    shiftDate: row.shift_date,
+    shiftPeriod: row.shift_period,
+    shiftSlotKey: row.shift_slot_key,
+    requestedAt: row.requested_at,
+    reason: row.reason
+  }));
+
+  const requesterStats = new Map<
+    string,
+    {
+      totalRequests: number;
+      pendingRequests: number;
+      approvedRequests: number;
+      deniedRequests: number;
+      lastRequestedAt: string;
+    }
+  >();
+  for (const row of shiftRequestRows) {
+    const key = row.from_employee_s_number;
+    if (!key) continue;
+    const current = requesterStats.get(key) ?? {
+      totalRequests: 0,
+      pendingRequests: 0,
+      approvedRequests: 0,
+      deniedRequests: 0,
+      lastRequestedAt: ''
+    };
+    current.totalRequests += 1;
+    if (row.status === 'pending') current.pendingRequests += 1;
+    if (row.status === 'approved') current.approvedRequests += 1;
+    if (row.status === 'denied') current.deniedRequests += 1;
+    if (!current.lastRequestedAt || row.requested_at > current.lastRequestedAt) {
+      current.lastRequestedAt = row.requested_at;
+    }
+    requesterStats.set(key, current);
+  }
+
+  const frequentRequesters = Array.from(requesterStats.entries())
+    .map(([requesterSNumber, stats]) => ({
+      requesterSNumber,
+      requesterName: formatEmployeeName(requesterSNumber, studentBySNumber),
+      totalRequests: stats.totalRequests,
+      pendingRequests: stats.pendingRequests,
+      approvedRequests: stats.approvedRequests,
+      deniedRequests: stats.deniedRequests,
+      lastRequestedAt: stats.lastRequestedAt
+    }))
+    .filter((row) => row.totalRequests >= 2 || row.pendingRequests >= 1)
+    .sort((left, right) => {
+      if (left.pendingRequests !== right.pendingRequests) return right.pendingRequests - left.pendingRequests;
+      if (left.totalRequests !== right.totalRequests) return right.totalRequests - left.totalRequests;
+      return right.lastRequestedAt.localeCompare(left.lastRequestedAt);
+    })
+    .slice(0, 20);
+
+  const pendingRequestSample = pendingShiftRequestDetails
+    .slice(0, 6)
+    .map(
+      (row) =>
+        `${row.requesterName} -> ${row.replacementName} (${formatDate(row.shiftDate)} P${row.shiftPeriod}, requested ${formatDateTime(row.requestedAt)})`
+    );
+  const frequentRequesterSample = frequentRequesters
+    .slice(0, 8)
+    .map(
+      (row) =>
+        `${row.requesterName} (${row.totalRequests} total, ${row.pendingRequests} pending, last ${formatDateTime(row.lastRequestedAt)})`
+    );
 
   const latestMorningDateLabel = latestMorningDate ? formatDate(latestMorningDate) : 'No recent shift date';
   const latestMorningValue =
@@ -808,7 +935,13 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
           ? `Present roster sample: ${latestMorningPresentNames.join(', ')}.`
           : 'No present roster sample available.',
         `Off-period attendance rate: ${offPeriodRateLabel}.`,
-        `Pending shift requests: ${openShiftRequests}.`
+        `Pending shift requests: ${openShiftRequests}.`,
+        pendingRequestSample.length
+          ? `Pending request details: ${pendingRequestSample.join('; ')}.`
+          : 'No pending shift request details available.',
+        frequentRequesterSample.length
+          ? `Frequent requesters (historical): ${frequentRequesterSample.join('; ')}.`
+          : 'No repeat requester pattern detected in shift-request history.'
       ].join(' ')
     },
     {
@@ -845,6 +978,12 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
 
   const executiveBrief = [
     `Since the last 7 days, ${newOrdersThisWeek} new product orders were placed and ${openShiftRequests} HR shift requests remain pending.`,
+    pendingRequestSample.length
+      ? `Pending shift requests include: ${pendingRequestSample.slice(0, 3).join('; ')}.`
+      : 'No detailed pending shift request rows are available right now.',
+    frequentRequesterSample.length
+      ? `Top historical shift-request requesters: ${frequentRequesterSample.slice(0, 3).join('; ')}.`
+      : 'No high-volume shift requester pattern detected.',
     `Split-shift attendance average is ${splitAttendanceRateLabel} (morning ${morningRateLabel}, off-period ${offPeriodRateLabel}).`,
     `Most recent morning meeting (${latestMeetingDateLabel}) is ${latestMeetingValue}.`,
     `Morning meeting trend scan found ${consistentMeetingSkippers.length} student(s) below 50% attendance (min ${minMeetingsForFlag} meetings).`,
@@ -881,6 +1020,11 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
         presentExcused: row.presentExcused,
         totalMeetings: row.totalMeetings
       }))
+    },
+    shiftRequestInsights: {
+      pendingCount: openShiftRequests,
+      pendingRequests: pendingShiftRequestDetails,
+      frequentRequesters
     }
   };
 }
@@ -897,6 +1041,7 @@ function summarizeToolResult(toolId: string, overview: ExecutiveOverviewData): s
       const meetingCard = overview.summaryCards.find((card) => card.id === 'morning-meeting-recent');
       const splitCard = overview.summaryCards.find((card) => card.id === 'split-attendance-rate');
       const trend = overview.morningMeetingTrend;
+      const requestInsights = overview.shiftRequestInsights;
       const trendLine =
         trend && trend.underFiftyPercent.length
           ? `Consistent morning meeting under-50% attendance (min ${trend.minMeetingsForFlag} meetings): ${trend.underFiftyPercent
@@ -909,12 +1054,34 @@ function summarizeToolResult(toolId: string, overview: ExecutiveOverviewData): s
           : trend
             ? `No students under 50% morning meeting attendance (min ${trend.minMeetingsForFlag} meetings, ${trend.totalMeetings} meetings scanned).`
             : '';
+      const pendingRequestLine =
+        requestInsights && requestInsights.pendingRequests.length
+          ? `Pending shift requests (${requestInsights.pendingCount}): ${requestInsights.pendingRequests
+              .slice(0, 12)
+              .map(
+                (row) =>
+                  `${row.requesterName} -> ${row.replacementName} (${formatDate(row.shiftDate)} P${row.shiftPeriod}, ${formatDateTime(row.requestedAt)})`
+              )
+              .join('; ')}.`
+          : `Pending shift requests: ${requestInsights?.pendingCount ?? 0}.`;
+      const frequentRequesterLine =
+        requestInsights && requestInsights.frequentRequesters.length
+          ? `Historical high-volume requesters: ${requestInsights.frequentRequesters
+              .slice(0, 12)
+              .map(
+                (row) =>
+                  `${row.requesterName} (${row.totalRequests} total, ${row.pendingRequests} pending, last ${formatDateTime(row.lastRequestedAt)})`
+              )
+              .join('; ')}.`
+          : 'No historical high-volume shift requester pattern found.';
       return [
         hrHealth?.summary ?? 'No HR summary available.',
         splitCard ? `Split attendance: ${splitCard.value} (${splitCard.subtitle}).` : '',
         meetingCard ? `Morning meeting snapshot: ${meetingCard.value} (${meetingCard.subtitle}).` : '',
         trendLine,
-        morningCard ? `Morning shift snapshot: ${morningCard.value} (${morningCard.subtitle}).` : ''
+        morningCard ? `Morning shift snapshot: ${morningCard.value} (${morningCard.subtitle}).` : '',
+        pendingRequestLine,
+        frequentRequesterLine
       ]
         .filter(Boolean)
         .join(' ');

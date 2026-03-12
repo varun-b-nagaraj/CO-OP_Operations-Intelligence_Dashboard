@@ -667,34 +667,121 @@ export function ExecutiveDashboard() {
           message: trimmed,
           conversation: toConversation(snapshot),
           userKey,
-          sessionId: workingSessionId
+          sessionId: workingSessionId,
+          stream: true
         })
       });
 
-      const payload = (await response.json()) as {
-        ok: boolean;
-        assistantMessage?: string;
-        sessionId?: string;
-        error?: string;
-      };
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? 'Chat request failed.');
+      const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+      if (!response.ok) {
+        let message = 'Chat request failed.';
+        try {
+          const payload = (await response.json()) as { error?: string };
+          message = payload.error ?? message;
+        } catch {
+          // Ignore parse errors.
+        }
+        throw new Error(message);
       }
 
-      const assistantText = payload.assistantMessage ?? 'No response generated.';
+      let assistantText = '';
+      let finalSessionId = workingSessionId;
+      if (contentType.includes('text/event-stream')) {
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('Streaming response was unavailable.');
+        }
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let eventName = 'message';
+
+        const processEventBlock = (block: string) => {
+          const lines = block.split('\n');
+          const dataLines: string[] = [];
+          eventName = 'message';
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              eventName = line.slice(6).trim();
+              continue;
+            }
+            if (line.startsWith('data:')) {
+              dataLines.push(line.slice(5).trim());
+            }
+          }
+          if (dataLines.length === 0) return;
+          try {
+            const payload = JSON.parse(dataLines.join('\n')) as {
+              text?: string;
+              sessionId?: string;
+              assistantMessage?: string;
+              error?: string;
+            };
+            if (eventName === 'delta' && typeof payload.text === 'string') {
+              assistantText += payload.text;
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === pendingAssistantId
+                    ? {
+                        ...message,
+                        pending: true,
+                        content: assistantText
+                      }
+                    : message
+                )
+              );
+            } else if (eventName === 'done') {
+              finalSessionId = payload.sessionId ?? finalSessionId;
+              if (typeof payload.assistantMessage === 'string' && payload.assistantMessage.trim()) {
+                assistantText = payload.assistantMessage;
+              }
+            } else if (eventName === 'error') {
+              throw new Error(payload.error ?? 'Streaming failed.');
+            }
+          } catch (error) {
+            throw error instanceof Error ? error : new Error('Failed to parse streaming event.');
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() ?? '';
+          for (const eventBlock of events) {
+            if (!eventBlock.trim()) continue;
+            processEventBlock(eventBlock);
+          }
+        }
+        if (buffer.trim()) {
+          processEventBlock(buffer);
+        }
+      } else {
+        const payload = (await response.json()) as {
+          ok: boolean;
+          assistantMessage?: string;
+          sessionId?: string;
+          error?: string;
+        };
+        if (!payload.ok) {
+          throw new Error(payload.error ?? 'Chat request failed.');
+        }
+        assistantText = payload.assistantMessage ?? 'No response generated.';
+        finalSessionId = payload.sessionId ?? finalSessionId;
+      }
+
       setMessages((current) =>
         current.map((message) =>
           message.id === pendingAssistantId
             ? {
                 ...message,
                 pending: false,
-                content: assistantText
+                content: assistantText || 'No response generated.'
               }
             : message
         )
       );
 
-      const finalSessionId = payload.sessionId ?? workingSessionId;
       setActiveSessionId(finalSessionId);
       await loadSessions(userKey, finalSessionId);
       void loadOverview();

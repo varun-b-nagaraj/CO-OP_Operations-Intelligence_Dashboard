@@ -40,6 +40,69 @@ interface ToolingCachePayload {
   toolTrace: ExecutiveToolTraceItem[];
 }
 
+function sseEvent(event: string, payload: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+}
+
+async function streamOllamaMessage(
+  response: Response,
+  onDelta: (text: string) => void
+): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed) as { message?: { content?: unknown }; response?: unknown; done?: unknown };
+        const delta =
+          typeof parsed.message?.content === 'string'
+            ? parsed.message.content
+            : typeof parsed.response === 'string'
+              ? parsed.response
+              : '';
+        if (delta) {
+          content += delta;
+          onDelta(delta);
+        }
+      } catch {
+        // Ignore non-JSON lines from upstream stream.
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    try {
+      const parsed = JSON.parse(buffer.trim()) as { message?: { content?: unknown }; response?: unknown };
+      const delta =
+        typeof parsed.message?.content === 'string'
+          ? parsed.message.content
+          : typeof parsed.response === 'string'
+            ? parsed.response
+            : '';
+      if (delta) {
+        content += delta;
+        onDelta(delta);
+      }
+    } catch {
+      // Ignore trailing parse errors.
+    }
+  }
+
+  return content;
+}
+
 function parseAssistantMessage(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;
   const candidate = payload as { message?: { content?: unknown }; response?: unknown };
@@ -239,9 +302,11 @@ export async function POST(request: NextRequest) {
       sessionId?: unknown;
       userKey?: unknown;
       conversation?: unknown;
+      stream?: unknown;
     };
 
     const message = typeof body.message === 'string' ? body.message.trim() : '';
+    const streamRequested = body.stream === true;
     if (!message) {
       return NextResponse.json({ ok: false, error: 'Message is required.' }, { status: 400 });
     }
@@ -396,7 +461,7 @@ export async function POST(request: NextRequest) {
     const upstream = await proxyOllamaChatRequest({
       body: {
         model,
-        stream: false,
+        stream: streamRequested,
         messages: [
           { role: 'system', content: systemPrompt },
           ...recentConversation.map((entry) => ({
@@ -436,7 +501,7 @@ export async function POST(request: NextRequest) {
       ]
         .filter(Boolean)
         .join(' ');
-    } else {
+    } else if (!streamRequested) {
       const upstreamJson = (await upstream.json()) as unknown;
       assistantMessage =
         parseAssistantMessage(upstreamJson) ??
@@ -446,6 +511,14 @@ export async function POST(request: NextRequest) {
         ]
           .filter(Boolean)
           .join(' ');
+      if (!assistantMessage) {
+        assistantMessage = [
+          'Tool execution finished, but the model response was empty.',
+          overview ? `Executive snapshot: ${overview.executiveBrief}` : ''
+        ]
+          .filter(Boolean)
+          .join(' ');
+      }
     }
 
     const assistantMetadata: Record<string, unknown> = {
@@ -459,6 +532,125 @@ export async function POST(request: NextRequest) {
         overview,
         toolTrace: overviewToolTrace
       } satisfies ToolingCachePayload;
+    }
+
+    if (streamRequested) {
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          const send = (event: string, payload: unknown) => {
+            controller.enqueue(encoder.encode(sseEvent(event, payload)));
+          };
+
+          try {
+            send('start', { sessionId, model });
+            if (source === 'ollama' && upstream.ok) {
+              assistantMessage = await streamOllamaMessage(upstream, (delta) => {
+                send('delta', { text: delta });
+              });
+            } else if (assistantMessage) {
+              send('delta', { text: assistantMessage });
+            }
+
+            await insertConversationMessage({
+              userKey,
+              sessionId,
+              role: 'assistant',
+              content: assistantMessage,
+              model: model,
+              metadata: assistantMetadata
+            });
+
+            const memoryWriteStart = new Date().toISOString();
+            let memoryWriteCount = 0;
+            const shouldRunMemoryWriter = wantsOperationalData || message.trim().length >= 10;
+
+            if (!shouldRunMemoryWriter) {
+              const memoryWriteEnd = new Date().toISOString();
+              toolTrace.push(
+                toToolTraceItem({
+                  id: 'sync_user_memory',
+                  status: 'complete',
+                  detail:
+                    'Condense durable facts with qwen3:8b and sync memory. Result: skipped for short conversational turn.',
+                  startedAt: memoryWriteStart,
+                  finishedAt: memoryWriteEnd
+                })
+              );
+            } else {
+              try {
+                const extractedFacts = await extractMemoryFactsWithSmallModel({
+                  userMessage: message,
+                  assistantMessage,
+                  existingFactsPrompt: memoryContext
+                });
+                memoryWriteCount = await upsertUserMemoryFacts(
+                  userKey,
+                  sessionId,
+                  extractedFacts.map((fact) => ({
+                    factText: fact.factText,
+                    category: fact.category,
+                    importance: fact.importance
+                  }))
+                );
+                const memoryWriteEnd = new Date().toISOString();
+                toolTrace.push(
+                  toToolTraceItem({
+                    id: 'sync_user_memory',
+                    status: 'complete',
+                    detail:
+                      memoryWriteCount > 0
+                        ? `Condense durable facts with qwen3:8b and sync memory. Result: saved ${memoryWriteCount} condensed fact(s).`
+                        : 'Condense durable facts with qwen3:8b and sync memory. Result: no new durable facts to store.',
+                    startedAt: memoryWriteStart,
+                    finishedAt: memoryWriteEnd
+                  })
+                );
+              } catch (error) {
+                const memoryWriteEnd = new Date().toISOString();
+                toolTrace.push(
+                  toToolTraceItem({
+                    id: 'sync_user_memory',
+                    status: 'failed',
+                    detail: `Condense durable facts with qwen3:8b and sync memory. Result: ${
+                      error instanceof Error ? error.message : 'Memory writer failed.'
+                    }`,
+                    startedAt: memoryWriteStart,
+                    finishedAt: memoryWriteEnd
+                  })
+                );
+              }
+            }
+
+            send('done', {
+              ok: true,
+              source,
+              model,
+              memoryModel: process.env.OLLAMA_MEMORY_MODEL?.trim() || 'qwen3:8b',
+              userKey,
+              sessionId,
+              assistantMessage,
+              toolTrace: [...toolTrace, ...overviewToolTrace],
+              memoryFactsWritten: memoryWriteCount
+            });
+          } catch (error) {
+            send('error', {
+              ok: false,
+              error: error instanceof Error ? error.message : 'Failed during executive chat streaming.'
+            });
+          } finally {
+            controller.close();
+          }
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive'
+        }
+      });
     }
 
     await insertConversationMessage({
