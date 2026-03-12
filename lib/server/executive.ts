@@ -106,6 +106,17 @@ export interface ExecutiveOverviewData {
       lastRequestedAt: string;
     }>;
   };
+  tomorrowSchedule?: {
+    date: string;
+    totalWorkers: number;
+    workers: Array<{
+      sNumber: string;
+      name: string;
+      period: number;
+      shiftSlotKey: string;
+      source: string;
+    }>;
+  };
 }
 
 export interface ExecutiveToolTraceItem {
@@ -135,6 +146,15 @@ function daysAgoIso(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toISOString();
+}
+
+function daysFromNowLocalIsoDate(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function orderSeverity(status: string): ExecutiveFeedItem['severity'] {
@@ -256,6 +276,13 @@ type ShiftRequestRow = {
 };
 
 type ShiftRequestRowRaw = Record<string, unknown>;
+type ShiftScheduleRow = {
+  shift_date: string;
+  shift_period: number;
+  shift_slot_key: string;
+  employee_s_number: string;
+  source: string | null;
+};
 
 interface AttendanceStats {
   expected: number;
@@ -430,20 +457,24 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const nowIso = new Date().toISOString();
   const weekAgoIso = daysAgoIso(7);
   const twoWeeksAgoDate = daysAgoIso(14).slice(0, 10);
+  const tomorrowDate = daysFromNowLocalIsoDate(1);
   const meetingTrendEndDate = nowIso.slice(0, 10);
   const minMeetingsForFlag = 3;
 
-  const [shiftRequestsTable, morningAttendanceTable, offPeriodAttendanceTable, meetingAttendanceTable] = await Promise.all([
-    resolveTableOrNull(supabase, 'hr_shift_change_requests', 'shift_change_requests'),
-    resolveTableOrNull(supabase, 'hr_morning_shift_attendance', 'morning_shift_attendance', 'shift_date'),
-    resolveTableOrNull(supabase, 'hr_off_period_shift_attendance', 'off_period_shift_attendance', 'shift_date'),
-    resolveTableOrNull(supabase, 'hr_meeting_attendance_records', 'meeting_attendance_records', 'checkin_date')
-  ]);
+  const [shiftRequestsTable, shiftAttendanceTable, morningAttendanceTable, offPeriodAttendanceTable, meetingAttendanceTable] =
+    await Promise.all([
+      resolveTableOrNull(supabase, 'hr_shift_change_requests', 'shift_change_requests'),
+      resolveTableOrNull(supabase, 'hr_shift_attendance', 'shift_attendance', 'shift_date'),
+      resolveTableOrNull(supabase, 'hr_morning_shift_attendance', 'morning_shift_attendance', 'shift_date'),
+      resolveTableOrNull(supabase, 'hr_off_period_shift_attendance', 'off_period_shift_attendance', 'shift_date'),
+      resolveTableOrNull(supabase, 'hr_meeting_attendance_records', 'meeting_attendance_records', 'checkin_date')
+    ]);
 
   const [
     newOrdersThisWeek,
     openShiftRequests,
     shiftRequestRowsSet,
+    tomorrowScheduleRows,
     recentProductOrders,
     morningAttendanceRows,
     offPeriodAttendanceRows,
@@ -471,6 +502,17 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
     shiftRequestsTable
       ? fetchShiftRequestRows(supabase, shiftRequestsTable)
       : Promise.resolve({ allRows: [], pendingRows: [] }),
+    shiftAttendanceTable
+      ? safeRows<ShiftScheduleRow>(() =>
+          supabase
+            .from(shiftAttendanceTable)
+            .select('shift_date,shift_period,shift_slot_key,employee_s_number,source')
+            .eq('shift_date', tomorrowDate)
+            .in('source', ['scheduler', 'shift_exchange'])
+            .order('shift_period', { ascending: true })
+            .limit(6000)
+        )
+      : Promise.resolve([]),
     safeRows<ProductOrderRow>(() =>
       supabase
         .from('product_purchase_orders')
@@ -597,6 +639,7 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       ...latestMorningSNumbers,
       ...latestMeetingSNumbers,
       ...meetingTrendSNumbers,
+      ...tomorrowScheduleRows.map((row) => row.employee_s_number),
       ...shiftRequestRows.map((row) => row.from_employee_s_number),
       ...shiftRequestRows.map((row) => row.to_employee_s_number)
     ])
@@ -634,6 +677,23 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const latestMeetingAbsentNames = Array.from(
     new Set(latestMeetingAbsentRows.map((row) => formatEmployeeName(row.s_number, studentBySNumber)))
   );
+  const tomorrowWorkers = tomorrowScheduleRows
+    .map((row) => ({
+      sNumber: row.employee_s_number,
+      name: formatEmployeeName(row.employee_s_number, studentBySNumber),
+      period: Number(row.shift_period ?? 0),
+      shiftSlotKey: String(row.shift_slot_key ?? ''),
+      source: String(row.source ?? 'scheduler')
+    }))
+    .filter((row) => row.sNumber && row.period > 0)
+    .sort((left, right) => {
+      if (left.period !== right.period) return left.period - right.period;
+      if (left.name !== right.name) return left.name.localeCompare(right.name);
+      return left.sNumber.localeCompare(right.sNumber);
+    });
+  const tomorrowWorkerSample = tomorrowWorkers
+    .slice(0, 10)
+    .map((row) => `${row.name} (P${row.period})`);
   const latestMeetingDateLabel = latestMeetingDate ? formatDate(latestMeetingDate) : 'No recent meeting date';
   const latestMeetingValue = latestMeetingRows.length
     ? `${latestMeetingPresentRows.length}/${latestMeetingRows.length} present/excused`
@@ -1026,6 +1086,10 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
           : 'No present roster sample available.',
         `Off-period attendance rate: ${offPeriodRateLabel}.`,
         `Pending shift requests: ${openShiftRequests}.`,
+        `Tomorrow schedule (${tomorrowDate}): ${tomorrowWorkers.length} scheduled worker-slot assignments.`,
+        tomorrowWorkerSample.length
+          ? `Tomorrow roster sample: ${tomorrowWorkerSample.join(', ')}.`
+          : 'No tomorrow roster rows found in schedule-backed attendance.',
         pendingRequestSample.length
           ? `Pending request details: ${pendingRequestSample.join('; ')}.`
           : 'No pending shift request details available.',
@@ -1074,6 +1138,10 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
     frequentRequesterSample.length
       ? `Top historical shift-request requesters: ${frequentRequesterSample.slice(0, 3).join('; ')}.`
       : 'No high-volume shift requester pattern detected.',
+    `Tomorrow schedule (${tomorrowDate}) has ${tomorrowWorkers.length} scheduled worker-slot assignments.`,
+    tomorrowWorkerSample.length
+      ? `Tomorrow roster sample: ${tomorrowWorkerSample.slice(0, 6).join(', ')}.`
+      : 'No tomorrow schedule roster rows found right now.',
     `Split-shift attendance average is ${splitAttendanceRateLabel} (morning ${morningRateLabel}, off-period ${offPeriodRateLabel}).`,
     `Most recent morning meeting (${latestMeetingDateLabel}) is ${latestMeetingValue}.`,
     `Morning meeting trend scan found ${consistentMeetingSkippers.length} student(s) below 50% attendance (min ${minMeetingsForFlag} meetings).`,
@@ -1115,6 +1183,11 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
       pendingCount: openShiftRequests,
       pendingRequests: pendingShiftRequestDetails,
       frequentRequesters
+    },
+    tomorrowSchedule: {
+      date: tomorrowDate,
+      totalWorkers: tomorrowWorkers.length,
+      workers: tomorrowWorkers.slice(0, 200)
     }
   };
 }
@@ -1132,6 +1205,7 @@ function summarizeToolResult(toolId: string, overview: ExecutiveOverviewData): s
       const splitCard = overview.summaryCards.find((card) => card.id === 'split-attendance-rate');
       const trend = overview.morningMeetingTrend;
       const requestInsights = overview.shiftRequestInsights;
+      const tomorrowSchedule = overview.tomorrowSchedule;
       const trendLine =
         trend && trend.underFiftyPercent.length
           ? `Consistent morning meeting under-50% attendance (min ${trend.minMeetingsForFlag} meetings): ${trend.underFiftyPercent
@@ -1164,12 +1238,20 @@ function summarizeToolResult(toolId: string, overview: ExecutiveOverviewData): s
               )
               .join('; ')}.`
           : 'No historical high-volume shift requester pattern found.';
+      const tomorrowScheduleLine =
+        tomorrowSchedule && tomorrowSchedule.workers.length
+          ? `Tomorrow schedule (${tomorrowSchedule.date}) workers: ${tomorrowSchedule.workers
+              .slice(0, 20)
+              .map((row) => `${row.name} (P${row.period})`)
+              .join('; ')}.`
+          : `Tomorrow schedule: no worker rows found for ${tomorrowSchedule?.date ?? 'tomorrow'}.`;
       return [
         hrHealth?.summary ?? 'No HR summary available.',
         splitCard ? `Split attendance: ${splitCard.value} (${splitCard.subtitle}).` : '',
         meetingCard ? `Morning meeting snapshot: ${meetingCard.value} (${meetingCard.subtitle}).` : '',
         trendLine,
         morningCard ? `Morning shift snapshot: ${morningCard.value} (${morningCard.subtitle}).` : '',
+        tomorrowScheduleLine,
         pendingRequestLine,
         frequentRequesterLine
       ]
