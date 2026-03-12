@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 
 import { useCurrentUser, usePermission } from '@/lib/permissions';
 
@@ -183,26 +183,47 @@ function getDepartmentMode(modes: Record<string, AccessMode>, department: Depart
   return hasView ? 'view' : 'none';
 }
 
-function getOverallAccessMode(modes: Record<string, AccessMode>): AccessMode {
-  let hasView = false;
-  for (const feature of FEATURE_CATALOG) {
-    const mode = modes[feature.id] ?? 'none';
-    if (mode === 'edit') return 'edit';
-    if (mode === 'view') hasView = true;
+function departmentBadgeClass(department: DepartmentKey): string {
+  switch (department) {
+    case 'executive':
+      return 'border-rose-300 bg-rose-100 text-rose-800';
+    case 'hr':
+      return 'border-sky-300 bg-sky-100 text-sky-800';
+    case 'cfa':
+      return 'border-amber-300 bg-amber-100 text-amber-800';
+    case 'finance':
+      return 'border-emerald-300 bg-emerald-100 text-emerald-800';
+    case 'marketing':
+      return 'border-fuchsia-300 bg-fuchsia-100 text-fuchsia-800';
+    case 'product':
+      return 'border-indigo-300 bg-indigo-100 text-indigo-800';
+    case 'inventory':
+      return 'border-orange-300 bg-orange-100 text-orange-800';
+    case 'employee':
+      return 'border-slate-300 bg-slate-100 text-slate-800';
+    default:
+      return 'border-neutral-300 bg-neutral-100 text-neutral-700';
   }
-  return hasView ? 'view' : 'none';
 }
 
-function modeBadgeClass(mode: AccessMode): string {
-  if (mode === 'edit') return 'border-emerald-300 bg-emerald-100 text-emerald-800';
-  if (mode === 'view') return 'border-sky-300 bg-sky-100 text-sky-800';
-  return 'border-neutral-300 bg-neutral-100 text-neutral-700';
-}
-
-function roleSummary(employee: EmployeeRow): string {
-  const base = employee.role_name ?? employee.role_key ?? 'No role';
-  const hasCustom = Array.isArray(employee.overrides) && employee.overrides.length > 0;
+function roleSummary(baseRole: string, hasCustom: boolean): string {
+  const base = baseRole || 'No role';
   return hasCustom ? `${base} + extra (custom)` : base;
+}
+
+function replaceWithDepartmentViewOverlay(
+  current: Record<string, AccessMode>,
+  department: DepartmentKey
+): Record<string, AccessMode> {
+  const next: Record<string, AccessMode> = {};
+  for (const feature of FEATURE_CATALOG) {
+    if (feature.department === department && feature.viewPermission) {
+      next[feature.id] = 'view';
+    } else {
+      next[feature.id] = 'none';
+    }
+  }
+  return { ...current, ...next };
 }
 
 interface AccessControlTabProps {
@@ -238,8 +259,10 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
   const [employeeRoleDraftById, setEmployeeRoleDraftById] = useState<Record<string, string>>({});
   const [employeePasswordDraftById, setEmployeePasswordDraftById] = useState<Record<string, string>>({});
   const [employeeModesById, setEmployeeModesById] = useState<Record<string, Record<string, AccessMode>>>({});
-  const [employeeDepartmentQuick, setEmployeeDepartmentQuick] = useState<DepartmentKey>('executive');
-  const [employeeDepartmentQuickMode, setEmployeeDepartmentQuickMode] = useState<AccessMode>('none');
+  const [employeeDepartmentQuickById, setEmployeeDepartmentQuickById] = useState<
+    Record<string, DepartmentKey>
+  >({});
+  const [showAllDepartmentsById, setShowAllDepartmentsById] = useState<Record<string, boolean>>({});
 
   const [customModalOpen, setCustomModalOpen] = useState(false);
   const [customDepartment, setCustomDepartment] = useState<DepartmentKey>('executive');
@@ -303,6 +326,21 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
         return next;
       });
 
+      setEmployeeDepartmentQuickById((previous) => {
+        const next = { ...previous };
+        for (const employee of employeeRows) {
+          const current =
+            previous[employee.employee_id] ??
+            (DEPARTMENTS.find(
+              (department) =>
+                getDepartmentMode(featureModesFromPermissions(employee.permissions), department.key) !== 'none'
+            )?.key ??
+              'employee');
+          next[employee.employee_id] = current;
+        }
+        return next;
+      });
+
       if (!selectedRoleId && roleRows.length > 0) setSelectedRoleId(roleRows[0].id);
       if (!selectedEmployeeId && employeeRows.length > 0) {
         setSelectedEmployeeId(employeeRows[0].employee_id);
@@ -344,6 +382,14 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
     () => employees.find((employee) => employee.employee_id === selectedEmployeeId) ?? null,
     [employees, selectedEmployeeId]
   );
+
+  const roleMetaById = useMemo(() => {
+    const next = new Map<string, { role_name: string; role_key: string }>();
+    for (const role of roles) {
+      next.set(role.id, { role_name: role.role_name, role_key: role.role_key });
+    }
+    return next;
+  }, [roles]);
 
   const roleDepartmentFeatures = useMemo(
     () => FEATURE_CATALOG.filter((feature) => feature.department === selectedRoleDepartment),
@@ -405,14 +451,18 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
     await loadData();
   };
 
-  const saveSelectedEmployee = async () => {
-    if (!canEdit || !selectedEmployee) return;
+  const saveEmployee = async (employee: EmployeeRow) => {
+    if (!canEdit) return;
 
-    const roleTemplateId = employeeRoleDraftById[selectedEmployee.employee_id] ?? '';
-    const password = employeePasswordDraftById[selectedEmployee.employee_id] ?? '';
-    const overrides = overridesFromModes(employeeModesById[selectedEmployee.employee_id] ?? {});
+    const roleTemplateId = employeeRoleDraftById[employee.employee_id] ?? '';
+    const password = employeePasswordDraftById[employee.employee_id] ?? '';
+    const baseModes =
+      employeeModesById[employee.employee_id] ?? featureModesFromPermissions(employee.permissions);
+    const quickDepartment = employeeDepartmentQuickById[employee.employee_id] ?? 'employee';
+    const quickOverlayModes = replaceWithDepartmentViewOverlay(baseModes, quickDepartment);
+    const overrides = overridesFromModes(quickOverlayModes);
 
-    const response = await fetch(`/api/executive/access/employees/${selectedEmployee.employee_id}`, {
+    const response = await fetch(`/api/executive/access/employees/${employee.employee_id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -428,8 +478,8 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
       return;
     }
 
-    setEmployeePasswordDraftById((previous) => ({ ...previous, [selectedEmployee.employee_id]: '' }));
-    setStatus(`Saved employee: ${selectedEmployee.employee_name}.`);
+    setEmployeePasswordDraftById((previous) => ({ ...previous, [employee.employee_id]: '' }));
+    setStatus(`Saved employee: ${employee.employee_name}.`);
     await loadData();
   };
 
@@ -633,7 +683,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
               onClick={() => setAddEmployeeOpen((value) => !value)}
               type="button"
             >
-              {addEmployeeOpen ? 'Close Add Employee' : 'Add Employee (Exec)'}
+              {addEmployeeOpen ? 'Close Add Employee' : 'Add Employee'}
             </button>
           </div>
 
@@ -659,7 +709,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                 value={newEmployeePassword}
               />
               <p className="text-xs text-neutral-600 md:col-span-2">
-                Employees created from Executive start as not schedulable; HR-created employees keep HR flow defaults.
+                New employees default to the general Employee role and start as not schedulable.
               </p>
               <button
                 className="min-h-[36px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:opacity-50"
@@ -681,196 +731,197 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
             value={employeeSearch}
           />
 
-          <div className="max-h-72 overflow-auto border border-neutral-300">
+          <div className="border border-neutral-300">
             <table className="min-w-full text-sm">
               <thead className="bg-neutral-100">
                 <tr>
                   <th className="border-b border-neutral-300 p-2 text-left">Employee</th>
                   <th className="border-b border-neutral-300 p-2 text-left">Role Summary</th>
                   <th className="border-b border-neutral-300 p-2 text-left">Departments</th>
-                  <th className="border-b border-neutral-300 p-2 text-left">Access Level</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredEmployees.map((employee) => {
-                  const modes =
+                  const baseModes =
                     employeeModesById[employee.employee_id] ??
                     featureModesFromPermissions(employee.permissions);
-                  const overallMode = getOverallAccessMode(modes);
+                  const quickDepartment = employeeDepartmentQuickById[employee.employee_id] ?? 'employee';
+                  const effectiveModes = replaceWithDepartmentViewOverlay(baseModes, quickDepartment);
+                  const draftedRoleId = employeeRoleDraftById[employee.employee_id];
+                  const draftedRoleMeta = draftedRoleId ? roleMetaById.get(draftedRoleId) : null;
+                  const roleLabel =
+                    draftedRoleId === ''
+                      ? 'No role'
+                      : draftedRoleMeta?.role_name ?? employee.role_name ?? employee.role_key ?? 'No role';
+                  const hasCustom = Array.isArray(employee.overrides) && employee.overrides.length > 0;
+                  const isExpanded = selectedEmployeeId === employee.employee_id;
                   const activeDepartments = DEPARTMENTS.filter((department) => {
-                    return getDepartmentMode(modes, department.key) !== 'none';
+                    return getDepartmentMode(effectiveModes, department.key) !== 'none';
                   }).map((department) => ({
                     ...department,
-                    mode: getDepartmentMode(modes, department.key)
+                    mode: getDepartmentMode(effectiveModes, department.key)
                   }));
+                  const showAll = Boolean(showAllDepartmentsById[employee.employee_id]);
+                  const visibleDepartments = showAll ? activeDepartments : activeDepartments.slice(0, 1);
 
                   return (
-                    <tr
-                      className={`border-b border-neutral-200 ${
-                        employee.employee_id === selectedEmployeeId ? 'bg-neutral-50' : ''
-                      }`}
-                      key={employee.employee_id}
-                    >
-                      <td className="p-2">
-                        <button
-                          className="text-left underline"
-                          onClick={() => setSelectedEmployeeId(employee.employee_id)}
-                          type="button"
-                        >
-                          {employee.employee_name} ({employee.s_number})
-                        </button>
-                      </td>
-                      <td className="p-2">{roleSummary(employee)}</td>
-                      <td className="p-2">
-                        <div className="flex flex-wrap gap-1">
-                          {activeDepartments.length === 0 ? (
-                            <span className="rounded border border-neutral-300 bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700">
-                              none
-                            </span>
-                          ) : (
-                            activeDepartments.map((department) => (
-                              <span
-                                className={`rounded border px-1.5 py-0.5 text-xs ${modeBadgeClass(
-                                  department.mode
-                                )}`}
-                                key={`${employee.employee_id}-${department.key}`}
-                              >
-                                {department.label}
+                    <Fragment key={employee.employee_id}>
+                      <tr
+                        className={`cursor-pointer border-b border-neutral-200 ${
+                          isExpanded ? 'bg-neutral-50' : ''
+                        }`}
+                        onClick={() =>
+                          setSelectedEmployeeId((previous) =>
+                            previous === employee.employee_id ? '' : employee.employee_id
+                          )
+                        }
+                      >
+                        <td className="p-2">
+                          <span className="text-left">
+                            {employee.employee_name} ({employee.s_number})
+                          </span>
+                        </td>
+                        <td className="p-2">
+                          <span className="text-left">
+                            {roleSummary(roleLabel, hasCustom)}
+                          </span>
+                        </td>
+                        <td className="p-2">
+                          <div className="flex flex-wrap items-center gap-1">
+                            {activeDepartments.length === 0 ? (
+                              <span className="rounded border border-neutral-300 bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700">
+                                none
                               </span>
-                            ))
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-2">
-                        <span
-                          className={`inline-block rounded border px-1.5 py-0.5 text-xs font-medium uppercase ${modeBadgeClass(
-                            overallMode
-                          )}`}
-                        >
-                          {overallMode}
-                        </span>
-                      </td>
-                    </tr>
+                            ) : (
+                              visibleDepartments.map((department) => (
+                                <span
+                                  className={`rounded border px-1.5 py-0.5 text-xs ${departmentBadgeClass(
+                                    department.key
+                                  )}`}
+                                  key={`${employee.employee_id}-${department.key}`}
+                                >
+                                  {department.label}
+                                </span>
+                              ))
+                            )}
+                            {activeDepartments.length > 1 ? (
+                              <button
+                                className="text-xs text-neutral-700 underline"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setShowAllDepartmentsById((previous) => ({
+                                    ...previous,
+                                    [employee.employee_id]: !showAll
+                                  }));
+                                }}
+                                type="button"
+                              >
+                                {showAll
+                                  ? 'show less'
+                                  : `show ${activeDepartments.length - visibleDepartments.length} more`}
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {isExpanded ? (
+                        <tr className="border-b border-neutral-200 bg-white">
+                          <td className="p-3" colSpan={3}>
+                            <div className="grid gap-2 md:grid-cols-3">
+                              <label className="text-xs">
+                                Role Template
+                                <select
+                                  className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2"
+                                  onChange={(event) =>
+                                    setEmployeeRoleDraftById((previous) => ({
+                                      ...previous,
+                                      [employee.employee_id]: event.target.value
+                                    }))
+                                  }
+                                  value={employeeRoleDraftById[employee.employee_id] ?? ''}
+                                >
+                                  <option value="">No role</option>
+                                  {roles.map((role) => (
+                                    <option key={role.id} value={role.id}>
+                                      {role.role_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label className="text-xs">
+                                Change Password
+                                <input
+                                  className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2"
+                                  onChange={(event) =>
+                                    setEmployeePasswordDraftById((previous) => ({
+                                      ...previous,
+                                      [employee.employee_id]: event.target.value
+                                    }))
+                                  }
+                                  type="password"
+                                  value={employeePasswordDraftById[employee.employee_id] ?? ''}
+                                />
+                              </label>
+
+                              <label className="text-xs">
+                                Quick Department (view for whole department)
+                                <select
+                                  className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2"
+                                  onChange={(event) =>
+                                    setEmployeeDepartmentQuickById((previous) => ({
+                                      ...previous,
+                                      [employee.employee_id]: event.target.value as DepartmentKey
+                                    }))
+                                  }
+                                  value={employeeDepartmentQuickById[employee.employee_id] ?? 'employee'}
+                                >
+                                  {DEPARTMENTS.map((department) => (
+                                    <option key={department.key} value={department.key}>
+                                      {department.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <button
+                                className="min-h-[34px] border border-neutral-500 px-3 text-xs"
+                                onClick={() => {
+                                  setSelectedEmployeeId(employee.employee_id);
+                                  setCustomModalOpen(true);
+                                  setCustomDepartment(
+                                    employeeDepartmentQuickById[employee.employee_id] ?? 'employee'
+                                  );
+                                  setCustomDepartmentMode('view');
+                                }}
+                                type="button"
+                              >
+                                Custom Edit Roles
+                              </button>
+
+                              <button
+                                className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:opacity-50"
+                                disabled={!canEdit}
+                                onClick={() => {
+                                  void saveEmployee(employee);
+                                }}
+                                type="button"
+                              >
+                                Save Employee Access
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
-
-          {selectedEmployee ? (
-            <div className="space-y-3 border border-neutral-300 p-3">
-              <p className="text-sm font-medium">
-                {selectedEmployee.employee_name} ({selectedEmployee.s_number})
-              </p>
-
-              <div className="grid gap-2 md:grid-cols-3">
-                <label className="text-xs">
-                  Role Template
-                  <select
-                    className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2"
-                    onChange={(event) =>
-                      setEmployeeRoleDraftById((previous) => ({
-                        ...previous,
-                        [selectedEmployee.employee_id]: event.target.value
-                      }))
-                    }
-                    value={employeeRoleDraftById[selectedEmployee.employee_id] ?? ''}
-                  >
-                    <option value="">No role</option>
-                    {roles.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {role.role_name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="text-xs">
-                  Change Password
-                  <input
-                    className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2"
-                    onChange={(event) =>
-                      setEmployeePasswordDraftById((previous) => ({
-                        ...previous,
-                        [selectedEmployee.employee_id]: event.target.value
-                      }))
-                    }
-                    type="password"
-                    value={employeePasswordDraftById[selectedEmployee.employee_id] ?? ''}
-                  />
-                </label>
-
-                <div className="text-xs">
-                  <p>Quick Department Change</p>
-                  <div className="mt-1 flex gap-1">
-                    <select
-                      className="min-h-[34px] w-full border border-neutral-300 px-2"
-                      onChange={(event) => setEmployeeDepartmentQuick(event.target.value as DepartmentKey)}
-                      value={employeeDepartmentQuick}
-                    >
-                      {DEPARTMENTS.map((department) => (
-                        <option key={department.key} value={department.key}>
-                          {department.label}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="min-h-[34px] w-full border border-neutral-300 px-2"
-                      onChange={(event) => setEmployeeDepartmentQuickMode(event.target.value as AccessMode)}
-                      value={employeeDepartmentQuickMode}
-                    >
-                      <option value="none">none</option>
-                      <option value="view">view</option>
-                      <option value="edit">edit</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className="min-h-[34px] border border-neutral-500 px-3 text-xs disabled:opacity-50"
-                  disabled={!canEdit}
-                  onClick={() => {
-                    setEmployeeModesById((previous) => ({
-                      ...previous,
-                      [selectedEmployee.employee_id]: setDepartmentMode(
-                        previous[selectedEmployee.employee_id] ?? {},
-                        employeeDepartmentQuick,
-                        employeeDepartmentQuickMode
-                      )
-                    }));
-                  }}
-                  type="button"
-                >
-                  Apply Quick Department Change
-                </button>
-
-                <button
-                  className="min-h-[34px] border border-neutral-500 px-3 text-xs"
-                  onClick={() => {
-                    setCustomModalOpen(true);
-                    setCustomDepartment(employeeDepartmentQuick);
-                    setCustomDepartmentMode(employeeDepartmentQuickMode);
-                  }}
-                  type="button"
-                >
-                  Custom Edit Roles
-                </button>
-
-                <button
-                  className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:opacity-50"
-                  disabled={!canEdit}
-                  onClick={() => {
-                    void saveSelectedEmployee();
-                  }}
-                  type="button"
-                >
-                  Save Employee Access
-                </button>
-              </div>
-            </div>
-          ) : null}
         </section>
       ) : null}
 
@@ -977,7 +1028,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                 className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:opacity-50"
                 disabled={!canEdit}
                 onClick={() => {
-                  void saveSelectedEmployee();
+                  void saveEmployee(selectedEmployee);
                   setCustomModalOpen(false);
                 }}
                 type="button"
