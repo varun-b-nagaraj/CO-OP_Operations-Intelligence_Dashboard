@@ -291,7 +291,6 @@ INSERT INTO public.access_role_permissions (role_key, permission_key) VALUES
   ('inventory_counter','inventory.sessions:join:assigned_location'),
   ('inventory_counter','inventory.counts:view:own'),
   ('inventory_counter','inventory.catalog:view:all'),
-  ('inventory_counter','inventory.finalize_upload:view:own'),
   ('finance_manager','finance.upload:view:own'),
   ('finance_manager','finance.upload:upload:all'),
   ('finance_manager','finance.reports:view:all'),

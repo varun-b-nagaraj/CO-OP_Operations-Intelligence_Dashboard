@@ -241,8 +241,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     permissions: [
       'inventory.sessions:join:assigned_location',
       'inventory.counts:view:own',
-      'inventory.catalog:view:all',
-      'inventory.finalize_upload:view:own'
+      'inventory.catalog:view:all'
     ]
   },
   {
