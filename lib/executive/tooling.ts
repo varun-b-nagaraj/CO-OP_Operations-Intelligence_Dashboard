@@ -111,7 +111,10 @@ export function requiresFreshDataPrompt(prompt: string): boolean {
     'consistently',
     'request',
     'requests',
-    'shift'
+    'shift',
+    'schedule',
+    'scheduled',
+    'tomorrow'
   ]);
 }
 
@@ -129,9 +132,13 @@ export function isOperationalDataPrompt(prompt: string): boolean {
     'hr',
     'attendance',
     'shift',
+    'schedule',
+    'scheduled',
     'working',
+    'work',
     'who is working',
     'roster',
+    'tomorrow',
     'morning',
     'off period',
     'off-period',
