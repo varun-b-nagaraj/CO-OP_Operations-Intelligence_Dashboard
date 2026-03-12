@@ -222,8 +222,12 @@ function renderMessageContent(content: string): ReactNode[] {
 
 export function ExecutiveDashboard() {
   const [activeTab, setActiveTab] = useState<ExecutiveTabId>('ai-agent');
-  const canViewAccessControl =
-    usePermission('executive.access_control.view') || usePermission('executive.access_control.edit');
+
+  const canViewExecutiveAccessControl = usePermission('executive.access_control.view');
+  const canEditExecutiveAccessControl = usePermission('executive.access_control.edit');
+
+  const canViewAccessControl = canViewExecutiveAccessControl || canEditExecutiveAccessControl;
+
   const navTabs = useMemo(
     () =>
       canViewAccessControl
@@ -381,7 +385,7 @@ export function ExecutiveDashboard() {
 
   useEffect(() => {
     if (!canViewAccessControl && activeTab === 'access-control') {
-      setActiveTab('ai-agent');
+      setActiveTab('overview');
     }
   }, [activeTab, canViewAccessControl]);
 

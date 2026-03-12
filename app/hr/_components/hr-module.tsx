@@ -53,6 +53,7 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
   const visibleTabs = tabs.filter((tab) => hasPermission(tab.permission));
   const [globalDateRange, setGlobalDateRange] = useState(currentMonthRange());
   const [openAddEmployeeSignal, setOpenAddEmployeeSignal] = useState(0);
+  const [panelVisible, setPanelVisible] = useState(false);
 
   const requestedModule = searchParams.get('module');
   const resolvedModule: PrimaryModule =
@@ -84,6 +85,12 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
   useEffect(() => {
     window.sessionStorage.setItem(HR_DATE_RANGE_SESSION_KEY, JSON.stringify(globalDateRange));
   }, [globalDateRange]);
+
+  useEffect(() => {
+    setPanelVisible(false);
+    const frame = window.requestAnimationFrame(() => setPanelVisible(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [resolvedModule, resolvedHRTab, activeCFATab]);
 
   const replaceWithParams = (nextParams: URLSearchParams) => {
     const href = `${pathname}?${nextParams.toString()}` as Route;
@@ -182,7 +189,9 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
         {resolvedModule === 'hr' ? (
           <section className="min-w-0" id="module-panel-hr">
             <section
-              className="min-w-0 p-0"
+              className={`min-w-0 p-0 transition-all duration-200 ${
+                panelVisible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
+              }`}
               id={`panel-${resolvedHRTab}`}
               role="tabpanel"
             >

@@ -23,9 +23,8 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = Boolean(request.cookies.get(AUTH_COOKIE_NAME)?.value);
 
-  if (pathname === '/') {
-    const target = hasSession ? '/executive' : '/login';
-    return NextResponse.redirect(new URL(target, request.url));
+  if (pathname === '/' && !hasSession) {
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 
   if (!hasSession && isProtectedPath(pathname)) {
@@ -35,7 +34,7 @@ export function middleware(request: NextRequest) {
   }
 
   if (hasSession && pathname === '/login') {
-    return NextResponse.redirect(new URL('/executive', request.url));
+    return NextResponse.redirect(new URL('/', request.url));
   }
 
   return NextResponse.next();

@@ -8,7 +8,7 @@ import { resetCurrentUserCache } from '@/lib/permissions';
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get('next') ?? '/executive';
+  const nextPath = searchParams.get('next') ?? '/';
 
   const [employeeId, setEmployeeId] = useState('');
   const [password, setPassword] = useState('');
