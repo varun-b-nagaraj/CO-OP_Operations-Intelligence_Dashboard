@@ -968,33 +968,50 @@ export function ExecutiveDashboard() {
                   ) : null}
                   {sessions.map((session) => {
                     const isActive = session.sessionId === activeSessionId;
+                    const isDeleting = deletingSessionId === session.sessionId;
                     return (
                       <article
-                        className={`w-full border p-2 ${
+                        className={`group w-full border p-2 transition-colors ${
                           isActive ? 'border-brand-maroon bg-[#fff5f5]' : 'border-neutral-300 bg-white'
                         }`}
                         key={session.sessionId}
                       >
-                        <button
-                          className={`w-full text-left ${!isActive ? 'hover:bg-neutral-100' : ''}`}
-                          onClick={() => void openSession(session.sessionId)}
-                          type="button"
-                        >
-                          <p className="truncate text-xs font-medium text-neutral-900">
-                            {session.lastMessagePreview || 'Conversation'}
-                          </p>
-                          <p className="mt-1 text-[11px] text-neutral-500">
-                            {formatSessionTimestamp(session.updatedAt)} | {session.messageCount}
-                          </p>
-                        </button>
-                        <div className="mt-2 flex justify-end">
+                        <div className="flex items-start gap-2">
                           <button
-                            className="min-h-[26px] border border-neutral-300 bg-white px-2 text-[11px] text-neutral-700 hover:bg-neutral-100 disabled:opacity-60"
-                            disabled={Boolean(deletingSessionId) || sending}
-                            onClick={() => void deleteSession(session.sessionId)}
+                            className={`min-w-0 flex-1 text-left transition-transform duration-200 ${
+                              !isActive ? 'hover:bg-neutral-100' : ''
+                            } group-hover:-translate-x-0.5 group-focus-within:-translate-x-0.5`}
+                            onClick={() => void openSession(session.sessionId)}
                             type="button"
                           >
-                            {deletingSessionId === session.sessionId ? 'Deleting...' : 'Delete'}
+                            <p className="truncate text-xs font-medium text-neutral-900">
+                              {session.lastMessagePreview || 'Conversation'}
+                            </p>
+                            <p className="mt-1 text-[11px] text-neutral-500">
+                              {formatSessionTimestamp(session.updatedAt)} | {session.messageCount}
+                            </p>
+                          </button>
+                          <button
+                            aria-label="Delete conversation"
+                            className="mt-0.5 inline-flex h-6 w-6 shrink-0 translate-x-1 items-center justify-center rounded border border-neutral-300 bg-white text-neutral-600 opacity-0 transition-all duration-200 hover:text-neutral-900 focus-visible:opacity-100 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100 disabled:opacity-50"
+                            disabled={Boolean(deletingSessionId) || sending}
+                            onClick={() => void deleteSession(session.sessionId)}
+                            title="Delete conversation"
+                            type="button"
+                          >
+                            {isDeleting ? (
+                              <span className="h-3.5 w-3.5 animate-spin rounded-full border border-neutral-500 border-t-transparent" />
+                            ) : (
+                              <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                                <path
+                                  d="M4 7h16M10 11v6M14 11v6M6 7l1 12h10l1-12M9 7V4h6v3"
+                                  stroke="currentColor"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="1.8"
+                                />
+                              </svg>
+                            )}
                           </button>
                         </div>
                       </article>
