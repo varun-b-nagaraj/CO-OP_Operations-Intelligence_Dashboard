@@ -367,15 +367,52 @@ export function ExecutiveDashboard() {
 
   const canViewExecutiveAccessControl = usePermission('executive.access_control.view');
   const canEditExecutiveAccessControl = usePermission('executive.access_control.edit');
+  const canViewHrSchedule = usePermission('hr.schedule.view');
+  const canViewHrAttendance = usePermission('hr.attendance.view');
+  const canViewProductOrders = usePermission('product.orders.view');
+  const canViewProductProducts = usePermission('product.products.view');
+  const canViewFinanceReports = usePermission('finance.reports.view');
+  const canViewFinanceUpload = usePermission('finance.upload.view');
+  const canViewMarketingEvents = usePermission('marketing.events.view');
+  const canViewMarketingReports = usePermission('marketing.reports.view');
+  const canViewInventoryCatalog = usePermission('inventory.catalog.view');
+  const canViewInventorySessions = usePermission('inventory.sessions.view');
+  const canViewCfa = usePermission('cfa.logs.read');
 
+  const canViewHr = canViewHrSchedule || canViewHrAttendance;
+  const canViewProduct = canViewProductOrders || canViewProductProducts;
+  const canViewFinance = canViewFinanceReports || canViewFinanceUpload;
+  const canViewMarketing = canViewMarketingEvents || canViewMarketingReports;
+  const canViewInventory = canViewInventoryCatalog || canViewInventorySessions;
   const canViewAccessControl = canViewExecutiveAccessControl || canEditExecutiveAccessControl;
+  const departmentTabAccess = useMemo<Record<ExecutiveTabId, boolean>>(
+    () => ({
+      'ai-agent': true,
+      overview: true,
+      'department-hr': canViewHr,
+      'department-product': canViewProduct,
+      'department-finance': canViewFinance,
+      'department-marketing': canViewMarketing,
+      'department-inventory': canViewInventory,
+      'department-cfa': canViewCfa,
+      'audit-log': canViewAccessControl,
+      'access-control': canViewAccessControl
+    }),
+    [
+      canViewAccessControl,
+      canViewCfa,
+      canViewFinance,
+      canViewHr,
+      canViewInventory,
+      canViewMarketing,
+      canViewProduct
+    ]
+  );
 
   const navTabs = useMemo(
     () =>
-      canViewAccessControl
-        ? EXECUTIVE_TABS
-        : EXECUTIVE_TABS.filter((tab) => tab.id !== 'access-control' && tab.id !== 'audit-log'),
-    [canViewAccessControl]
+      EXECUTIVE_TABS.filter((tab) => departmentTabAccess[tab.id]),
+    [departmentTabAccess]
   );
   const activeLabel = useMemo(
     () => navTabs.find((tab) => tab.id === activeTab)?.label ?? 'Executive Dashboard',
@@ -517,9 +554,23 @@ export function ExecutiveDashboard() {
     void loadSessions(userKey);
   }, [userKey, loadSessions]);
 
+  const allowedDepartmentNames = useMemo(() => {
+    const allowed = new Set<string>();
+    if (canViewHr) allowed.add('HR');
+    if (canViewProduct) allowed.add('Product');
+    if (canViewFinance) allowed.add('Finance');
+    if (canViewMarketing) allowed.add('Marketing');
+    if (canViewInventory) allowed.add('Inventory');
+    if (canViewCfa) allowed.add('Chick-fil-A');
+    return allowed;
+  }, [canViewCfa, canViewFinance, canViewHr, canViewInventory, canViewMarketing, canViewProduct]);
   const departmentOverviews = useMemo(
-    () => uniqueBy(overview?.departmentHealth ?? [], (item) => item.department),
-    [overview]
+    () =>
+      uniqueBy(
+        (overview?.departmentHealth ?? []).filter((item) => allowedDepartmentNames.has(item.department)),
+        (item) => item.department
+      ),
+    [allowedDepartmentNames, overview]
   );
   const selectedDepartment = useMemo(
     () => DEPARTMENT_TABS.find((tab) => tab.id === activeTab)?.department ?? null,
@@ -535,10 +586,10 @@ export function ExecutiveDashboard() {
   }, [sending, activeBreadcrumbs]);
 
   useEffect(() => {
-    if (!canViewAccessControl && (activeTab === 'access-control' || activeTab === 'audit-log')) {
+    if (!departmentTabAccess[activeTab]) {
       setActiveTab('overview');
     }
-  }, [activeTab, canViewAccessControl]);
+  }, [activeTab, departmentTabAccess]);
 
   const startNewConversation = () => {
     const newSessionId = createSessionId();

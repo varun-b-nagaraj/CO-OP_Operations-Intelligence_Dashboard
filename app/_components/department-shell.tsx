@@ -42,6 +42,8 @@ import {
 } from 'lucide-react';
 import { ReactNode, useEffect, useState } from 'react';
 
+import { LogoutButton } from '@/app/_components/logout-button';
+
 export interface DepartmentShellNavItem {
   id: string;
   label: string;
@@ -246,6 +248,12 @@ export function DepartmentShell({
               );
             })}
           </nav>
+          <div className="border-t border-neutral-300 p-2">
+            <LogoutButton
+              className="ui-click min-h-[40px] w-full border border-neutral-300 bg-white px-3 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+              label="Log out"
+            />
+          </div>
         </aside>
 
         <section className="ui-fade-in min-w-0 w-full flex-1 md:pl-16">

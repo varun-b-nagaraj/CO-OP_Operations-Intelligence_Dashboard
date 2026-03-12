@@ -1,5 +1,8 @@
 import Link from 'next/link';
 
+import { LogoutButton } from '@/app/_components/logout-button';
+import { getServerAuthContext } from '@/lib/server/auth';
+
 const DEPARTMENTS: Array<{ href: string; name: string; summary: string }> = [
   {
     href: '/executive',
@@ -43,19 +46,44 @@ const DEPARTMENTS: Array<{ href: string; name: string; summary: string }> = [
   }
 ];
 
-export default function HomePage() {
+const DEPARTMENT_VIEW_PERMISSIONS: Record<string, string[]> = {
+  '/executive': ['executive.overview.view', 'executive.ai_agent.view'],
+  '/hr': ['hr.schedule.view', 'hr.attendance.view', 'hr.requests.view'],
+  '/product': ['product.orders.view', 'product.products.view', 'product.vendors.view'],
+  '/marketing': ['marketing.events.view', 'marketing.reports.view', 'marketing.contacts.view'],
+  '/finance': ['finance.reports.view', 'finance.upload.view'],
+  '/inventory': ['inventory.catalog.view', 'inventory.sessions.view', 'inventory.count_view.view'],
+  '/employee': ['employee.schedule.view', 'employee.calendar.view', 'employee.accountability.view'],
+  '/cfa': ['cfa.logs.read']
+};
+
+export default async function HomePage() {
+  const auth = await getServerAuthContext();
+  const visibleDepartments = !auth
+    ? DEPARTMENTS
+    : DEPARTMENTS.filter((department) =>
+        (DEPARTMENT_VIEW_PERMISSIONS[department.href] ?? []).some((permission) =>
+          auth.permissions.includes(permission)
+        )
+      );
+
   return (
     <main className="min-h-screen w-full bg-neutral-100 px-4 py-8 text-neutral-900 md:px-8">
       <section className="mx-auto w-full max-w-6xl">
         <header className="mb-5 border border-neutral-300 bg-white p-5">
-          <h1 className="text-2xl font-semibold">CO-OP Operations Dashboard</h1>
-          <p className="mt-1 text-sm text-neutral-700">
-            Select a department module to continue.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold">CO-OP Operations Dashboard</h1>
+              <p className="mt-1 text-sm text-neutral-700">
+                Select a department module to continue.
+              </p>
+            </div>
+            {auth ? <LogoutButton /> : null}
+          </div>
         </header>
 
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {DEPARTMENTS.map((department) => (
+          {visibleDepartments.map((department) => (
             <Link
               className="block border border-neutral-300 bg-white p-4 transition-colors hover:bg-neutral-50"
               href={department.href}
@@ -66,6 +94,11 @@ export default function HomePage() {
             </Link>
           ))}
         </section>
+        {auth && visibleDepartments.length === 0 ? (
+          <p className="mt-4 border border-neutral-300 bg-white p-4 text-sm text-neutral-700">
+            No department access has been assigned to this account yet.
+          </p>
+        ) : null}
       </section>
     </main>
   );
