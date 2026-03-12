@@ -22,6 +22,7 @@ function permission(
 
 export const PERMISSIONS: PermissionDefinition[] = [
   permission('executive.ai:view:own', 'Executive AI Agent View', ['executive.ai_agent.view']),
+  permission('executive.ai:view:all', 'Executive AI Agent View All'),
   permission('executive.ai:manage:all', 'Executive AI Agent Manage', ['executive.ai_agent.edit']),
   permission('executive.overview:view:all', 'Executive Overview View', ['executive.overview.view']),
   permission('executive.feed:view:all', 'Executive Feed View', ['executive.department_feed.view']),
@@ -35,19 +36,25 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('executive.audit:export:all', 'Executive Audit Export'),
 
   permission('hr.schedule:view:own', 'HR Schedule View Own', ['hr.schedule.view', 'employee.schedule.view']),
+  permission('hr.schedule:view:all', 'HR Schedule View All'),
   permission('hr.schedule:edit:all', 'HR Schedule Edit All', ['hr.schedule.edit']),
   permission('hr.schedule:approve:all', 'HR Schedule Approve All'),
   permission('hr.meeting_attendance:view:own', 'Meeting Attendance View Own', ['hr.attendance.view', 'employee.accountability.view']),
+  permission('hr.meeting_attendance:view:all', 'Meeting Attendance View All'),
   permission('hr.meeting_attendance:override:all', 'Meeting Attendance Override All', ['hr.attendance.override']),
   permission('hr.shift_attendance:view:own', 'Shift Attendance View Own', ['hr.attendance.view']),
+  permission('hr.shift_attendance:view:all', 'Shift Attendance View All'),
   permission('hr.shift_attendance:override:all', 'Shift Attendance Override All', ['hr.attendance.override']),
   permission('hr.requests:submit:own', 'HR Requests Submit Own', ['hr.requests.view', 'employee.requests.edit', 'employee.requests.view']),
   permission('hr.requests:approve:all', 'HR Requests Approve All', ['hr.requests.edit']),
   permission('hr.employee_records:view:own', 'Employee Records View Own'),
+  permission('hr.employee_records:view:all', 'Employee Records View All'),
   permission('hr.employee_records:manage:all', 'Employee Records Manage All', ['hr.settings.edit']),
   permission('hr.settings:view:own', 'HR Settings View Own'),
+  permission('hr.settings:view:all', 'HR Settings View All'),
   permission('hr.settings:manage:all', 'HR Settings Manage All', ['hr.settings.edit']),
   permission('hr.strikes:view:own', 'HR Strikes View Own'),
+  permission('hr.strikes:view:all', 'HR Strikes View All'),
   permission('hr.strikes:manage:all', 'HR Strikes Manage All', ['hr.strikes.manage']),
   permission('hr.audit:view:all', 'HR Audit View', ['hr.audit.view']),
   permission('hr.audit:export:all', 'HR Audit Export'),
@@ -63,6 +70,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('cfa.exports:export:all', 'CFA Export', ['cfa.exports']),
 
   permission('finance.upload:view:own', 'Finance Upload View Own', ['finance.upload.view']),
+  permission('finance.upload:view:all', 'Finance Upload View All'),
   permission('finance.upload:upload:all', 'Finance Upload All', ['finance.upload.edit']),
   permission('finance.reports:view:all', 'Finance Reports View', ['finance.reports.view']),
   permission('finance.reports:edit:all', 'Finance Reports Edit', ['finance.reports.edit']),
@@ -70,6 +78,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('finance.calendar:view:all', 'Finance Calendar View', ['finance.calendar.view']),
 
   permission('marketing.events:view:own', 'Marketing Events View', ['marketing.events.view']),
+  permission('marketing.events:view:all', 'Marketing Events View All'),
   permission('marketing.events:edit:all', 'Marketing Events Edit', ['marketing.events.edit']),
   permission('marketing.events:publish:all', 'Marketing Events Publish'),
   permission('marketing.contacts:view:all', 'Marketing Contacts View', ['marketing.contacts.view']),
@@ -85,6 +94,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('marketing.settings:manage:all', 'Marketing Settings Manage', ['marketing.settings.edit']),
 
   permission('product.orders:view:own', 'Product Orders View', ['product.orders.view']),
+  permission('product.orders:view:all', 'Product Orders View All'),
   permission('product.orders:edit:all', 'Product Orders Edit', ['product.orders.edit']),
   permission('product.orders:approve:all', 'Product Orders Approve'),
   permission('product.orders:order:all', 'Product Orders Place'),
@@ -98,6 +108,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('product.designs:view:all', 'Product Designs View', ['product.designs.view']),
   permission('product.designs:edit:all', 'Product Designs Edit', ['product.designs.edit']),
   permission('product.wishlist:view:own', 'Product Wishlist View', ['product.wishlist.view']),
+  permission('product.wishlist:view:all', 'Product Wishlist View All'),
   permission('product.wishlist:edit:all', 'Product Wishlist Edit', ['product.wishlist.edit']),
   permission('product.wishlist:convert:all', 'Product Wishlist Convert'),
   permission('product.settings:view:all', 'Product Settings View', ['product.settings.view']),
@@ -111,8 +122,10 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('inventory.sessions:create:all', 'Inventory Session Create', ['inventory.sessions.edit']),
   permission('inventory.sessions:edit:all', 'Inventory Session Manage', ['inventory.sessions.edit']),
   permission('inventory.counts:view:own', 'Inventory Count View', ['inventory.count_view.view']),
+  permission('inventory.counts:view:all', 'Inventory Count View All'),
   permission('inventory.counts:edit:all', 'Inventory Count Edit', ['inventory.count_view.edit']),
   permission('inventory.finalize_upload:view:own', 'Inventory Finalize View', ['inventory.finalize_upload.view']),
+  permission('inventory.finalize_upload:view:all', 'Inventory Finalize View All'),
   permission('inventory.finalize_upload:finalize:all', 'Inventory Finalize', ['inventory.finalize_upload.edit']),
   permission('inventory.finalize_upload:upload:all', 'Inventory Upload', ['inventory.finalize_upload.edit']),
   permission('inventory.finalize_upload:lock:all', 'Inventory Lock Session'),
@@ -127,15 +140,19 @@ export const PERMISSIONS: PermissionDefinition[] = [
   ),
 
   permission('employee.calendar:view:own', 'Employee Calendar View', ['employee.calendar.view']),
+  permission('employee.calendar:view:all', 'Employee Calendar View All'),
   permission('employee.schedule:view:own', 'Employee Schedule View', ['employee.schedule.view']),
+  permission('employee.schedule:view:all', 'Employee Schedule View All'),
   permission('employee.schedule:submit:own', 'Employee Schedule Submit Requests'),
   permission('employee.accountability:view:own', 'Employee Accountability View', ['employee.accountability.view']),
+  permission('employee.accountability:view:all', 'Employee Accountability View All'),
   permission('employee.requests:submit:own', 'Employee Requests Submit', ['employee.requests.view', 'employee.requests.edit']),
   permission(
     'employee.inventory_checks:view:own',
     'Employee Inventory Checks View',
     ['employee.inventory_checks.view']
   ),
+  permission('employee.inventory_checks:view:all', 'Employee Inventory Checks View All'),
   permission(
     'employee.inventory_checks:signup:own',
     'Employee Inventory Checks Signup',
@@ -177,6 +194,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     isSystem: true,
     permissions: [
       'executive.ai:view:own',
+      'executive.ai:view:all',
       'executive.ai:manage:all',
       'executive.overview:view:all',
       'executive.feed:view:all',
@@ -197,19 +215,25 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     isSystem: true,
     permissions: [
       'hr.schedule:view:own',
+      'hr.schedule:view:all',
       'hr.schedule:edit:all',
       'hr.schedule:approve:all',
       'hr.meeting_attendance:view:own',
+      'hr.meeting_attendance:view:all',
       'hr.meeting_attendance:override:all',
       'hr.shift_attendance:view:own',
+      'hr.shift_attendance:view:all',
       'hr.shift_attendance:override:all',
       'hr.requests:submit:own',
       'hr.requests:approve:all',
       'hr.employee_records:view:own',
+      'hr.employee_records:view:all',
       'hr.employee_records:manage:all',
       'hr.settings:view:own',
+      'hr.settings:view:all',
       'hr.settings:manage:all',
       'hr.strikes:view:own',
+      'hr.strikes:view:all',
       'hr.strikes:manage:all',
       'hr.audit:view:all',
       'hr.audit:export:all',
@@ -248,8 +272,10 @@ export const BASELINE_ROLES: RoleDefinition[] = [
       'inventory.sessions:create:all',
       'inventory.sessions:edit:all',
       'inventory.counts:view:own',
+      'inventory.counts:view:all',
       'inventory.counts:edit:all',
       'inventory.finalize_upload:view:own',
+      'inventory.finalize_upload:view:all',
       'inventory.finalize_upload:finalize:all',
       'inventory.finalize_upload:upload:all',
       'inventory.finalize_upload:lock:all',
@@ -278,6 +304,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     isSystem: true,
     permissions: [
       'finance.upload:view:own',
+      'finance.upload:view:all',
       'finance.upload:upload:all',
       'finance.reports:view:all',
       'finance.reports:edit:all',
@@ -292,6 +319,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     isSystem: true,
     permissions: [
       'marketing.events:view:own',
+      'marketing.events:view:all',
       'marketing.events:edit:all',
       'marketing.events:publish:all',
       'marketing.contacts:view:all',
@@ -314,6 +342,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     isSystem: true,
     permissions: [
       'product.orders:view:own',
+      'product.orders:view:all',
       'product.orders:edit:all',
       'product.orders:approve:all',
       'product.orders:order:all',
@@ -327,6 +356,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
       'product.designs:view:all',
       'product.designs:edit:all',
       'product.wishlist:view:own',
+      'product.wishlist:view:all',
       'product.wishlist:edit:all',
       'product.wishlist:convert:all',
       'product.settings:view:all',
@@ -360,10 +390,10 @@ export const BASELINE_ROLES: RoleDefinition[] = [
     permissions: [
       'executive.overview:view:all',
       'finance.reports:view:all',
-      'marketing.events:view:own',
+      'marketing.events:view:all',
       'product.products:view:all',
       'inventory.catalog:view:all',
-      'employee.calendar:view:own'
+      'employee.calendar:view:all'
     ]
   }
 ];

@@ -5,9 +5,13 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { createBrowserClient } from '@/lib/supabase';
 
 type CalendarEntryType = 'event' | 'target' | 'reminder';
-type CalendarPriority = 'employee' | 'director' | 'executive';
 type CalendarMode = 'calendar' | 'list';
 type ModalMode = 'create' | 'edit';
+
+interface AccessRoleOption {
+  role_key: string;
+  role_name: string;
+}
 
 interface CalendarEventRow {
   id: string;
@@ -16,7 +20,8 @@ interface CalendarEventRow {
   entry_type: CalendarEntryType;
   starts_at: string;
   ends_at: string | null;
-  priority: CalendarPriority;
+  view_for_everyone: boolean;
+  visible_role_keys: string[];
   source_department: string | null;
   inventory_signup_enabled: boolean;
 }
@@ -27,7 +32,8 @@ interface CalendarEventDraft {
   entry_type: CalendarEntryType;
   starts_at: string;
   ends_at: string;
-  priority: CalendarPriority;
+  view_for_everyone: boolean;
+  visible_role_keys: string[];
   source_department: string;
   inventory_signup_enabled: boolean;
 }
@@ -38,12 +44,6 @@ interface InventoryCheckEventState {
   signup_state: 'none' | 'signed_up' | 'withdrawn' | 'requested_change';
   can_self_withdraw: boolean;
 }
-
-const PRIORITY_OPTIONS: Array<{ value: CalendarPriority; label: string }> = [
-  { value: 'employee', label: 'Employee' },
-  { value: 'director', label: 'Director' },
-  { value: 'executive', label: 'Executive' }
-];
 
 const ENTRY_TYPE_OPTIONS: Array<{ value: CalendarEntryType; label: string }> = [
   { value: 'event', label: 'Event' },
@@ -59,11 +59,10 @@ const ENTRY_TYPE_PILL_CLASS: Record<CalendarEntryType, string> = {
   reminder: 'border-violet-200 bg-violet-50 text-violet-700'
 };
 
-const PRIORITY_PILL_CLASS: Record<CalendarPriority, string> = {
-  employee: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  director: 'border-amber-200 bg-amber-50 text-amber-700',
-  executive: 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700'
-};
+const VISIBILITY_PILL_CLASS = {
+  everyone: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  restricted: 'border-amber-200 bg-amber-50 text-amber-700'
+} as const;
 
 const DEPARTMENT_COLOR_BY_KEY: Record<string, { label: string; boxClass: string; pillClass: string }> = {
   lightspeed: {
@@ -180,7 +179,8 @@ function createDraftForDay(day?: Date, sourceDepartment?: string) {
     entry_type: 'event' as CalendarEntryType,
     starts_at: toLocalInputDateTime(start.toISOString()),
     ends_at: toLocalInputDateTime(end.toISOString()),
-    priority: 'employee' as CalendarPriority,
+    view_for_everyone: true,
+    visible_role_keys: [],
     source_department: sourceDepartment ?? '',
     inventory_signup_enabled: false
   };
@@ -193,25 +193,11 @@ function createDraftFromEvent(entry: CalendarEventRow): CalendarEventDraft {
     entry_type: entry.entry_type,
     starts_at: toLocalInputDateTime(entry.starts_at),
     ends_at: toLocalInputDateTime(entry.ends_at ?? ''),
-    priority: normalizeCalendarPriority(entry.priority),
+    view_for_everyone: entry.view_for_everyone !== false,
+    visible_role_keys: Array.isArray(entry.visible_role_keys) ? entry.visible_role_keys : [],
     source_department: normalizeDepartmentKey(entry.source_department),
     inventory_signup_enabled: Boolean(entry.inventory_signup_enabled)
   };
-}
-
-function normalizeCalendarPriority(value: unknown): CalendarPriority {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  if (normalized === 'executive' || normalized === 'exec') return 'executive';
-  if (normalized === 'director' || normalized === 'department_manager' || normalized === 'all_managers') {
-    return 'director';
-  }
-  return 'employee';
-}
-
-function requiredRolePriority(priority: CalendarPriority): number {
-  if (priority === 'executive') return 300;
-  if (priority === 'director') return 200;
-  return 100;
 }
 
 function normalizeDepartmentKey(value: string | null | undefined) {
@@ -242,7 +228,6 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
   const [mode, setMode] = useState<CalendarMode>('calendar');
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [events, setEvents] = useState<CalendarEventRow[]>([]);
-  const [priorityFilter, setPriorityFilter] = useState<'all' | CalendarPriority>('all');
   const [entryTypeFilter, setEntryTypeFilter] = useState<'all' | CalendarEntryType>('all');
   const [dayPageByKey, setDayPageByKey] = useState<Record<string, number>>({});
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -257,14 +242,15 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
   const [inventoryCheckByEventId, setInventoryCheckByEventId] = useState<Record<string, InventoryCheckEventState>>({});
   const [createAsInventoryCheck, setCreateAsInventoryCheck] = useState(false);
   const [requestReasonByCheckId, setRequestReasonByCheckId] = useState<Record<string, string>>({});
-  const [userRolePriority, setUserRolePriority] = useState(100);
+  const [availableRoles, setAvailableRoles] = useState<AccessRoleOption[]>([]);
+  const [currentUserRoleKeys, setCurrentUserRoleKeys] = useState<string[]>([]);
 
   const defaultDepartment = useMemo(() => {
     const normalized = normalizeDepartmentKey(props.sourceDepartment);
     return normalized === 'unknown' ? '' : normalized;
   }, [props.sourceDepartment]);
 
-  const [draft, setDraft] = useState(() => {
+  const [draft, setDraft] = useState<CalendarEventDraft>(() => {
     const normalized = normalizeDepartmentKey(props.sourceDepartment);
     return createDraftForDay(undefined, normalized === 'unknown' ? '' : normalized);
   });
@@ -305,7 +291,7 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
     setMessage(null);
     const { data, error } = await supabase
       .from('general_department_calendar_events')
-      .select('id,title,details,entry_type,starts_at,ends_at,priority,source_department,inventory_signup_enabled')
+      .select('id,title,details,entry_type,starts_at,ends_at,view_for_everyone,visible_role_keys,source_department,inventory_signup_enabled')
       .order('starts_at', { ascending: true })
       .limit(1000);
 
@@ -316,8 +302,17 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
     }
 
     const normalizedRows = ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
-      ...row,
-      priority: normalizeCalendarPriority(row.priority),
+      id: String(row.id ?? ''),
+      title: String(row.title ?? ''),
+      details: row.details ? String(row.details) : null,
+      entry_type: String(row.entry_type ?? 'event') as CalendarEntryType,
+      starts_at: String(row.starts_at ?? ''),
+      ends_at: row.ends_at ? String(row.ends_at) : null,
+      view_for_everyone: row.view_for_everyone !== false,
+      visible_role_keys: Array.isArray(row.visible_role_keys)
+        ? row.visible_role_keys.map((entry) => String(entry)).filter(Boolean)
+        : [],
+      source_department: row.source_department ? String(row.source_department) : null,
       inventory_signup_enabled: Boolean(row.inventory_signup_enabled)
     })) as CalendarEventRow[];
     setEvents(normalizedRows);
@@ -330,27 +325,54 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
   }, [loadEvents]);
 
   useEffect(() => {
-    void fetch('/api/access/priority', { cache: 'no-store' })
+    void fetch('/api/access/visibility', { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) return;
-        const payload = (await response.json()) as { ok?: boolean; role_priority?: number };
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          roles?: AccessRoleOption[];
+          user_role_keys?: string[];
+        };
         if (!payload.ok) return;
-        const nextPriority = Number(payload.role_priority ?? 100);
-        if (Number.isFinite(nextPriority)) {
-          setUserRolePriority(nextPriority);
-        }
+        setAvailableRoles(Array.isArray(payload.roles) ? payload.roles : []);
+        setCurrentUserRoleKeys(Array.isArray(payload.user_role_keys) ? payload.user_role_keys : []);
       })
       .catch(() => undefined);
   }, []);
 
   const filteredEvents = useMemo(() => {
     return events.filter((entry) => {
-      if (requiredRolePriority(entry.priority) > userRolePriority) return false;
-      if (priorityFilter !== 'all' && entry.priority !== priorityFilter) return false;
       if (entryTypeFilter !== 'all' && entry.entry_type !== entryTypeFilter) return false;
-      return true;
+      if (entry.view_for_everyone) return true;
+      if (entry.visible_role_keys.length === 0) return false;
+      return entry.visible_role_keys.some((roleKey) => currentUserRoleKeys.includes(roleKey));
     });
-  }, [entryTypeFilter, events, priorityFilter, userRolePriority]);
+  }, [currentUserRoleKeys, entryTypeFilter, events]);
+
+  const toggleDraftRole = useCallback((roleKey: string, checked: boolean) => {
+    setDraft((prev) => {
+      const nextRoles = checked
+        ? Array.from(new Set([...prev.visible_role_keys, roleKey]))
+        : prev.visible_role_keys.filter((entry) => entry !== roleKey);
+      return {
+        ...prev,
+        visible_role_keys: nextRoles
+      };
+    });
+  }, []);
+
+  const toggleListEditRole = useCallback((roleKey: string, checked: boolean) => {
+    setListEditDraft((prev) => {
+      if (!prev) return prev;
+      const nextRoles = checked
+        ? Array.from(new Set([...prev.visible_role_keys, roleKey]))
+        : prev.visible_role_keys.filter((entry) => entry !== roleKey);
+      return {
+        ...prev,
+        visible_role_keys: nextRoles
+      };
+    });
+  }, []);
 
   useEffect(() => {
     setDayPageByKey({});
@@ -362,7 +384,8 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
       return {
         ...nextDraft,
         entry_type: prev.entry_type,
-        priority: prev.priority,
+        view_for_everyone: prev.view_for_everyone,
+        visible_role_keys: prev.visible_role_keys,
         source_department: prev.source_department || defaultDepartment
       };
     });
@@ -404,6 +427,10 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
       setMessage('Start date/time is required.');
       return;
     }
+    if (!draft.view_for_everyone && draft.visible_role_keys.length === 0) {
+      setMessage('Select at least one role when "View for everyone" is disabled.');
+      return;
+    }
 
     setSaving(true);
     setMessage(null);
@@ -414,7 +441,8 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
       entry_type: draft.entry_type,
       starts_at: startsAt,
       ends_at: toIso(draft.ends_at),
-      priority: draft.priority,
+      view_for_everyone: draft.view_for_everyone,
+      visible_role_keys: draft.view_for_everyone ? [] : draft.visible_role_keys,
       source_department: draft.source_department || defaultDepartment || props.sourceDepartment || null
     };
 
@@ -428,7 +456,7 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
           details: payload.details,
           starts_at: payload.starts_at,
           ends_at: payload.ends_at,
-          priority: payload.priority
+          priority: 'employee'
         })
       });
       if (!response.ok) {
@@ -597,6 +625,10 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
       setMessage('Start date/time is required.');
       return;
     }
+    if (!listEditDraft.view_for_everyone && listEditDraft.visible_role_keys.length === 0) {
+      setMessage('Select at least one role when "View for everyone" is disabled.');
+      return;
+    }
 
     setSaving(true);
     setMessage(null);
@@ -608,7 +640,8 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
         entry_type: listEditDraft.entry_type,
         starts_at: startsAt,
         ends_at: toIso(listEditDraft.ends_at),
-        priority: listEditDraft.priority,
+        view_for_everyone: listEditDraft.view_for_everyone,
+        visible_role_keys: listEditDraft.view_for_everyone ? [] : listEditDraft.visible_role_keys,
         source_department: listEditDraft.source_department || defaultDepartment || null
       })
       .eq('id', expandedListEventId);
@@ -763,22 +796,7 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
         )}
       </div>
 
-      <div className="grid gap-2 border border-neutral-300 bg-white p-3 md:grid-cols-2">
-        <label className="text-sm">
-          Filter by priority
-          <select
-            className="mt-1 min-h-[36px] w-full border border-neutral-300 px-2"
-            onChange={(event) => setPriorityFilter(event.target.value as 'all' | CalendarPriority)}
-            value={priorityFilter}
-          >
-            <option value="all">All Priorities</option>
-            {PRIORITY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="grid gap-2 border border-neutral-300 bg-white p-3 md:grid-cols-1">
         <label className="text-sm">
           Filter by event type
           <select
@@ -897,8 +915,12 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                         <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${ENTRY_TYPE_PILL_CLASS[entry.entry_type]}`}>
                           {ENTRY_TYPE_OPTIONS.find((item) => item.value === entry.entry_type)?.label ?? entry.entry_type}
                         </span>
-                        <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${PRIORITY_PILL_CLASS[entry.priority]}`}>
-                          {PRIORITY_OPTIONS.find((item) => item.value === entry.priority)?.label ?? entry.priority}
+                        <span
+                          className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${
+                            entry.view_for_everyone ? VISIBILITY_PILL_CLASS.everyone : VISIBILITY_PILL_CLASS.restricted
+                          }`}
+                        >
+                          {entry.view_for_everyone ? 'Everyone' : 'Role restricted'}
                         </span>
                       </div>
                       {renderInventoryActions(entry)}
@@ -916,7 +938,7 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
         </div>
       ) : (
         <div className="border border-neutral-300">
-          <table className="min-w-full text-sm"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 p-2 text-left">Title</th><th className="border-b border-neutral-300 p-2 text-left">Type</th><th className="border-b border-neutral-300 p-2 text-left">Starts</th><th className="border-b border-neutral-300 p-2 text-left">Ends</th><th className="border-b border-neutral-300 p-2 text-left">Priority</th><th className="border-b border-neutral-300 p-2 text-left">Source</th></tr></thead><tbody>
+          <table className="min-w-full text-sm"><thead className="bg-neutral-100"><tr><th className="border-b border-neutral-300 p-2 text-left">Title</th><th className="border-b border-neutral-300 p-2 text-left">Type</th><th className="border-b border-neutral-300 p-2 text-left">Starts</th><th className="border-b border-neutral-300 p-2 text-left">Ends</th><th className="border-b border-neutral-300 p-2 text-left">Visibility</th><th className="border-b border-neutral-300 p-2 text-left">Source</th></tr></thead><tbody>
               {upcomingEvents.map((entry) => (
                 <Fragment key={entry.id}>
                 <tr className="cursor-pointer border-b border-neutral-200 hover:bg-neutral-50"><td className="p-2"><button
@@ -930,14 +952,18 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                       <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${ENTRY_TYPE_PILL_CLASS[entry.entry_type]}`}>
                         {ENTRY_TYPE_OPTIONS.find((item) => item.value === entry.entry_type)?.label ?? entry.entry_type}
                       </span>
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${PRIORITY_PILL_CLASS[entry.priority]}`}>
-                        {PRIORITY_OPTIONS.find((item) => item.value === entry.priority)?.label ?? entry.priority}
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                          entry.view_for_everyone ? VISIBILITY_PILL_CLASS.everyone : VISIBILITY_PILL_CLASS.restricted
+                        }`}
+                      >
+                        {entry.view_for_everyone ? 'Everyone' : 'Role restricted'}
                       </span>
                     </div>
                     <p className="text-xs text-neutral-600">{entry.details ?? '-'}</p>
                     {renderInventoryActions(entry)}
-                  </td><td className="p-2">{ENTRY_TYPE_OPTIONS.find((item) => item.value === entry.entry_type)?.label ?? entry.entry_type}</td><td className="p-2">{formatDateTime(entry.starts_at)}</td><td className="p-2">{formatDateTime(entry.ends_at)}</td><td className="p-2"><span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${PRIORITY_PILL_CLASS[entry.priority]}`}>
-                      {PRIORITY_OPTIONS.find((item) => item.value === entry.priority)?.label ?? entry.priority}
+                  </td><td className="p-2">{ENTRY_TYPE_OPTIONS.find((item) => item.value === entry.entry_type)?.label ?? entry.entry_type}</td><td className="p-2">{formatDateTime(entry.starts_at)}</td><td className="p-2">{formatDateTime(entry.ends_at)}</td><td className="p-2"><span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${entry.view_for_everyone ? VISIBILITY_PILL_CLASS.everyone : VISIBILITY_PILL_CLASS.restricted}`}>
+                      {entry.view_for_everyone ? 'Everyone' : `Roles (${entry.visible_role_keys.length})`}
                     </span>
                   </td><td className="p-2"><span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${getDepartmentStyle(entry.source_department).pillClass}`}>
                       {getDepartmentStyle(entry.source_department).label}
@@ -968,18 +994,41 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                           </select>
                         </label>
                         <label className="text-xs font-medium text-neutral-700">
-                          Priority
-                          <select
-                            className="mt-1 min-h-[34px] w-full border border-neutral-300 px-2 text-sm"
-                            onChange={(event) => setListEditDraft((prev) => (prev ? { ...prev, priority: event.target.value as CalendarPriority } : prev))}
-                            value={listEditDraft.priority}
-                          >
-                            {PRIORITY_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
+                          Visibility
+                          <div className="mt-1 space-y-2 border border-neutral-300 p-2">
+                            <label className="flex items-center gap-2 text-xs text-neutral-700">
+                              <input
+                                checked={listEditDraft.view_for_everyone}
+                                onChange={(event) =>
+                                  setListEditDraft((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          view_for_everyone: event.target.checked,
+                                          visible_role_keys: event.target.checked ? [] : prev.visible_role_keys
+                                        }
+                                      : prev
+                                  )
+                                }
+                                type="checkbox"
+                              />
+                              View for everyone
+                            </label>
+                            {!listEditDraft.view_for_everyone ? (
+                              <div className="max-h-28 overflow-y-auto border border-neutral-200 bg-white p-1.5">
+                                {availableRoles.map((role) => (
+                                  <label className="flex items-center gap-2 py-0.5 text-xs text-neutral-700" key={role.role_key}>
+                                    <input
+                                      checked={listEditDraft.visible_role_keys.includes(role.role_key)}
+                                      onChange={(event) => toggleListEditRole(role.role_key, event.target.checked)}
+                                      type="checkbox"
+                                    />
+                                    <span>{role.role_name} ({role.role_key})</span>
+                                  </label>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
                         </label>
                         <label className="text-xs font-medium text-neutral-700">
                           Department
@@ -1093,18 +1142,37 @@ export function SharedCalendarTab(props: { sourceDepartment: string }) {
                 </select>
               </label>
               <label className="text-sm">
-                Priority
-                <select
-                  className="mt-1 min-h-[40px] w-full border border-neutral-300 px-2"
-                  onChange={(event) => setDraft((prev) => ({ ...prev, priority: event.target.value as CalendarPriority }))}
-                  value={draft.priority}
-                >
-                  {PRIORITY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                Visibility
+                <div className="mt-1 space-y-2 border border-neutral-300 p-2">
+                  <label className="flex items-center gap-2 text-sm text-neutral-700">
+                    <input
+                      checked={draft.view_for_everyone}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          view_for_everyone: event.target.checked,
+                          visible_role_keys: event.target.checked ? [] : prev.visible_role_keys
+                        }))
+                      }
+                      type="checkbox"
+                    />
+                    View for everyone
+                  </label>
+                  {!draft.view_for_everyone ? (
+                    <div className="max-h-28 overflow-y-auto border border-neutral-200 bg-white p-1.5">
+                      {availableRoles.map((role) => (
+                        <label className="flex items-center gap-2 py-0.5 text-xs text-neutral-700" key={role.role_key}>
+                          <input
+                            checked={draft.visible_role_keys.includes(role.role_key)}
+                            onChange={(event) => toggleDraftRole(role.role_key, event.target.checked)}
+                            type="checkbox"
+                          />
+                          <span>{role.role_name} ({role.role_key})</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </label>
               <label className="text-sm">
                 Department

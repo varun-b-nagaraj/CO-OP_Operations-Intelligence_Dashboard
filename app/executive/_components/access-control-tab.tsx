@@ -13,7 +13,6 @@ type RoleRow = {
   role_key: string;
   role_name: string;
   description: string | null;
-  role_priority: number;
   is_system: boolean;
   is_active: boolean;
   role_permissions: string[];
@@ -34,7 +33,6 @@ type EmployeeRow = {
 type RoleDraft = {
   role_name: string;
   description: string;
-  role_priority: number;
   is_active: boolean;
   role_permissions: string[];
   updated_at: string;
@@ -62,7 +60,6 @@ function toRoleDraft(role: RoleRow): RoleDraft {
   return {
     role_name: role.role_name,
     description: role.description ?? '',
-    role_priority: Number(role.role_priority ?? 100),
     is_active: role.is_active,
     role_permissions: role.role_permissions,
     updated_at: role.updated_at
@@ -92,7 +89,6 @@ function isRoleChanged(role: RoleRow, draft: RoleDraft | undefined): boolean {
   if (draft.updated_at !== role.updated_at) return true;
   if (draft.role_name !== role.role_name) return true;
   if ((draft.description || '') !== (role.description || '')) return true;
-  if (Number(draft.role_priority) !== Number(role.role_priority)) return true;
   if (draft.is_active !== role.is_active) return true;
   const next = [...draft.role_permissions].sort().join('|');
   const current = [...role.role_permissions].sort().join('|');
@@ -140,7 +136,6 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
 
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleDescription, setNewRoleDescription] = useState('');
-  const [newRolePriority, setNewRolePriority] = useState('100');
 
   const [newEmployeeName, setNewEmployeeName] = useState('');
   const [newEmployeeSNumber, setNewEmployeeSNumber] = useState('');
@@ -293,6 +288,19 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
     setRoleDraft({ role_permissions: Array.from(set) });
   };
 
+  const toggleDepartmentPermissions = (permissionKeys: string[], checked: boolean) => {
+    if (!selectedRoleDraft) return;
+    const set = new Set(selectedRoleDraft.role_permissions);
+    for (const permissionKey of permissionKeys) {
+      if (checked) {
+        set.add(permissionKey);
+      } else {
+        set.delete(permissionKey);
+      }
+    }
+    setRoleDraft({ role_permissions: Array.from(set) });
+  };
+
   const applyPreset = (roleKey: string) => {
     const preset = BASELINE_ROLES.find((role) => role.roleKey === roleKey);
     if (!preset) return;
@@ -309,7 +317,6 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
       body: JSON.stringify({
         role_name: selectedRoleDraft.role_name,
         description: selectedRoleDraft.description || null,
-        role_priority: selectedRoleDraft.role_priority,
         is_active: selectedRoleDraft.is_active,
         role_permissions: selectedRoleDraft.role_permissions
       })
@@ -346,7 +353,6 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
         role_key: roleKey,
         role_name: roleName,
         description: newRoleDescription || null,
-        role_priority: Number.isFinite(Number(newRolePriority)) ? Math.trunc(Number(newRolePriority)) : 100,
         role_permissions: []
       })
     });
@@ -359,7 +365,6 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
 
     setNewRoleName('');
     setNewRoleDescription('');
-    setNewRolePriority('100');
     await loadData();
     setSelectedRoleKey(roleKey);
     setStatus('Role created.');
@@ -376,7 +381,6 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
         role_key: duplicateKey,
         role_name: `${selectedRole.role_name} Copy`,
         description: selectedRole.description,
-        role_priority: selectedRoleDraft.role_priority,
         role_permissions: selectedRoleDraft.role_permissions
       })
     });
@@ -521,13 +525,6 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                   rows={2}
                   value={newRoleDescription}
                 />
-                <input
-                  className="w-full border border-neutral-300 px-2 py-1.5 text-sm"
-                  inputMode="numeric"
-                  onChange={(event) => setNewRolePriority(event.target.value)}
-                  placeholder="Priority (100 employee, 200 director, 300 executive)"
-                  value={newRolePriority}
-                />
                 <button className="w-full border border-brand-maroon bg-brand-maroon px-3 py-1.5 text-sm text-white" onClick={() => void createRole()} type="button">
                   Create Role
                 </button>
@@ -552,22 +549,6 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                     <label className="text-sm text-neutral-700">
                       Role Key
                       <input className="mt-1 w-full border border-neutral-300 bg-neutral-100 px-2 py-1.5" disabled value={selectedRole.role_key} />
-                    </label>
-                    <label className="text-sm text-neutral-700">
-                      Role Priority
-                      <input
-                        className="mt-1 w-full border border-neutral-300 px-2 py-1.5"
-                        disabled={!canEdit}
-                        inputMode="numeric"
-                        onChange={(event) =>
-                          setRoleDraft({
-                            role_priority: Number.isFinite(Number(event.target.value))
-                              ? Math.trunc(Number(event.target.value))
-                              : 0
-                          })
-                        }
-                        value={String(selectedRoleDraft.role_priority)}
-                      />
                     </label>
                   </div>
                   <label className="mt-3 block text-sm text-neutral-700">
@@ -618,10 +599,28 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                 <div className="border border-neutral-200 p-3">
                   <h3 className="text-sm font-semibold text-neutral-800">Permission Matrix</h3>
                   <div className="mt-3 space-y-3">
-                    {permissionGroups.map((department) => (
+                    {permissionGroups.map((department) => {
+                      const departmentPermissionKeys = department.resources.flatMap((resource) =>
+                        resource.items.map((item) => item.permissionKey)
+                      );
+                      const allSelected =
+                        departmentPermissionKeys.length > 0 &&
+                        departmentPermissionKeys.every((key) => selectedRoleDraft.role_permissions.includes(key));
+                      return (
                       <section className="border border-neutral-200" key={department.department}>
-                        <header className="border-b border-neutral-200 bg-neutral-100 px-3 py-2 text-sm font-semibold uppercase tracking-wide text-neutral-700">
-                          {department.department}
+                        <header className="flex items-center justify-between gap-2 border-b border-neutral-200 bg-neutral-100 px-3 py-2 text-sm font-semibold uppercase tracking-wide text-neutral-700">
+                          <span>{department.department}</span>
+                          <label className="inline-flex items-center gap-1.5 text-[11px] font-medium normal-case tracking-normal text-neutral-700">
+                            <input
+                              checked={allSelected}
+                              disabled={!canEdit}
+                              onChange={(event) =>
+                                toggleDepartmentPermissions(departmentPermissionKeys, event.target.checked)
+                              }
+                              type="checkbox"
+                            />
+                            <span>Full department access</span>
+                          </label>
                         </header>
                         <div className="divide-y divide-neutral-200">
                           {department.resources.map((resource) => (
@@ -647,7 +646,8 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
                           ))}
                         </div>
                       </section>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
