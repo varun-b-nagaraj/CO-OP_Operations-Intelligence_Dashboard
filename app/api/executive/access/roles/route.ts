@@ -1,20 +1,20 @@
 import { NextResponse } from 'next/server';
 
 import { ensureServerPermission } from '@/lib/server/permissions';
-import { createRoleTemplate, listRoleTemplates } from '@/lib/server/access-control';
+import { createRoleV2, listRolesV2 } from '@/lib/server/access-control-v2';
 
 export async function GET() {
-  const allowed = await ensureServerPermission('executive.access_control.view');
+  const allowed = await ensureServerPermission('executive.access:view:all');
   if (!allowed) {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }
 
-  const roles = await listRoleTemplates();
+  const roles = await listRolesV2();
   return NextResponse.json({ ok: true, roles });
 }
 
 export async function POST(request: Request) {
-  const allowed = await ensureServerPermission('executive.access_control.edit');
+  const allowed = await ensureServerPermission('executive.access:manage:all');
   if (!allowed) {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }
@@ -23,14 +23,14 @@ export async function POST(request: Request) {
     role_key?: unknown;
     role_name?: unknown;
     description?: unknown;
-    permissions?: unknown;
+    role_permissions?: unknown;
   };
 
   const roleKey = String(payload.role_key ?? '').trim();
   const roleName = String(payload.role_name ?? '').trim();
   const description = String(payload.description ?? '').trim();
-  const permissions = Array.isArray(payload.permissions)
-    ? payload.permissions.map((value) => String(value)).filter(Boolean)
+  const rolePermissions = Array.isArray(payload.role_permissions)
+    ? payload.role_permissions.map((value) => String(value)).filter(Boolean)
     : [];
 
   if (!roleKey || !roleName) {
@@ -41,11 +41,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const role = await createRoleTemplate({
+    const role = await createRoleV2({
       role_key: roleKey,
       role_name: roleName,
       description: description || null,
-      permissions
+      role_permissions: rolePermissions
     });
 
     return NextResponse.json({ ok: true, role });

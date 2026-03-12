@@ -9,9 +9,10 @@ export async function GET(
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
-    const canView = await ensureServerPermission('inventory.sessions.view');
-    const canEdit = await ensureServerPermission('inventory.sessions.edit');
-    if (!canView && !canEdit) {
+    const canJoin = await ensureServerPermission('inventory.sessions:join:assigned_location');
+    const canCreate = await ensureServerPermission('inventory.sessions:create:all');
+    const canEdit = await ensureServerPermission('inventory.sessions:edit:all');
+    if (!canJoin && !canCreate && !canEdit) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
     }
 

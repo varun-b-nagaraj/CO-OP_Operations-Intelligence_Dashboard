@@ -365,6 +365,12 @@ function DepartmentOverviewGrid({
 export function ExecutiveDashboard() {
   const [activeTab, setActiveTab] = useState<ExecutiveTabId>('ai-agent');
 
+  const canViewExecutiveAiV2 = usePermission('executive.ai:view:own');
+  const canViewExecutiveAiLegacy = usePermission('executive.ai_agent.view');
+  const canViewExecutiveOverviewV2 = usePermission('executive.overview:view:all');
+  const canViewExecutiveOverviewLegacy = usePermission('executive.overview.view');
+  const canViewExecutiveAccessControlV2 = usePermission('executive.access:view:all');
+  const canManageExecutiveAccessControlV2 = usePermission('executive.access:manage:all');
   const canViewExecutiveAccessControl = usePermission('executive.access_control.view');
   const canEditExecutiveAccessControl = usePermission('executive.access_control.edit');
   const canViewHrSchedule = usePermission('hr.schedule.view');
@@ -384,11 +390,17 @@ export function ExecutiveDashboard() {
   const canViewFinance = canViewFinanceReports || canViewFinanceUpload;
   const canViewMarketing = canViewMarketingEvents || canViewMarketingReports;
   const canViewInventory = canViewInventoryCatalog || canViewInventorySessions;
-  const canViewAccessControl = canViewExecutiveAccessControl || canEditExecutiveAccessControl;
+  const canViewExecutiveAi = canViewExecutiveAiV2 || canViewExecutiveAiLegacy;
+  const canViewExecutiveOverview = canViewExecutiveOverviewV2 || canViewExecutiveOverviewLegacy;
+  const canViewAccessControl =
+    canViewExecutiveAccessControlV2 ||
+    canManageExecutiveAccessControlV2 ||
+    canViewExecutiveAccessControl ||
+    canEditExecutiveAccessControl;
   const departmentTabAccess = useMemo<Record<ExecutiveTabId, boolean>>(
     () => ({
-      'ai-agent': true,
-      overview: true,
+      'ai-agent': canViewExecutiveAi,
+      overview: canViewExecutiveOverview,
       'department-hr': canViewHr,
       'department-product': canViewProduct,
       'department-finance': canViewFinance,
@@ -399,6 +411,8 @@ export function ExecutiveDashboard() {
       'access-control': canViewAccessControl
     }),
     [
+      canViewExecutiveAi,
+      canViewExecutiveOverview,
       canViewAccessControl,
       canViewCfa,
       canViewFinance,
@@ -706,6 +720,14 @@ export function ExecutiveDashboard() {
   };
 
   const activeBreadcrumb = activeBreadcrumbs[breadcrumbIndex] ?? '';
+
+  if (navTabs.length === 0) {
+    return (
+      <main className="p-4 text-sm text-neutral-700">
+        You do not have permission to view any executive sections.
+      </main>
+    );
+  }
 
   return (
     <DepartmentShell

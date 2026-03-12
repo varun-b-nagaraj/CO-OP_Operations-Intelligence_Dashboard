@@ -3,7 +3,7 @@ import { randomBytes, scryptSync } from 'crypto';
 import { NextResponse } from 'next/server';
 
 import { ensureServerPermission } from '@/lib/server/permissions';
-import { updateEmployeeAccess } from '@/lib/server/access-control';
+import { updateEmployeeRoleAssignmentsV2 } from '@/lib/server/access-control-v2';
 import { createServerClient } from '@/lib/supabase';
 
 function hashPassword(password: string): string {
@@ -16,45 +16,33 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ employeeId: string }> }
 ) {
-  const allowed = await ensureServerPermission('executive.access_control.edit');
+  const allowed = await ensureServerPermission('executive.access:manage:all');
   if (!allowed) {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }
 
   const { employeeId } = await context.params;
   const payload = (await request.json()) as {
-    role_template_id?: unknown;
-    overrides?: unknown;
+    primary_role_key?: unknown;
+    secondary_role_keys?: unknown;
     password?: unknown;
   };
 
-  const roleTemplateId =
-    typeof payload.role_template_id === 'string' ? payload.role_template_id.trim() : undefined;
+  const primaryRoleKey =
+    typeof payload.primary_role_key === 'string' ? payload.primary_role_key.trim() : '';
+  const secondaryRoleKeys = Array.isArray(payload.secondary_role_keys)
+    ? payload.secondary_role_keys.map((entry) => String(entry)).filter(Boolean)
+    : [];
   const password = typeof payload.password === 'string' ? payload.password : '';
 
-  const overrides = Array.isArray(payload.overrides)
-    ? payload.overrides
-        .map((entry) => {
-          const value = entry as Record<string, unknown>;
-          const permissionKey = String(value.permission_key ?? '').trim();
-          const effect = String(value.effect ?? '') === 'deny' ? 'deny' : 'allow';
-          return permissionKey
-            ? {
-                permission_key: permissionKey,
-                effect: effect as 'allow' | 'deny'
-              }
-            : null;
-        })
-        .filter((entry): entry is { permission_key: string; effect: 'allow' | 'deny' } => Boolean(entry))
-    : undefined;
-
   try {
-    await updateEmployeeAccess({
-      employeeId,
-      roleTemplateId,
-      overrides,
-      assignedBy: 'executive_access_control'
-    });
+    if (primaryRoleKey) {
+      await updateEmployeeRoleAssignmentsV2({
+        employee_id: employeeId,
+        primary_role_key: primaryRoleKey,
+        secondary_role_keys: secondaryRoleKeys
+      });
+    }
 
     if (password.trim()) {
       if (password.length < 8) {

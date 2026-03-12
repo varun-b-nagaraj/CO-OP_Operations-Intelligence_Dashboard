@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { can, canonicalizePermissions } from '@/lib/access/engine';
 import { PermissionFlag, UserContext } from '@/lib/types';
 
 type AuthMeResponse = {
@@ -53,7 +54,7 @@ export function getCurrentUser(): UserContext {
 
 export function hasPermission(flag: PermissionFlag): boolean {
   const user = getCurrentUser();
-  return user.permissions.includes(flag);
+  return can(flag, canonicalizePermissions(user.permissions));
 }
 
 export function useCurrentUser(): { user: UserContext | null; loading: boolean } {
@@ -79,5 +80,5 @@ export function useCurrentUser(): { user: UserContext | null; loading: boolean }
 
 export function usePermission(flag: PermissionFlag): boolean {
   const { user } = useCurrentUser();
-  return Boolean(user?.permissions.includes(flag));
+  return Boolean(user && can(flag, canonicalizePermissions(user.permissions)));
 }

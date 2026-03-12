@@ -3,6 +3,8 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 
+import { can, canonicalizePermissions, expandForLegacyClients } from '@/lib/access/engine';
+import { ALL_PERMISSION_KEYS, CANONICAL_TO_LEGACY } from '@/lib/access/registry';
 import { createServerClient } from '@/lib/supabase';
 import { PermissionFlag, UserContext } from '@/lib/types';
 
@@ -12,79 +14,13 @@ const HARD_CODED_EXEC_S_NUMBER = 's151579';
 const HARD_CODED_EXEC_PASSWORD = 'Sleepfox1!';
 const HARD_CODED_EXEC_SESSION_TOKEN = 'hardcoded_exec_session_v1';
 const HARD_CODED_EXEC_ROLE = 'exec';
-const HARD_CODED_EXEC_PERMISSIONS: PermissionFlag[] = [
-  'cfa.day_type.override',
-  'cfa.exports',
-  'cfa.logs.read',
-  'cfa.logs.write',
-  'cfa.menu.manage',
-  'employee.accountability.view',
-  'employee.calendar.view',
-  'employee.requests.edit',
-  'employee.requests.view',
-  'employee.schedule.view',
-  'executive.access_control.edit',
-  'executive.access_control.view',
-  'executive.ai_agent.edit',
-  'executive.ai_agent.view',
-  'executive.alerts.view',
-  'executive.calendar.view',
-  'executive.department_feed.view',
-  'executive.metrics.view',
-  'executive.overview.view',
-  'executive.reports.view',
-  'finance.calendar.view',
-  'finance.reports.edit',
-  'finance.reports.view',
-  'finance.upload.edit',
-  'finance.upload.view',
-  'hr.attendance.override',
-  'hr.attendance.view',
-  'hr.audit.view',
-  'hr.calendar.view',
-  'hr.requests.edit',
-  'hr.requests.view',
-  'hr.schedule.edit',
-  'hr.schedule.view',
-  'hr.settings.edit',
-  'hr.strikes.manage',
-  'inventory.calendar.view',
-  'inventory.catalog.edit',
-  'inventory.catalog.view',
-  'inventory.count_view.edit',
-  'inventory.count_view.view',
-  'inventory.finalize_upload.edit',
-  'inventory.finalize_upload.view',
-  'inventory.sessions.edit',
-  'inventory.sessions.view',
-  'marketing.calendar.view',
-  'marketing.contacts.edit',
-  'marketing.contacts.view',
-  'marketing.coordinators.edit',
-  'marketing.coordinators.view',
-  'marketing.events.edit',
-  'marketing.events.view',
-  'marketing.reports.edit',
-  'marketing.reports.view',
-  'marketing.settings.edit',
-  'marketing.settings.view',
-  'marketing.shared_calendar.view',
-  'product.calendar.view',
-  'product.designs.edit',
-  'product.designs.view',
-  'product.orders.edit',
-  'product.orders.view',
-  'product.products.edit',
-  'product.products.view',
-  'product.prompts.edit',
-  'product.prompts.view',
-  'product.settings.edit',
-  'product.settings.view',
-  'product.vendors.edit',
-  'product.vendors.view',
-  'product.wishlist.edit',
-  'product.wishlist.view'
-];
+const HARD_CODED_EXEC_PERMISSIONS: PermissionFlag[] = Array.from(
+  new Set([
+    '*',
+    ...ALL_PERMISSION_KEYS,
+    ...ALL_PERMISSION_KEYS.flatMap((key) => CANONICAL_TO_LEGACY.get(key) ?? [])
+  ])
+);
 
 interface SessionRow {
   employee_id: number;
@@ -96,6 +32,10 @@ export interface AuthenticatedUserContext extends UserContext {
   employeeId: string;
   sNumber: string;
   name: string;
+}
+
+function isRBACV2Enabled(): boolean {
+  return process.env.RBAC_V2_ENABLED !== 'false';
 }
 
 function hashSessionToken(token: string): string {
@@ -127,7 +67,7 @@ export function getHardcodedExecSessionToken(): string {
   return HARD_CODED_EXEC_SESSION_TOKEN;
 }
 
-export async function resolveEffectivePermissions(
+async function resolveEffectivePermissionsLegacy(
   employeeId: string
 ): Promise<{ role: string; permissions: PermissionFlag[] }> {
   const supabase = createServerClient();
@@ -193,6 +133,56 @@ export async function resolveEffectivePermissions(
   return {
     role,
     permissions: Array.from(permissionSet)
+  };
+}
+
+export async function resolveEffectivePermissions(
+  employeeId: string
+): Promise<{ role: string; permissions: PermissionFlag[] }> {
+  if (!isRBACV2Enabled()) {
+    return resolveEffectivePermissionsLegacy(employeeId);
+  }
+
+  const supabase = createServerClient();
+
+  const { data: assignments, error: assignmentError } = await supabase
+    .from('employee_role_assignments')
+    .select('role_key,is_primary')
+    .eq('employee_id', employeeId)
+    .order('created_at', { ascending: true });
+
+  if (assignmentError) {
+    return resolveEffectivePermissionsLegacy(employeeId);
+  }
+
+  const roleKeys = (assignments ?? [])
+    .map((row) => String(row.role_key ?? '').trim())
+    .filter(Boolean);
+  const primaryRoleKey =
+    (assignments ?? []).find((row) => Boolean(row.is_primary))?.role_key ?? roleKeys[0] ?? 'employee_self_service';
+
+  if (roleKeys.length === 0) {
+    return { role: 'employee_self_service', permissions: [] };
+  }
+
+  const { data: rolePermissionRows, error: rolePermissionError } = await supabase
+    .from('access_role_permissions')
+    .select('permission_key')
+    .in('role_key', roleKeys);
+
+  if (rolePermissionError) {
+    return resolveEffectivePermissionsLegacy(employeeId);
+  }
+
+  const basePermissions = (rolePermissionRows ?? [])
+    .map((row) => String(row.permission_key ?? '').trim())
+    .filter(Boolean);
+  const canonicalResolved = canonicalizePermissions(basePermissions);
+  const effectivePermissions = expandForLegacyClients(canonicalResolved);
+
+  return {
+    role: String(primaryRoleKey),
+    permissions: effectivePermissions
   };
 }
 
@@ -299,7 +289,7 @@ export async function requirePermission(permissionKey: PermissionFlag): Promise<
   const context = await getServerAuthContext();
   if (!context) return false;
   if (isHardcodedExecSNumber(context.sNumber)) return true;
-  return context.permissions.includes(permissionKey);
+  return can(permissionKey, canonicalizePermissions(context.permissions));
 }
 
 export function buildAuthCookieConfig(expiresAt: Date) {

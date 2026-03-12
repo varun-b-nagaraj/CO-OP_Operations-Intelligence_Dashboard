@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { buildVisibleNav, canonicalizePermissions } from '@/lib/access/engine';
 import { LogoutButton } from '@/app/_components/logout-button';
 import { getServerAuthContext } from '@/lib/server/auth';
 
@@ -46,26 +47,16 @@ const DEPARTMENTS: Array<{ href: string; name: string; summary: string }> = [
   }
 ];
 
-const DEPARTMENT_VIEW_PERMISSIONS: Record<string, string[]> = {
-  '/executive': ['executive.overview.view', 'executive.ai_agent.view'],
-  '/hr': ['hr.schedule.view', 'hr.attendance.view', 'hr.requests.view'],
-  '/product': ['product.orders.view', 'product.products.view', 'product.vendors.view'],
-  '/marketing': ['marketing.events.view', 'marketing.reports.view', 'marketing.contacts.view'],
-  '/finance': ['finance.reports.view', 'finance.upload.view'],
-  '/inventory': ['inventory.catalog.view', 'inventory.sessions.view', 'inventory.count_view.view'],
-  '/employee': ['employee.schedule.view', 'employee.calendar.view', 'employee.accountability.view'],
-  '/cfa': ['cfa.logs.read']
-};
-
 export default async function HomePage() {
   const auth = await getServerAuthContext();
-  const visibleDepartments = !auth
-    ? DEPARTMENTS
-    : DEPARTMENTS.filter((department) =>
-        (DEPARTMENT_VIEW_PERMISSIONS[department.href] ?? []).some((permission) =>
-          auth.permissions.includes(permission)
-        )
-      );
+  const departmentByHref = new Map(DEPARTMENTS.map((department) => [department.href, department]));
+  const visibleHrefs = !auth
+    ? []
+    : buildVisibleNav(undefined, canonicalizePermissions(auth.permissions))
+        .flatMap((section) => section.children.map((child) => child.href));
+  const visibleDepartments = visibleHrefs
+    .map((href) => departmentByHref.get(href))
+    .filter((department): department is (typeof DEPARTMENTS)[number] => Boolean(department));
 
   return (
     <main className="min-h-screen w-full bg-neutral-100 px-4 py-8 text-neutral-900 md:px-8">

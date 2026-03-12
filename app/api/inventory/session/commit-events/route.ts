@@ -8,7 +8,9 @@ import { createServerClient } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
   try {
-    const allowed = await ensureServerPermission('inventory.sessions.edit');
+    const canJoin = await ensureServerPermission('inventory.sessions:join:assigned_location');
+    const canEditCounts = await ensureServerPermission('inventory.counts:edit:all');
+    const allowed = canJoin || canEditCounts;
     if (!allowed) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
     }

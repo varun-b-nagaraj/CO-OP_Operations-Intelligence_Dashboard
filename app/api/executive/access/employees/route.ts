@@ -3,7 +3,7 @@ import { randomBytes, scryptSync } from 'crypto';
 import { NextResponse } from 'next/server';
 
 import { ensureServerPermission } from '@/lib/server/permissions';
-import { listEmployeeAccess } from '@/lib/server/access-control';
+import { listEmployeeAccessV2, updateEmployeeRoleAssignmentsV2 } from '@/lib/server/access-control-v2';
 import { createServerClient } from '@/lib/supabase';
 
 function hashPassword(password: string): string {
@@ -13,17 +13,17 @@ function hashPassword(password: string): string {
 }
 
 export async function GET() {
-  const allowed = await ensureServerPermission('executive.access_control.view');
+  const allowed = await ensureServerPermission('executive.access:view:all');
   if (!allowed) {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }
 
-  const employees = await listEmployeeAccess();
+  const employees = await listEmployeeAccessV2();
   return NextResponse.json({ ok: true, employees });
 }
 
 export async function POST(request: Request) {
-  const allowed = await ensureServerPermission('executive.access_control.edit');
+  const allowed = await ensureServerPermission('executive.access:manage:all');
   if (!allowed) {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }
@@ -109,24 +109,19 @@ export async function POST(request: Request) {
   const employeeId = String(insertedEmployee.id);
 
   const { data: employeeRole } = await supabase
-    .from('access_role_templates')
-    .select('id')
-    .eq('role_key', 'employee')
+    .from('access_roles')
+    .select('role_key')
+    .eq('role_key', 'employee_self_service')
     .eq('is_active', true)
-    .order('created_at', { ascending: true })
+    .order('updated_at', { ascending: true })
     .limit(1)
     .maybeSingle();
 
-  if (employeeRole?.id) {
-    await supabase.from('employee_role_assignments').upsert(
-      {
-        employee_id: employeeId,
-        role_template_id: employeeRole.id,
-        is_primary: true,
-        assigned_by: 'executive_access_create'
-      },
-      { onConflict: 'employee_id,role_template_id' }
-    );
+  if (employeeRole?.role_key) {
+    await updateEmployeeRoleAssignmentsV2({
+      employee_id: employeeId,
+      primary_role_key: String(employeeRole.role_key)
+    });
   }
 
   if (password) {
