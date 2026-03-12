@@ -40,6 +40,42 @@ interface ToolingCachePayload {
   toolTrace: ExecutiveToolTraceItem[];
 }
 
+function isScheduleRosterPrompt(prompt: string): boolean {
+  const normalized = prompt.toLowerCase();
+  return (
+    normalized.includes('schedule') ||
+    normalized.includes('scheduled') ||
+    normalized.includes('who is working') ||
+    normalized.includes("who's working") ||
+    normalized.includes('work tomorrow') ||
+    normalized.includes('tomorrow')
+  );
+}
+
+function buildScheduleAssistantReply(message: string, overview: ExecutiveOverviewData): string {
+  const schedule = overview.tomorrowSchedule;
+  if (!schedule) {
+    return 'Schedule data is missing from this tool run. I can rerun and return tomorrow roster details.';
+  }
+
+  if (!schedule.workers.length) {
+    return `No scheduled workers were found for ${schedule.date} in the shift schedule dataset.`;
+  }
+
+  const uniqueWorkers = Array.from(new Map(schedule.workers.map((worker) => [worker.sNumber, worker])).values());
+  const workerList = uniqueWorkers
+    .slice(0, 40)
+    .map((worker) => `${worker.name} (P${worker.period})`)
+    .join(', ');
+
+  const asksWho = /\bwho\b/.test(message.toLowerCase());
+  if (asksWho) {
+    return `Scheduled to work on ${schedule.date}: ${workerList}. Total scheduled workers: ${uniqueWorkers.length}.`;
+  }
+
+  return `Tomorrow's schedule (${schedule.date}) has ${uniqueWorkers.length} workers: ${workerList}.`;
+}
+
 function sseEvent(event: string, payload: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
@@ -460,66 +496,74 @@ export async function POST(request: NextRequest) {
       lastContextMessage?.role === 'user' &&
       lastContextMessage.content.trim().toLowerCase() === message.trim().toLowerCase();
 
-    const upstream = await proxyOllamaChatRequest({
-      body: {
-        model,
-        stream: streamRequested,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...recentConversation.map((entry) => ({
-            role: entry.role,
-            content: entry.content
-          })),
-          ...(hasCurrentUserPromptAlready ? [] : [{ role: 'user', content: message }])
-        ],
-        options: {
-          temperature: 0.1
-        }
-      }
-    });
-
     let assistantMessage = '';
-    let source: 'ollama' | 'fallback' = 'ollama';
+    let source: 'ollama' | 'fallback' | 'tooling' = 'ollama';
+    let upstream: Response | null = null;
 
-    if (!upstream.ok) {
-      source = 'fallback';
-      const upstreamDetail = await readResponseError(upstream);
-      const debugId = upstream.headers.get('x-coop-ollama-debug-id') ?? '';
-      const isAuthError = upstream.status === 401 || upstream.status === 403;
-      assistantMessage = [
-        isAuthError
-          ? 'Ollama authentication failed through the internal proxy.'
-          : 'Unable to reach Ollama through the internal proxy right now.',
-        `Upstream status: ${upstream.status}.`,
-        upstreamDetail ? `Upstream detail: ${upstreamDetail}` : '',
-        debugId ? `Debug ID: ${debugId}.` : '',
-        isAuthError
-          ? 'Check OLLAMA_API_KEY and OLLAMA_BASE_URL in Vercel environment settings.'
-          : '',
-        overview ? `Executive snapshot: ${overview.executiveBrief}` : '',
-        overview
-          ? 'Check the Overview tab for current metrics and the Alerts tab for follow-up actions.'
-          : 'Try again in a moment.'
-      ]
-        .filter(Boolean)
-        .join(' ');
-    } else if (!streamRequested) {
-      const upstreamJson = (await upstream.json()) as unknown;
-      assistantMessage =
-        parseAssistantMessage(upstreamJson) ??
-        [
-          'Tool execution finished, but the model response was empty.',
-          overview ? `Executive snapshot: ${overview.executiveBrief}` : ''
-        ]
-          .filter(Boolean)
-          .join(' ');
-      if (!assistantMessage) {
+    const shouldForceScheduleReply =
+      wantsOperationalData && Boolean(overview) && isScheduleRosterPrompt(message);
+    if (shouldForceScheduleReply && overview) {
+      source = 'tooling';
+      assistantMessage = buildScheduleAssistantReply(message, overview);
+    } else {
+      upstream = await proxyOllamaChatRequest({
+        body: {
+          model,
+          stream: streamRequested,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...recentConversation.map((entry) => ({
+              role: entry.role,
+              content: entry.content
+            })),
+            ...(hasCurrentUserPromptAlready ? [] : [{ role: 'user', content: message }])
+          ],
+          options: {
+            temperature: 0.1
+          }
+        }
+      });
+
+      if (!upstream.ok) {
+        source = 'fallback';
+        const upstreamDetail = await readResponseError(upstream);
+        const debugId = upstream.headers.get('x-coop-ollama-debug-id') ?? '';
+        const isAuthError = upstream.status === 401 || upstream.status === 403;
         assistantMessage = [
-          'Tool execution finished, but the model response was empty.',
-          overview ? `Executive snapshot: ${overview.executiveBrief}` : ''
+          isAuthError
+            ? 'Ollama authentication failed through the internal proxy.'
+            : 'Unable to reach Ollama through the internal proxy right now.',
+          `Upstream status: ${upstream.status}.`,
+          upstreamDetail ? `Upstream detail: ${upstreamDetail}` : '',
+          debugId ? `Debug ID: ${debugId}.` : '',
+          isAuthError
+            ? 'Check OLLAMA_API_KEY and OLLAMA_BASE_URL in Vercel environment settings.'
+            : '',
+          overview ? `Executive snapshot: ${overview.executiveBrief}` : '',
+          overview
+            ? 'Check the Overview tab for current metrics and the Alerts tab for follow-up actions.'
+            : 'Try again in a moment.'
         ]
           .filter(Boolean)
           .join(' ');
+      } else if (!streamRequested) {
+        const upstreamJson = (await upstream.json()) as unknown;
+        assistantMessage =
+          parseAssistantMessage(upstreamJson) ??
+          [
+            'Tool execution finished, but the model response was empty.',
+            overview ? `Executive snapshot: ${overview.executiveBrief}` : ''
+          ]
+            .filter(Boolean)
+            .join(' ');
+        if (!assistantMessage) {
+          assistantMessage = [
+            'Tool execution finished, but the model response was empty.',
+            overview ? `Executive snapshot: ${overview.executiveBrief}` : ''
+          ]
+            .filter(Boolean)
+            .join(' ');
+        }
       }
     }
 
@@ -546,7 +590,7 @@ export async function POST(request: NextRequest) {
 
           try {
             send('start', { sessionId, model });
-            if (source === 'ollama' && upstream.ok) {
+            if (source === 'ollama' && upstream?.ok) {
               assistantMessage = await streamOllamaMessage(upstream, (delta) => {
                 send('delta', { text: delta });
               });
