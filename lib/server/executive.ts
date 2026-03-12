@@ -255,6 +255,8 @@ type ShiftRequestRow = {
   requested_at: string;
 };
 
+type ShiftRequestRowRaw = Record<string, unknown>;
+
 interface AttendanceStats {
   expected: number;
   present: number;
@@ -318,6 +320,98 @@ function resolveStudentName(row: StudentNameRow): string {
   return `${first} ${last}`.trim();
 }
 
+function parseNumberValue(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function normalizeShiftRequestStatus(value: unknown): ShiftRequestRow['status'] {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'approved') return 'approved';
+  if (normalized === 'denied') return 'denied';
+  return 'pending';
+}
+
+function normalizeShiftRequestRow(row: ShiftRequestRowRaw): ShiftRequestRow | null {
+  const id = readStringValue(row, ['id']);
+  const shiftDate = readStringValue(row, ['shift_date', 'date']);
+  const requester = readStringValue(row, [
+    'from_employee_s_number',
+    'requester_s_number',
+    'employee_s_number',
+    'from_s_number'
+  ]);
+  const replacement = readStringValue(row, [
+    'to_employee_s_number',
+    'replacement_s_number',
+    'to_s_number'
+  ]);
+  if (!id || !shiftDate || !requester) return null;
+
+  const requestedAt = readStringValue(row, ['requested_at', 'created_at', 'updated_at']) || new Date(0).toISOString();
+  const shiftSlotKey = readStringValue(row, ['shift_slot_key', 'slot_key']);
+  const reason = readStringValue(row, ['reason', 'notes', 'comment']);
+  return {
+    id,
+    shift_date: shiftDate,
+    shift_period: parseNumberValue(row.shift_period, 0),
+    shift_slot_key: shiftSlotKey,
+    from_employee_s_number: requester,
+    to_employee_s_number: replacement,
+    reason,
+    status: normalizeShiftRequestStatus(row.status),
+    requested_at: requestedAt
+  };
+}
+
+async function fetchShiftRequestRows(
+  supabase: ReturnType<typeof createServerClient>,
+  table: string
+): Promise<{ allRows: ShiftRequestRow[]; pendingRows: ShiftRequestRow[] }> {
+  const preferredColumns =
+    'id,shift_date,shift_period,shift_slot_key,from_employee_s_number,to_employee_s_number,reason,status,requested_at';
+
+  const [allPreferredResult, pendingPreferredResult] = await Promise.all([
+    supabase.from(table).select(preferredColumns).order('requested_at', { ascending: false }).limit(20000),
+    supabase.from(table).select(preferredColumns).eq('status', 'pending').order('requested_at', { ascending: false }).limit(500)
+  ]);
+
+  const allPreferredRows = allPreferredResult.error ? [] : (allPreferredResult.data as ShiftRequestRowRaw[] | null) ?? [];
+  const pendingPreferredRows = pendingPreferredResult.error
+    ? []
+    : (pendingPreferredResult.data as ShiftRequestRowRaw[] | null) ?? [];
+
+  if (allPreferredRows.length || pendingPreferredRows.length) {
+    return {
+      allRows: allPreferredRows.map(normalizeShiftRequestRow).filter((row): row is ShiftRequestRow => Boolean(row)),
+      pendingRows: pendingPreferredRows
+        .map(normalizeShiftRequestRow)
+        .filter((row): row is ShiftRequestRow => Boolean(row))
+    };
+  }
+
+  const [allFallbackResult, pendingFallbackResult] = await Promise.all([
+    supabase.from(table).select('*').order('requested_at', { ascending: false }).limit(20000),
+    supabase.from(table).select('*').eq('status', 'pending').order('requested_at', { ascending: false }).limit(500)
+  ]);
+
+  const allFallbackRows = allFallbackResult.error ? [] : (allFallbackResult.data as ShiftRequestRowRaw[] | null) ?? [];
+  const pendingFallbackRows = pendingFallbackResult.error
+    ? []
+    : (pendingFallbackResult.data as ShiftRequestRowRaw[] | null) ?? [];
+
+  return {
+    allRows: allFallbackRows.map(normalizeShiftRequestRow).filter((row): row is ShiftRequestRow => Boolean(row)),
+    pendingRows: pendingFallbackRows.map(normalizeShiftRequestRow).filter((row): row is ShiftRequestRow => Boolean(row))
+  };
+}
+
 async function resolveTableOrNull(
   supabase: ReturnType<typeof createServerClient>,
   preferredTable: string,
@@ -349,7 +443,7 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const [
     newOrdersThisWeek,
     openShiftRequests,
-    shiftRequestRows,
+    shiftRequestRowsSet,
     recentProductOrders,
     morningAttendanceRows,
     offPeriodAttendanceRows,
@@ -375,16 +469,8 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
         )
       : Promise.resolve(0),
     shiftRequestsTable
-      ? safeRows<ShiftRequestRow>(() =>
-          supabase
-            .from(shiftRequestsTable)
-            .select(
-              'id,shift_date,shift_period,shift_slot_key,from_employee_s_number,to_employee_s_number,reason,status,requested_at'
-            )
-            .order('requested_at', { ascending: false })
-            .limit(10000)
-        )
-      : Promise.resolve([]),
+      ? fetchShiftRequestRows(supabase, shiftRequestsTable)
+      : Promise.resolve({ allRows: [], pendingRows: [] }),
     safeRows<ProductOrderRow>(() =>
       supabase
         .from('product_purchase_orders')
@@ -461,6 +547,11 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
         .limit(6)
     )
   ]);
+
+  const shiftRequestRows = shiftRequestRowsSet.allRows;
+  const pendingShiftRequestRows = shiftRequestRowsSet.pendingRows.length
+    ? shiftRequestRowsSet.pendingRows
+    : shiftRequestRows.filter((row) => row.status === 'pending');
 
   const morningStats = buildAttendanceStats(morningAttendanceRows);
   const offPeriodStats = buildAttendanceStats(offPeriodAttendanceRows);
@@ -585,7 +676,6 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
     .slice(0, 8)
     .map((row) => `${row.name} (${Math.round(row.attendanceRate)}%, ${row.presentExcused}/${row.totalMeetings})`);
 
-  const pendingShiftRequestRows = shiftRequestRows.filter((row) => row.status === 'pending');
   const pendingShiftRequestDetails = pendingShiftRequestRows.slice(0, 20).map((row) => ({
     requesterSNumber: row.from_employee_s_number,
     requesterName: formatEmployeeName(row.from_employee_s_number, studentBySNumber),

@@ -104,7 +104,14 @@ export function requiresFreshDataPrompt(prompt: string): boolean {
     'refresh',
     'updated',
     'just now',
-    'most recent'
+    'most recent',
+    'who',
+    'anyone',
+    'pattern',
+    'consistently',
+    'request',
+    'requests',
+    'shift'
   ]);
 }
 
@@ -183,6 +190,10 @@ export function planExecutiveTools(prompt: string): ExecutiveToolSpec[] {
     'employee',
     'strike',
     'shift',
+    'request',
+    'requests',
+    'schedule out',
+    'scheduling out',
     'morning',
     'off period',
     'off-period'
