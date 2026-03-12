@@ -3,6 +3,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { ReactNode } from 'react';
 
+import { GlobalTableSorter } from '@/app/_components/global-table-sorter';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
@@ -14,7 +15,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body suppressHydrationWarning>
-        <Providers>{children}</Providers>
+        <Providers>
+          <GlobalTableSorter />
+          {children}
+        </Providers>
       </body>
     </html>
   );
