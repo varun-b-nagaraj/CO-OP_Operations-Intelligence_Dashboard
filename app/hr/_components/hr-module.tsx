@@ -22,7 +22,6 @@ const ShiftAttendanceTab = dynamic(() =>
   import('./shift-attendance-tab').then((module) => module.ShiftAttendanceTab)
 );
 const RequestsTab = dynamic(() => import('./requests-tab').then((module) => module.RequestsTab));
-const AuditTab = dynamic(() => import('./audit-tab').then((module) => module.AuditTab));
 const SharedCalendarTab = dynamic(() =>
   import('@/app/_components/shared-calendar-tab').then((module) => module.SharedCalendarTab)
 );
@@ -33,7 +32,6 @@ const tabs: Array<HRTabItem & { permission: PermissionFlag }> = [
   { id: 'meeting-attendance', label: 'Meeting Attendance', icon: 'meeting', permission: 'hr.attendance.view' },
   { id: 'shift-attendance', label: 'Shift Attendance', icon: 'shift', permission: 'hr.attendance.view' },
   { id: 'requests', label: 'Requests', icon: 'requests', permission: 'hr.requests.view' },
-  { id: 'audit', label: 'Audit', icon: 'audit', permission: 'hr.audit.view' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar', permission: 'hr.schedule.view' }
 ];
 
@@ -203,7 +201,6 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
               {resolvedHRTab === 'meeting-attendance' && <MeetingAttendanceTab dateRange={globalDateRange} />}
               {resolvedHRTab === 'shift-attendance' && <ShiftAttendanceTab dateRange={globalDateRange} />}
               {resolvedHRTab === 'requests' && <RequestsTab />}
-              {resolvedHRTab === 'audit' && <AuditTab dateRange={globalDateRange} />}
             </section>
           </section>
         ) : (

@@ -9,8 +9,7 @@ export interface HRTabItem {
     | 'employees'
     | 'meeting-attendance'
     | 'shift-attendance'
-    | 'requests'
-    | 'audit';
+    | 'requests';
   label: string;
   icon?: DepartmentShellNavIcon;
 }

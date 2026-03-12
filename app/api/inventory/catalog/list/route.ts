@@ -13,9 +13,15 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServerClient();
     const query = request.nextUrl.searchParams.get('q') ?? '';
-    const items = await listCatalog(supabase, query);
+    const pageRaw = Number(request.nextUrl.searchParams.get('page') ?? '1');
+    const perPageRaw = Number(request.nextUrl.searchParams.get('per_page') ?? '100');
+    const all = request.nextUrl.searchParams.get('all') === '1';
+    const page = Number.isFinite(pageRaw) ? Math.max(1, pageRaw) : 1;
+    const perPage = Number.isFinite(perPageRaw) ? Math.min(100, Math.max(1, perPageRaw)) : 100;
 
-    return NextResponse.json({ ok: true, items });
+    const result = await listCatalog(supabase, query, { page, perPage, all });
+
+    return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     return NextResponse.json(
       {

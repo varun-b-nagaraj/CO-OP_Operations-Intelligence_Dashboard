@@ -1,22 +1,24 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
-import { SharedCalendarTab } from '@/app/_components/shared-calendar-tab';
 import { AccessControlTab } from '@/app/executive/_components/access-control-tab';
+import { ExecutiveAuditLog } from '@/app/executive/_components/executive-audit-log';
 import { planExecutiveTools } from '@/lib/executive/tooling';
 import { usePermission } from '@/lib/permissions';
 
 type ExecutiveTabId =
   | 'ai-agent'
   | 'overview'
-  | 'department-feed'
-  | 'alerts'
-  | 'metrics'
-  | 'reports'
-  | 'calendar'
+  | 'department-hr'
+  | 'department-product'
+  | 'department-finance'
+  | 'department-marketing'
+  | 'department-inventory'
+  | 'department-cfa'
   | 'access-control';
 
 interface ExecutiveSummaryCard {
@@ -100,17 +102,59 @@ const USER_KEY_STORAGE = 'executive_agent_user_key_v1';
 const EXECUTIVE_TABS: Array<{
   id: ExecutiveTabId;
   label: string;
-  icon: 'dashboard' | 'analysis' | 'history' | 'prompts' | 'reports' | 'calendar' | 'settings';
+  icon: 'dashboard' | 'analysis' | 'reports' | 'settings';
 }> = [
   { id: 'ai-agent', label: 'AI Agent', icon: 'dashboard' },
   { id: 'overview', label: 'Overview', icon: 'analysis' },
-  { id: 'department-feed', label: 'Feed', icon: 'history' },
-  { id: 'alerts', label: 'Alerts', icon: 'prompts' },
-  { id: 'metrics', label: 'Metrics', icon: 'reports' },
-  { id: 'reports', label: 'Reports', icon: 'history' },
-  { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+  { id: 'department-hr', label: 'HR', icon: 'reports' },
+  { id: 'department-product', label: 'Product', icon: 'reports' },
+  { id: 'department-finance', label: 'Finance', icon: 'reports' },
+  { id: 'department-marketing', label: 'Marketing', icon: 'reports' },
+  { id: 'department-inventory', label: 'Inventory', icon: 'reports' },
+  { id: 'department-cfa', label: 'Chick-fil-A', icon: 'reports' },
   { id: 'access-control', label: 'Access Control', icon: 'settings' }
 ];
+
+const DEPARTMENT_TABS: Array<{ id: ExecutiveTabId; department: string }> = [
+  { id: 'department-hr', department: 'HR' },
+  { id: 'department-product', department: 'Product' },
+  { id: 'department-finance', department: 'Finance' },
+  { id: 'department-marketing', department: 'Marketing' },
+  { id: 'department-inventory', department: 'Inventory' },
+  { id: 'department-cfa', department: 'Chick-fil-A' }
+];
+
+const DEPARTMENT_PAGE_LINKS: Record<string, string> = {
+  HR: '/hr',
+  Product: '/product',
+  Finance: '/finance',
+  Marketing: '/marketing',
+  Inventory: '/inventory',
+  'Chick-fil-A': '/cfa',
+  Executive: '/executive'
+};
+
+function resolveDepartmentHref(department: string): string {
+  return DEPARTMENT_PAGE_LINKS[department] ?? '/executive';
+}
+
+const SUMMARY_CARD_LINKS: Record<string, string> = {
+  'orders-week': '/product',
+  'split-attendance-rate': '/hr?module=hr&tab=shift-attendance',
+  'morning-shift-recent': '/hr?module=hr&tab=shift-attendance',
+  'morning-meeting-recent': '/hr?module=hr&tab=meeting-attendance',
+  'meeting-under-fifty': '/hr?module=hr&tab=meeting-attendance',
+  'open-hr-requests': '/hr?module=hr&tab=requests',
+  'finance-reports': '/finance',
+  'inventory-sessions': '/inventory',
+  'marketing-events': '/marketing',
+  'cfa-logs': '/cfa',
+  'calendar-upcoming': '/executive'
+};
+
+function resolveSummaryCardHref(cardId: string): string {
+  return SUMMARY_CARD_LINKS[cardId] ?? '/executive';
+}
 
 const QUICK_PROMPTS = [
   'What changed this week across all departments?',
@@ -131,12 +175,6 @@ function toneClass(tone: 'neutral' | 'positive' | 'warning'): string {
   if (tone === 'positive') return 'border-emerald-200 bg-emerald-50';
   if (tone === 'warning') return 'border-amber-200 bg-amber-50';
   return 'border-neutral-200 bg-white';
-}
-
-function severityClass(severity: 'info' | 'warning' | 'critical'): string {
-  if (severity === 'critical') return 'border-red-200 bg-red-50';
-  if (severity === 'warning') return 'border-amber-200 bg-amber-50';
-  return 'border-sky-200 bg-sky-50';
 }
 
 function healthClass(status: 'healthy' | 'watch' | 'risk'): string {
@@ -230,6 +268,84 @@ function uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[] {
     result.push(item);
   }
   return result;
+}
+
+function ExpandableText({
+  text,
+  limit = 280,
+  className = 'text-sm text-neutral-700',
+  stopPropagationOnToggle = false
+}: {
+  text: string;
+  limit?: number;
+  className?: string;
+  stopPropagationOnToggle?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > limit;
+  const visibleText = expanded || !isLong ? text : `${text.slice(0, limit).trim()}...`;
+
+  return (
+    <div>
+      <p className={className}>{visibleText}</p>
+      {isLong ? (
+        <button
+          className="mt-2 min-h-[32px] border border-neutral-300 bg-white px-3 text-xs font-medium text-neutral-800 hover:bg-neutral-100"
+          onClick={(event) => {
+            if (stopPropagationOnToggle) event.stopPropagation();
+            setExpanded((current) => !current);
+          }}
+          type="button"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function DepartmentOverviewGrid({
+  items,
+  emptyText = 'No department overview available yet.'
+}: {
+  items: DepartmentHealthItem[];
+  emptyText?: string;
+}) {
+  const router = useRouter();
+
+  if (!items.length) return <p className="text-sm text-neutral-700">{emptyText}</p>;
+
+  return (
+    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {items.map((item) => {
+        const href = resolveDepartmentHref(item.department);
+        return (
+          <article
+            className={`cursor-pointer border p-3 transition hover:shadow-sm ${healthClass(item.status)}`}
+            key={item.id}
+            onClick={() => router.push(href)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                router.push(href);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-neutral-900">{item.department}</p>
+              <span className="text-[11px] uppercase tracking-wide text-neutral-600">{item.status}</span>
+            </div>
+            <div className="mt-2">
+              <ExpandableText className="text-sm text-neutral-700" limit={260} stopPropagationOnToggle text={item.summary} />
+            </div>
+            <p className="mt-2 text-xs font-medium text-neutral-700 underline">Open {item.department} dashboard</p>
+          </article>
+        );
+      })}
+    </section>
+  );
 }
 
 export function ExecutiveDashboard() {
@@ -387,30 +503,13 @@ export function ExecutiveDashboard() {
     void loadSessions(userKey);
   }, [userKey, loadSessions]);
 
-  const dedupedFeed = useMemo(
-    () =>
-      uniqueBy(overview?.feed ?? [], (item) => `${item.department}|${item.title}|${item.detail}`),
+  const departmentOverviews = useMemo(
+    () => uniqueBy(overview?.departmentHealth ?? [], (item) => item.department),
     [overview]
   );
-  const dedupedAlerts = useMemo(
-    () =>
-      uniqueBy(
-        overview?.alerts ?? [],
-        (item) => `${item.department}|${item.title}|${item.description}|${item.action}`
-      ),
-    [overview]
-  );
-  const dedupedMetrics = useMemo(
-    () => uniqueBy(overview?.metrics ?? [], (item) => `${item.title}|${item.value}|${item.trend}`),
-    [overview]
-  );
-  const dedupedReports = useMemo(
-    () =>
-      uniqueBy(
-        overview?.reports ?? [],
-        (item) => `${item.type}|${item.title}|${item.updatedAt}|${item.owner}`
-      ),
-    [overview]
+  const selectedDepartment = useMemo(
+    () => DEPARTMENT_TABS.find((tab) => tab.id === activeTab)?.department ?? null,
+    [activeTab]
   );
 
   useEffect(() => {
@@ -719,125 +818,151 @@ export function ExecutiveDashboard() {
 
         {activeTab === 'overview' ? (
           <section className="mx-auto w-full max-w-[1100px] space-y-4 p-4 md:p-6">
-          {loadingOverview ? <p className="text-sm text-neutral-700">Loading executive overview...</p> : null}
-          {overviewError ? <p className="text-sm text-red-700">{overviewError}</p> : null}
-          {overview ? (
-            <>
-              <section className="border border-neutral-300 bg-white p-4">
-                <h2 className="text-lg font-semibold">Executive Brief</h2>
-                <p className="mt-2 text-sm text-neutral-700">{overview.executiveBrief}</p>
-              </section>
-              <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                {overview.summaryCards.map((card) => (
-                  <article className={`border p-3 ${toneClass(card.tone)}`} key={card.id}>
-                    <p className="text-xs uppercase tracking-wide text-neutral-500">{card.title}</p>
-                    <p className="mt-1 text-2xl font-semibold text-neutral-900">{card.value}</p>
-                    <p className="mt-1 text-xs text-neutral-700">{card.subtitle}</p>
-                  </article>
-                ))}
-              </section>
-              <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {overview.departmentHealth.map((item) => (
-                  <article className={`border p-3 ${healthClass(item.status)}`} key={item.id}>
-                    <p className="text-sm font-semibold text-neutral-900">{item.department}</p>
-                    <p className="mt-1 text-xs uppercase tracking-wide text-neutral-600">{item.status}</p>
-                    <p className="mt-2 text-sm text-neutral-700">{item.summary}</p>
-                  </article>
-                ))}
-              </section>
-            </>
-          ) : null}
+            {loadingOverview ? <p className="text-sm text-neutral-700">Loading executive overview...</p> : null}
+            {overviewError ? <p className="text-sm text-red-700">{overviewError}</p> : null}
+            {overview ? (
+              <>
+                <section className="border border-neutral-300 bg-white p-4">
+                  <h2 className="text-lg font-semibold">Executive Brief</h2>
+                  <div className="mt-2">
+                    <ExpandableText limit={420} text={overview.executiveBrief} />
+                  </div>
+                </section>
+                <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {overview.summaryCards.map((card) => (
+                    <Link
+                      className={`block border p-3 transition hover:shadow-sm ${toneClass(card.tone)}`}
+                      href={resolveSummaryCardHref(card.id)}
+                      key={card.id}
+                    >
+                      <p className="text-xs uppercase tracking-wide text-neutral-500">{card.title}</p>
+                      <p className="mt-1 text-2xl font-semibold text-neutral-900">{card.value}</p>
+                      <p className="mt-1 text-xs text-neutral-700">{card.subtitle}</p>
+                      <p className="mt-2 text-xs font-medium text-neutral-700 underline">Open details</p>
+                    </Link>
+                  ))}
+                </section>
+                <section className="space-y-3">
+                  <div>
+                    <h3 className="text-base font-semibold text-neutral-900">Department Overviews</h3>
+                    <p className="text-sm text-neutral-600">
+                      High-level status by department with quick navigation to each module.
+                    </p>
+                  </div>
+                  <DepartmentOverviewGrid items={departmentOverviews} />
+                </section>
+              </>
+            ) : null}
           </section>
         ) : null}
 
-        {activeTab === 'department-feed' ? (
-          <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
-          {dedupedFeed.map((item) => (
-            <article className={`border p-3 ${severityClass(item.severity)}`} key={item.id}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-neutral-900">
-                  {item.department}: {item.title}
-                </p>
-                <p className="text-xs text-neutral-700">{item.timestamp}</p>
-              </div>
-              <p className="mt-1 text-sm text-neutral-800">{item.detail}</p>
-              <Link className="mt-2 inline-flex text-xs underline" href={item.href}>
-                Open {item.department}
-              </Link>
-            </article>
-          ))}
-          {!dedupedFeed.length ? <p className="text-sm text-neutral-700">No feed updates available yet.</p> : null}
-          </section>
-        ) : null}
+        {selectedDepartment ? (
+          <section className="mx-auto w-full max-w-[1100px] space-y-4 p-4 md:p-6">
+            {loadingOverview ? <p className="text-sm text-neutral-700">Loading executive overview...</p> : null}
+            {overviewError ? <p className="text-sm text-red-700">{overviewError}</p> : null}
+            {overview ? (
+              <>
+                <section className="border border-neutral-300 bg-white p-4">
+                  <h2 className="text-lg font-semibold">{selectedDepartment} Updates</h2>
+                  <p className="mt-1 text-xs text-neutral-600">
+                    Focused important updates for {selectedDepartment}.
+                  </p>
+                  <div className="mt-2">
+                    <ExpandableText
+                      limit={420}
+                      text={
+                        overview.departmentHealth.find((item) => item.department === selectedDepartment)?.summary ??
+                        `No health summary available yet for ${selectedDepartment}.`
+                      }
+                    />
+                  </div>
+                </section>
 
-        {activeTab === 'alerts' ? (
-          <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
-          {dedupedAlerts.map((alert) => (
-            <article
-              className={`border p-3 ${
-                alert.severity === 'high' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'
-              }`}
-              key={alert.id}
-            >
-              <p className="text-sm font-semibold text-neutral-900">
-                {alert.title} ({alert.department})
-              </p>
-              <p className="mt-1 text-sm text-neutral-800">{alert.description}</p>
-              <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-700">
-                Next step: {alert.action}
-              </p>
-            </article>
-          ))}
-          {!dedupedAlerts.length ? <p className="text-sm text-neutral-700">No active alerts.</p> : null}
-          </section>
-        ) : null}
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold text-neutral-900">Recent Feed</h3>
+                  {overview.feed
+                    .filter((item) => item.department === selectedDepartment)
+                    .slice(0, 8)
+                    .map((item) => (
+                      <article className="border border-neutral-300 bg-white p-3" key={item.id}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-neutral-900">{item.title}</p>
+                          <p className="text-xs text-neutral-600">{item.timestamp}</p>
+                        </div>
+                        <div className="mt-1">
+                          <ExpandableText className="text-sm text-neutral-700" limit={300} text={item.detail} />
+                        </div>
+                        <Link className="mt-2 inline-flex text-xs underline" href={item.href}>
+                          Open source module
+                        </Link>
+                      </article>
+                    ))}
+                  {!overview.feed.some((item) => item.department === selectedDepartment) ? (
+                    <p className="text-sm text-neutral-700">No recent feed updates.</p>
+                  ) : null}
+                </section>
 
-        {activeTab === 'metrics' ? (
-          <section className="mx-auto grid w-full max-w-[1100px] gap-3 p-4 md:grid-cols-2 md:p-6">
-          {dedupedMetrics.map((metric) => (
-            <article className="border border-neutral-300 bg-white p-4" key={metric.id}>
-              <p className="text-xs uppercase tracking-wide text-neutral-500">{metric.title}</p>
-              <p className="mt-1 text-2xl font-semibold text-neutral-900">{metric.value}</p>
-              <p className="mt-2 text-sm text-neutral-700">{metric.trend}</p>
-            </article>
-          ))}
-          {!dedupedMetrics.length ? <p className="text-sm text-neutral-700">No metric snapshots available.</p> : null}
-          </section>
-        ) : null}
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold text-neutral-900">Alerts</h3>
+                  {overview.alerts
+                    .filter((alert) => alert.department === selectedDepartment)
+                    .map((alert) => (
+                      <article className="border border-neutral-300 bg-white p-3" key={alert.id}>
+                        <p className="text-sm font-semibold text-neutral-900">{alert.title}</p>
+                        <p className="mt-1 text-sm text-neutral-700">{alert.description}</p>
+                        <p className="mt-2 text-xs text-neutral-600">Next step: {alert.action}</p>
+                      </article>
+                    ))}
+                  {!overview.alerts.some((alert) => alert.department === selectedDepartment) ? (
+                    <p className="text-sm text-neutral-700">No active alerts for this department.</p>
+                  ) : null}
+                </section>
 
-        {activeTab === 'reports' ? (
-          <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
-          {dedupedReports.map((report) => (
-            <article className="border border-neutral-300 bg-white p-3" key={report.id}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-neutral-900">
-                  {report.type}: {report.title}
-                </p>
-                <p className="text-xs text-neutral-600">{report.updatedAt}</p>
-              </div>
-              <p className="mt-1 text-xs uppercase tracking-wide text-neutral-600">
-                Status: {report.status} | Owner: {report.owner}
-              </p>
-              <Link className="mt-2 inline-flex text-xs underline" href={report.href}>
-                Open source module
-              </Link>
-            </article>
-          ))}
-          {!dedupedReports.length ? <p className="text-sm text-neutral-700">No report records available.</p> : null}
-          </section>
-        ) : null}
-
-        {activeTab === 'calendar' ? (
-          <section className="w-full p-4 md:p-6">
-          <div className="border border-neutral-300 bg-white">
-            <SharedCalendarTab sourceDepartment="exec" />
-          </div>
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold text-neutral-900">Reports</h3>
+                  {overview.reports
+                    .filter((report) => report.type === selectedDepartment)
+                    .slice(0, 6)
+                    .map((report) => (
+                      <article className="border border-neutral-300 bg-white p-3" key={report.id}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-neutral-900">{report.title}</p>
+                          <p className="text-xs text-neutral-600">{report.updatedAt}</p>
+                        </div>
+                        <p className="mt-1 text-xs text-neutral-600">
+                          Status: {report.status} | Owner: {report.owner}
+                        </p>
+                        <Link className="mt-2 inline-flex text-xs underline" href={report.href}>
+                          Open source module
+                        </Link>
+                      </article>
+                    ))}
+                  {!overview.reports.some((report) => report.type === selectedDepartment) ? (
+                    <p className="text-sm text-neutral-700">No recent reports for this department.</p>
+                  ) : null}
+                </section>
+              </>
+            ) : null}
           </section>
         ) : null}
 
         {activeTab === 'access-control' && canViewAccessControl ? (
-          <section className="w-full">
-            <AccessControlTab />
+          <section className="w-full space-y-4 p-4 md:p-6">
+            {overview ? (
+              <div className="border border-neutral-300 bg-white p-4">
+                <h2 className="text-base font-semibold text-neutral-900">Department Overviews</h2>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Snapshot context while you manage cross-department permissions.
+                </p>
+                <div className="mt-3">
+                  <DepartmentOverviewGrid items={departmentOverviews} />
+                </div>
+              </div>
+            ) : null}
+            <ExecutiveAuditLog />
+            <div className="border border-neutral-300 bg-white">
+              <AccessControlTab />
+            </div>
           </section>
         ) : null}
       </section>

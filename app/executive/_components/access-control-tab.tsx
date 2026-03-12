@@ -60,7 +60,6 @@ const FEATURE_CATALOG: FeaturePermission[] = [
   { id: 'hr_schedule', department: 'hr', label: 'Schedule', viewPermission: 'hr.schedule.view', editPermission: 'hr.schedule.edit' },
   { id: 'hr_attendance', department: 'hr', label: 'Attendance', viewPermission: 'hr.attendance.view', editPermission: 'hr.attendance.override' },
   { id: 'hr_requests', department: 'hr', label: 'Requests', viewPermission: 'hr.requests.view', editPermission: 'hr.requests.edit' },
-  { id: 'hr_audit', department: 'hr', label: 'Audit', viewPermission: 'hr.audit.view' },
   { id: 'hr_settings', department: 'hr', label: 'Settings', editPermission: 'hr.settings.edit' },
   { id: 'hr_strikes', department: 'hr', label: 'Strikes', editPermission: 'hr.strikes.manage' },
   { id: 'hr_calendar', department: 'hr', label: 'Calendar', viewPermission: 'hr.calendar.view' },
@@ -453,16 +452,23 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
     await loadData();
   };
 
-  const saveEmployee = async (employee: EmployeeRow) => {
-    if (!canEdit) return;
+  const saveEmployee = async (
+    employee: EmployeeRow,
+    explicitModes?: Record<string, AccessMode>
+  ): Promise<boolean> => {
+    if (!canEdit) return false;
 
     const roleTemplateId = employeeRoleDraftById[employee.employee_id] ?? '';
     const password = employeePasswordDraftById[employee.employee_id] ?? '';
     const baseModes =
-      employeeModesById[employee.employee_id] ?? featureModesFromPermissions(employee.permissions);
+      explicitModes ??
+      employeeModesById[employee.employee_id] ??
+      featureModesFromPermissions(employee.permissions);
     const quickDepartment = employeeDepartmentQuickById[employee.employee_id] ?? 'employee';
-    const quickOverlayModes = replaceWithDepartmentViewOverlay(baseModes, quickDepartment);
-    const overrides = overridesFromModes(quickOverlayModes);
+    const effectiveModes = explicitModes
+      ? baseModes
+      : replaceWithDepartmentViewOverlay(baseModes, quickDepartment);
+    const overrides = overridesFromModes(effectiveModes);
 
     const response = await fetch(`/api/executive/access/employees/${employee.employee_id}`, {
       method: 'PATCH',
@@ -477,12 +483,13 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
     const payload = (await response.json()) as { ok: boolean; error?: string };
     if (!response.ok || !payload.ok) {
       setStatus(payload.error ?? 'Unable to save employee settings.');
-      return;
+      return false;
     }
 
     setEmployeePasswordDraftById((previous) => ({ ...previous, [employee.employee_id]: '' }));
     setStatus(`Saved employee: ${employee.employee_name}.`);
     await loadData();
+    return true;
   };
 
   const createEmployeeFromExec = async () => {
@@ -1029,9 +1036,25 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
               <button
                 className="min-h-[34px] border border-brand-maroon bg-brand-maroon px-3 text-xs text-white disabled:opacity-50"
                 disabled={!canEdit}
-                onClick={() => {
-                  void saveEmployee(selectedEmployee);
-                  setCustomModalOpen(false);
+                onClick={async () => {
+                  const currentModes =
+                    employeeModesById[selectedEmployee.employee_id] ??
+                    featureModesFromPermissions(selectedEmployee.permissions);
+                  const appliedModes = setDepartmentMode(
+                    currentModes,
+                    customDepartment,
+                    customDepartmentMode
+                  );
+
+                  setEmployeeModesById((previous) => ({
+                    ...previous,
+                    [selectedEmployee.employee_id]: appliedModes
+                  }));
+
+                  const saved = await saveEmployee(selectedEmployee, appliedModes);
+                  if (saved) {
+                    setCustomModalOpen(false);
+                  }
                 }}
                 type="button"
               >

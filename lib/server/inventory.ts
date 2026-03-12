@@ -114,14 +114,18 @@ function inventoryWritePayload(input: CatalogUpsertInput): Record<string, unknow
 
 export async function listCatalog(
   supabase: SupabaseClient,
-  query?: string
-): Promise<InventoryCatalogItem[]> {
+  query?: string,
+  options?: { page?: number; perPage?: number; all?: boolean }
+): Promise<{ items: InventoryCatalogItem[]; total: number; page: number; perPage: number; totalPages: number }> {
+  const page = Math.max(1, Number(options?.page ?? 1) || 1);
+  const perPage = Math.min(100, Math.max(1, Number(options?.perPage ?? 100) || 100));
+  const all = Boolean(options?.all);
+
   let request = supabase
     .from('Inventory')
-    .select('*')
+    .select('*', { count: 'exact' })
     .eq('inventory_deleted', false)
-    .order('inventory_row_id', { ascending: true })
-    .limit(5000);
+    .order('inventory_row_id', { ascending: true });
 
   if (query?.trim()) {
     const q = query.trim();
@@ -130,12 +134,39 @@ export async function listCatalog(
     );
   }
 
-  const { data, error } = await request;
+  if (!all) {
+    const from = (page - 1) * perPage;
+    const to = from + perPage - 1;
+    request = request.range(from, to);
+  } else {
+    request = request.limit(5000);
+  }
+
+  const { data, error, count } = await request;
   if (error) {
     throw new Error(error.message);
   }
 
-  return (data ?? []).map((row) => mapInventoryRow(row as Record<string, unknown>));
+  const rows = (data ?? []).map((row) => mapInventoryRow(row as Record<string, unknown>));
+  if (all) {
+    return {
+      items: rows,
+      total: rows.length,
+      page: 1,
+      perPage: rows.length || perPage,
+      totalPages: 1
+    };
+  }
+
+  const resolvedTotal = count ?? rows.length;
+  const totalPages = Math.max(1, Math.ceil(resolvedTotal / perPage));
+  return {
+    items: rows,
+    total: resolvedTotal,
+    page,
+    perPage,
+    totalPages
+  };
 }
 
 async function findCatalogMatch(
