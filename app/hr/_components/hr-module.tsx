@@ -190,10 +190,9 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
                       value={globalDateRange.to}
                     />
                   </label>
-                  {resolvedHRTab === 'employees' ? (
+                  {resolvedHRTab === 'employees' && canEditHRSettings ? (
                     <button
-                      className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white hover:bg-[#6a0000] disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!canEditHRSettings}
+                      className="min-h-[40px] border border-brand-maroon bg-brand-maroon px-4 text-sm font-medium text-white hover:bg-[#6a0000]"
                       onClick={() => setOpenAddEmployeeSignal((previous) => previous + 1)}
                       type="button"
                     >
