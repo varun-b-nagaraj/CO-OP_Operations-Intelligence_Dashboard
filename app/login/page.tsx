@@ -1,11 +1,11 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FormEvent, useState } from 'react';
+import { FormEvent, Suspense, useState } from 'react';
 
 import { resetCurrentUserCache } from '@/lib/permissions';
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = searchParams.get('next') ?? '/';
@@ -83,5 +83,13 @@ export default function LoginPage() {
         {status ? <p className="mt-3 text-sm text-red-700">{status}</p> : null}
       </section>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen w-full bg-neutral-100 p-4 md:p-8" />}>
+      <LoginPageInner />
+    </Suspense>
   );
 }

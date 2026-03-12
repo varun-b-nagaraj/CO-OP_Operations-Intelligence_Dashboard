@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
 import { SharedCalendarTab } from '@/app/_components/shared-calendar-tab';
@@ -220,6 +220,18 @@ function renderMessageContent(content: string): ReactNode[] {
   return nodes;
 }
 
+function uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    const key = keyFn(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
 export function ExecutiveDashboard() {
   const [activeTab, setActiveTab] = useState<ExecutiveTabId>('ai-agent');
 
@@ -257,7 +269,7 @@ export function ExecutiveDashboard() {
   const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<string[]>([]);
   const [breadcrumbIndex, setBreadcrumbIndex] = useState(0);
 
-  const loadOverview = async () => {
+  const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
     setOverviewError(null);
     try {
@@ -272,9 +284,9 @@ export function ExecutiveDashboard() {
     } finally {
       setLoadingOverview(false);
     }
-  };
+  }, []);
 
-  const loadMessagesForSession = async (currentUserKey: string, sessionId: string) => {
+  const loadMessagesForSession = useCallback(async (currentUserKey: string, sessionId: string) => {
     if (!currentUserKey || !sessionId) return;
     setLoadingMessages(true);
     try {
@@ -308,9 +320,9 @@ export function ExecutiveDashboard() {
     } finally {
       setLoadingMessages(false);
     }
-  };
+  }, []);
 
-  const loadSessions = async (currentUserKey: string, preferredSessionId?: string) => {
+  const loadSessions = useCallback(async (currentUserKey: string, preferredSessionId?: string) => {
     if (!currentUserKey) return;
     setLoadingSessions(true);
     try {
@@ -350,11 +362,11 @@ export function ExecutiveDashboard() {
     } finally {
       setLoadingSessions(false);
     }
-  };
+  }, [activeSessionId, loadMessagesForSession]);
 
   useEffect(() => {
     void loadOverview();
-  }, []);
+  }, [loadOverview]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -373,7 +385,33 @@ export function ExecutiveDashboard() {
   useEffect(() => {
     if (!userKey) return;
     void loadSessions(userKey);
-  }, [userKey]);
+  }, [userKey, loadSessions]);
+
+  const dedupedFeed = useMemo(
+    () =>
+      uniqueBy(overview?.feed ?? [], (item) => `${item.department}|${item.title}|${item.detail}`),
+    [overview]
+  );
+  const dedupedAlerts = useMemo(
+    () =>
+      uniqueBy(
+        overview?.alerts ?? [],
+        (item) => `${item.department}|${item.title}|${item.description}|${item.action}`
+      ),
+    [overview]
+  );
+  const dedupedMetrics = useMemo(
+    () => uniqueBy(overview?.metrics ?? [], (item) => `${item.title}|${item.value}|${item.trend}`),
+    [overview]
+  );
+  const dedupedReports = useMemo(
+    () =>
+      uniqueBy(
+        overview?.reports ?? [],
+        (item) => `${item.type}|${item.title}|${item.updatedAt}|${item.owner}`
+      ),
+    [overview]
+  );
 
   useEffect(() => {
     if (!sending || !activeBreadcrumbs.length) return;
@@ -714,7 +752,7 @@ export function ExecutiveDashboard() {
 
         {activeTab === 'department-feed' ? (
           <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
-          {overview?.feed.map((item) => (
+          {dedupedFeed.map((item) => (
             <article className={`border p-3 ${severityClass(item.severity)}`} key={item.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-neutral-900">
@@ -728,13 +766,13 @@ export function ExecutiveDashboard() {
               </Link>
             </article>
           ))}
-          {!overview?.feed.length ? <p className="text-sm text-neutral-700">No feed updates available yet.</p> : null}
+          {!dedupedFeed.length ? <p className="text-sm text-neutral-700">No feed updates available yet.</p> : null}
           </section>
         ) : null}
 
         {activeTab === 'alerts' ? (
           <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
-          {overview?.alerts.map((alert) => (
+          {dedupedAlerts.map((alert) => (
             <article
               className={`border p-3 ${
                 alert.severity === 'high' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'
@@ -750,26 +788,26 @@ export function ExecutiveDashboard() {
               </p>
             </article>
           ))}
-          {!overview?.alerts.length ? <p className="text-sm text-neutral-700">No active alerts.</p> : null}
+          {!dedupedAlerts.length ? <p className="text-sm text-neutral-700">No active alerts.</p> : null}
           </section>
         ) : null}
 
         {activeTab === 'metrics' ? (
           <section className="mx-auto grid w-full max-w-[1100px] gap-3 p-4 md:grid-cols-2 md:p-6">
-          {overview?.metrics.map((metric) => (
+          {dedupedMetrics.map((metric) => (
             <article className="border border-neutral-300 bg-white p-4" key={metric.id}>
               <p className="text-xs uppercase tracking-wide text-neutral-500">{metric.title}</p>
               <p className="mt-1 text-2xl font-semibold text-neutral-900">{metric.value}</p>
               <p className="mt-2 text-sm text-neutral-700">{metric.trend}</p>
             </article>
           ))}
-          {!overview?.metrics.length ? <p className="text-sm text-neutral-700">No metric snapshots available.</p> : null}
+          {!dedupedMetrics.length ? <p className="text-sm text-neutral-700">No metric snapshots available.</p> : null}
           </section>
         ) : null}
 
         {activeTab === 'reports' ? (
           <section className="mx-auto w-full max-w-[1100px] space-y-3 p-4 md:p-6">
-          {overview?.reports.map((report) => (
+          {dedupedReports.map((report) => (
             <article className="border border-neutral-300 bg-white p-3" key={report.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-neutral-900">
@@ -785,7 +823,7 @@ export function ExecutiveDashboard() {
               </Link>
             </article>
           ))}
-          {!overview?.reports.length ? <p className="text-sm text-neutral-700">No report records available.</p> : null}
+          {!dedupedReports.length ? <p className="text-sm text-neutral-700">No report records available.</p> : null}
           </section>
         ) : null}
 

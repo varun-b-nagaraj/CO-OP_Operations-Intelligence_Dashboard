@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useCurrentUser, usePermission } from '@/lib/permissions';
 
@@ -273,7 +273,7 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
   const [newEmployeeSNumber, setNewEmployeeSNumber] = useState('');
   const [newEmployeePassword, setNewEmployeePassword] = useState('');
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setStatus(null);
     try {
@@ -341,20 +341,22 @@ export function AccessControlTab(props: AccessControlTabProps = {}) {
         return next;
       });
 
-      if (!selectedRoleId && roleRows.length > 0) setSelectedRoleId(roleRows[0].id);
-      if (!selectedEmployeeId && employeeRows.length > 0) {
-        setSelectedEmployeeId(employeeRows[0].employee_id);
+      if (roleRows.length > 0) {
+        setSelectedRoleId((previous) => previous || roleRows[0].id);
+      }
+      if (employeeRows.length > 0) {
+        setSelectedEmployeeId((previous) => previous || employeeRows[0].employee_id);
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Failed to load access data.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [loadData]);
 
   useEffect(() => {
     if (!props.openAddEmployeeSignal) return;
