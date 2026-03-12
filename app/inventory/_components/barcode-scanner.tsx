@@ -201,11 +201,11 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
 
   return (
     <div className="border border-neutral-300 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="text-xs text-neutral-700">
-          Scan Mode
+      <div className="grid gap-2 sm:grid-cols-[minmax(220px,260px)_auto_1fr] sm:items-end">
+        <label className="flex flex-col gap-1 text-xs text-neutral-700">
+          <span>Scan Mode</span>
           <Select
-            className="ml-2 border border-neutral-300 px-2 py-1 text-xs"
+            className="min-h-[40px] border border-neutral-300 px-2 py-1 text-xs"
             onChange={(event) => setScanMode(event.target.value as ScanMode)}
             value={scanMode}
           >
@@ -214,7 +214,7 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
           </Select>
         </label>
         <button
-          className="border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
+          className="min-h-[40px] border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
           disabled={!supported}
           onClick={() => {
             setError('');
@@ -224,9 +224,11 @@ export function BarcodeScanner({ onDetected, recentScan }: BarcodeScannerProps) 
         >
           {active ? 'Stop Camera Scan' : 'Start Camera Scan'}
         </button>
-        {!supported ? <span className="text-xs text-amber-700">Camera not available on this browser.</span> : null}
+        {!supported ? (
+          <span className="self-center text-xs text-amber-700">Camera not available on this browser.</span>
+        ) : null}
         {supported ? (
-          <span className="text-xs text-neutral-600">
+          <span className="self-center text-xs text-neutral-600">
             UPC/EAN/System ID scanning via camera ({fallbackMode === 'native' ? 'native detector' : 'ZXing fallback'}).
           </span>
         ) : null}
