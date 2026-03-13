@@ -34,6 +34,8 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('executive.access:manage:all', 'Access Control Manage', ['executive.access_control.edit']),
   permission('executive.audit:view:all', 'Executive Audit View', ['hr.audit.view']),
   permission('executive.audit:export:all', 'Executive Audit Export'),
+  permission('executive.hours:view:all', 'Executive Hours View', ['executive.hours.view']),
+  permission('executive.hours:approve:all', 'Executive Hours Approve', ['executive.hours.approve']),
 
   permission('hr.schedule:view:own', 'HR Schedule View Own', ['hr.schedule.view', 'employee.schedule.view']),
   permission('hr.schedule:view:all', 'HR Schedule View All'),
@@ -147,6 +149,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   permission('employee.accountability:view:own', 'Employee Accountability View', ['employee.accountability.view']),
   permission('employee.accountability:view:all', 'Employee Accountability View All'),
   permission('employee.requests:submit:own', 'Employee Requests Submit', ['employee.requests.view', 'employee.requests.edit']),
+  permission('employee.hours:submit:own', 'Employee Hours Submit', ['employee.hours.submit']),
   permission(
     'employee.inventory_checks:view:own',
     'Employee Inventory Checks View',
@@ -205,7 +208,9 @@ export const BASELINE_ROLES: RoleDefinition[] = [
       'executive.access:view:all',
       'executive.access:manage:all',
       'executive.audit:view:all',
-      'executive.audit:export:all'
+      'executive.audit:export:all',
+      'executive.hours:view:all',
+      'executive.hours:approve:all'
     ]
   },
   {
@@ -375,6 +380,7 @@ export const BASELINE_ROLES: RoleDefinition[] = [
       'employee.schedule:submit:own',
       'employee.accountability:view:own',
       'employee.requests:submit:own',
+      'employee.hours:submit:own',
       'employee.inventory_checks:view:own',
       'employee.inventory_checks:signup:own',
       'employee.inventory_checks:request_change:own',

@@ -7,7 +7,8 @@ import { ensureServerPermission } from '@/lib/server/permissions';
 export default async function ExecutivePage() {
   const canViewExecutive =
     (await ensureServerPermission('executive.overview:view:all')) ||
-    (await ensureServerPermission('executive.ai:view:own'));
+    (await ensureServerPermission('executive.ai:view:own')) ||
+    (await ensureServerPermission('executive.hours:view:all'));
   if (!canViewExecutive) {
     redirect('/');
   }

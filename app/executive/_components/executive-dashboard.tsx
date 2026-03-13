@@ -7,6 +7,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { DepartmentShell } from '@/app/_components/department-shell';
 import { AccessControlTab } from '@/app/executive/_components/access-control-tab';
 import { ExecutiveAuditLog } from '@/app/executive/_components/executive-audit-log';
+import { ExecutiveHoursApprovalsTab } from '@/app/executive/_components/executive-hours-approvals-tab';
 import { planExecutiveTools } from '@/lib/executive/tooling';
 import { usePermission } from '@/lib/permissions';
 
@@ -19,6 +20,7 @@ type ExecutiveTabId =
   | 'department-marketing'
   | 'department-inventory'
   | 'department-cfa'
+  | 'hours-approvals'
   | 'audit-log'
   | 'access-control';
 
@@ -127,6 +129,7 @@ const EXECUTIVE_TABS: Array<{
   { id: 'department-marketing', label: 'Marketing', icon: 'events' },
   { id: 'department-inventory', label: 'Inventory', icon: 'catalog' },
   { id: 'department-cfa', label: 'Chick-fil-A', icon: 'menu' },
+  { id: 'hours-approvals', label: 'Hours Approvals', icon: 'reports' },
   { id: 'audit-log', label: 'Audit Log', icon: 'audit' },
   { id: 'access-control', label: 'Access Control', icon: 'settings' }
 ];
@@ -442,6 +445,10 @@ export function ExecutiveDashboard() {
   const canViewExecutiveOverviewLegacy = usePermission('executive.overview.view');
   const canViewExecutiveAccessControlV2 = usePermission('executive.access:view:all');
   const canManageExecutiveAccessControlV2 = usePermission('executive.access:manage:all');
+  const canViewExecutiveHoursV2 = usePermission('executive.hours:view:all');
+  const canApproveExecutiveHoursV2 = usePermission('executive.hours:approve:all');
+  const canViewExecutiveHoursLegacy = usePermission('executive.hours.view');
+  const canApproveExecutiveHoursLegacy = usePermission('executive.hours.approve');
   const canViewExecutiveAccessControl = usePermission('executive.access_control.view');
   const canEditExecutiveAccessControl = usePermission('executive.access_control.edit');
   const canViewHrSchedule = usePermission('hr.schedule.view');
@@ -463,6 +470,12 @@ export function ExecutiveDashboard() {
   const canViewInventory = canViewInventoryCatalog || canViewInventorySessions;
   const canViewExecutiveAi = canViewExecutiveAiV2 || canViewExecutiveAiLegacy;
   const canViewExecutiveOverview = canViewExecutiveOverviewV2 || canViewExecutiveOverviewLegacy;
+  const canViewExecutiveHours =
+    canViewExecutiveHoursV2 ||
+    canApproveExecutiveHoursV2 ||
+    canViewExecutiveHoursLegacy ||
+    canApproveExecutiveHoursLegacy ||
+    canViewExecutiveOverview;
   const canViewAccessControl =
     canViewExecutiveAccessControlV2 ||
     canManageExecutiveAccessControlV2 ||
@@ -478,11 +491,13 @@ export function ExecutiveDashboard() {
       'department-marketing': canViewMarketing,
       'department-inventory': canViewInventory,
       'department-cfa': canViewCfa,
+      'hours-approvals': canViewExecutiveHours,
       'audit-log': canViewAccessControl,
       'access-control': canViewAccessControl
     }),
     [
       canViewExecutiveAi,
+      canViewExecutiveHours,
       canViewExecutiveOverview,
       canViewAccessControl,
       canViewCfa,
@@ -1377,6 +1392,12 @@ export function ExecutiveDashboard() {
             <div className="border border-neutral-300 bg-white">
               <AccessControlTab />
             </div>
+          </section>
+        ) : null}
+
+        {activeTab === 'hours-approvals' && canViewExecutiveHours ? (
+          <section className="w-full space-y-4 p-4 md:p-6">
+            <ExecutiveHoursApprovalsTab />
           </section>
         ) : null}
 
