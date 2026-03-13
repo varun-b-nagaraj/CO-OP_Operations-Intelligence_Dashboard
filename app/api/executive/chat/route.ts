@@ -106,7 +106,17 @@ function buildScheduleAssistantReply(message: string, overview: ExecutiveOvervie
   return `Tomorrow's schedule (${schedule.date}) has ${uniqueWorkers.length} workers: ${workerList}.`;
 }
 
-function buildAttendanceOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
+function isMorningMeetingPrompt(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('morning meeting') || normalized.includes('meeting attendance');
+}
+
+function isMorningShiftPrompt(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('morning shift') || normalized.includes('shift attendance');
+}
+
+function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
   const attendanceTables = new Set(['hr_meeting_attendance_records', 'meeting_attendance_records']);
   const studentTables = new Set(['students']);
   const attendanceRows: Array<{ sNumber: string; date: string; status: string }> = [];
@@ -191,6 +201,100 @@ function buildAttendanceOverviewFromRecords(records: ToolExecutionRecord[]): str
     `Morning meeting overview (${latestDate || 'latest date unavailable'}): ${latestPresentExcused}/${latestRows.length} present/excused.`,
     `Below 50% attendance (min ${minMeetingsForFlag} meetings): ${below50.length ? fmt(below50) : 'none'}.`,
     `Below 70% attendance (min ${minMeetingsForFlag} meetings): ${below70.length ? fmt(below70) : 'none'}.`
+  ].join(' ');
+}
+
+function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
+  const shiftTables = new Set(['hr_morning_shift_attendance', 'morning_shift_attendance']);
+  const studentTables = new Set(['students']);
+  const shiftRows: Array<{ sNumber: string; date: string; status: string }> = [];
+  const studentBySNumber = new Map<string, string>();
+
+  for (const record of records) {
+    if (!record.table) continue;
+    if (shiftTables.has(record.table)) {
+      for (const row of record.rows) {
+        const sNumberRaw = row.employee_s_number ?? row.s_number ?? row.student_number;
+        const dateRaw = row.shift_date ?? row.date;
+        const statusRaw = row.status;
+        const sNumber = typeof sNumberRaw === 'string' ? sNumberRaw.trim() : '';
+        const date = typeof dateRaw === 'string' ? dateRaw.trim() : '';
+        const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : '';
+        if (!sNumber || !date) continue;
+        shiftRows.push({ sNumber, date, status });
+      }
+    } else if (studentTables.has(record.table)) {
+      for (const row of record.rows) {
+        const sNumberRaw = row.s_number ?? row.student_number;
+        const sNumber = typeof sNumberRaw === 'string' ? sNumberRaw.trim() : '';
+        if (!sNumber) continue;
+        const nameCandidates = [row.name, row.full_name, row.student_name];
+        const first = typeof row.first_name === 'string' ? row.first_name.trim() : '';
+        const last = typeof row.last_name === 'string' ? row.last_name.trim() : '';
+        const joined = `${first} ${last}`.trim();
+        const bestName =
+          nameCandidates.find((candidate) => typeof candidate === 'string' && candidate.trim()) ??
+          (joined || sNumber);
+        studentBySNumber.set(sNumber, String(bestName).trim());
+      }
+    }
+  }
+
+  if (!shiftRows.length) return null;
+
+  const deduped = new Map<string, { sNumber: string; date: string; status: string }>();
+  for (const row of shiftRows) {
+    const key = `${row.sNumber}|${row.date}|${row.status}`;
+    if (!deduped.has(key)) deduped.set(key, row);
+  }
+  const rows = Array.from(deduped.values());
+  const latestDate = rows.map((row) => row.date).sort().at(-1) ?? '';
+  const latestRows = latestDate ? rows.filter((row) => row.date === latestDate) : [];
+  const latestPresentExcused = latestRows.filter((row) => row.status === 'present' || row.status === 'excused').length;
+
+  const absentNames = latestRows
+    .filter((row) => row.status === 'absent')
+    .map((row) => studentBySNumber.get(row.sNumber) ?? row.sNumber);
+  const presentNames = latestRows
+    .filter((row) => row.status === 'present' || row.status === 'excused')
+    .map((row) => studentBySNumber.get(row.sNumber) ?? row.sNumber);
+
+  const aggregate = new Map<string, { total: number; presentExcused: number }>();
+  for (const row of rows) {
+    const current = aggregate.get(row.sNumber) ?? { total: 0, presentExcused: 0 };
+    current.total += 1;
+    if (row.status === 'present' || row.status === 'excused') current.presentExcused += 1;
+    aggregate.set(row.sNumber, current);
+  }
+  const minShiftsForFlag = 3;
+  const rollup = Array.from(aggregate.entries())
+    .map(([sNumber, stat]) => {
+      const rate = stat.total > 0 ? (stat.presentExcused / stat.total) * 100 : 0;
+      return {
+        sNumber,
+        name: studentBySNumber.get(sNumber) ?? sNumber,
+        total: stat.total,
+        presentExcused: stat.presentExcused,
+        rate
+      };
+    })
+    .filter((row) => row.total >= minShiftsForFlag);
+
+  const below50 = rollup
+    .filter((row) => row.rate < 50)
+    .sort((a, b) => a.rate - b.rate || b.total - a.total || a.name.localeCompare(b.name));
+  const below70 = rollup
+    .filter((row) => row.rate < 70)
+    .sort((a, b) => a.rate - b.rate || b.total - a.total || a.name.localeCompare(b.name));
+  const fmt = (rowsToFormat: typeof below70) =>
+    rowsToFormat.slice(0, 60).map((row) => `${row.name} (${Math.round(row.rate)}%, ${row.presentExcused}/${row.total})`).join('; ');
+
+  return [
+    `Morning shift overview (${latestDate || 'latest date unavailable'}): ${latestPresentExcused}/${latestRows.length} present/excused.`,
+    `Present/excused: ${presentNames.length ? presentNames.join(', ') : 'none'}.`,
+    `Absent: ${absentNames.length ? absentNames.join(', ') : 'none'}.`,
+    `Below 50% attendance (min ${minShiftsForFlag} shifts): ${below50.length ? fmt(below50) : 'none'}.`,
+    `Below 70% attendance (min ${minShiftsForFlag} shifts): ${below70.length ? fmt(below70) : 'none'}.`
   ].join(' ');
 }
 
@@ -796,10 +900,21 @@ export async function POST(request: NextRequest) {
     let source: 'ollama' | 'fallback' | 'tooling' = 'ollama';
     let upstream: Response | null = null;
 
-    const forcedAttendanceReply =
-      wantsAttendancePrecision && executionRecords.length > 0
-        ? buildAttendanceOverviewFromRecords(executionRecords)
-        : null;
+    let forcedAttendanceReply: string | null = null;
+    if (wantsAttendancePrecision && executionRecords.length > 0) {
+      const wantsMeeting = isMorningMeetingPrompt(message);
+      const wantsShift = isMorningShiftPrompt(message);
+      if (wantsMeeting && !wantsShift) {
+        forcedAttendanceReply = buildMorningMeetingOverviewFromRecords(executionRecords);
+      } else if (wantsShift && !wantsMeeting) {
+        forcedAttendanceReply = buildMorningShiftOverviewFromRecords(executionRecords);
+      } else {
+        // Ambiguous attendance prompt: provide both sections explicitly.
+        const meeting = buildMorningMeetingOverviewFromRecords(executionRecords);
+        const shift = buildMorningShiftOverviewFromRecords(executionRecords);
+        forcedAttendanceReply = [meeting, shift].filter(Boolean).join('\n\n');
+      }
+    }
     const shouldForceScheduleReply =
       wantsOperationalData && Boolean(overview) && isScheduleRosterPrompt(message);
     if (forcedAttendanceReply) {
