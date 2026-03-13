@@ -116,6 +116,15 @@ function isMorningShiftPrompt(message: string): boolean {
   return normalized.includes('morning shift') || normalized.includes('shift attendance');
 }
 
+function isTopMorningShiftPrompt(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('most morning shifts') ||
+    normalized.includes('worked the most morning shifts') ||
+    (normalized.includes('morning shift') && normalized.includes('who') && normalized.includes('most'))
+  );
+}
+
 function isDateOnOrBeforeToday(dateText: string): boolean {
   const normalized = dateText.trim();
   const dateOnly = normalized.slice(0, 10);
@@ -306,6 +315,71 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
     `Below 50% attendance (min ${minShiftsForFlag} shifts): ${below50.length ? fmt(below50) : 'none'}.`,
     `Below 70% attendance (min ${minShiftsForFlag} shifts): ${below70.length ? fmt(below70) : 'none'}.`
   ].join(' ');
+}
+
+function buildTopMorningShiftWorkersFromRecords(records: ToolExecutionRecord[]): string | null {
+  const shiftTables = new Set(['hr_morning_shift_attendance', 'morning_shift_attendance']);
+  const studentTables = new Set(['students']);
+  const studentByAnyId = new Map<string, string>();
+  const workerCounts = new Map<string, number>();
+
+  for (const record of records) {
+    if (!record.table) continue;
+    if (studentTables.has(record.table)) {
+      for (const row of record.rows) {
+        const idCandidates = [row.s_number, row.student_number, row.id]
+          .map((value) => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''))
+          .filter(Boolean);
+        const first = typeof row.first_name === 'string' ? row.first_name.trim() : '';
+        const last = typeof row.last_name === 'string' ? row.last_name.trim() : '';
+        const joined = `${first} ${last}`.trim();
+        const nameCandidates = [row.name, row.full_name, row.student_name, joined]
+          .map((value) => (typeof value === 'string' ? value.trim() : ''))
+          .filter(Boolean);
+        const bestName = nameCandidates[0] ?? '';
+        if (!bestName) continue;
+        for (const candidate of idCandidates) {
+          studentByAnyId.set(candidate, bestName);
+        }
+      }
+      continue;
+    }
+
+    if (shiftTables.has(record.table)) {
+      for (const row of record.rows) {
+        const workerIdRaw = row.employee_s_number ?? row.s_number ?? row.student_number ?? row.employee_id;
+        const dateRaw = row.shift_date ?? row.date;
+        const workerId =
+          typeof workerIdRaw === 'string' || typeof workerIdRaw === 'number' ? String(workerIdRaw).trim() : '';
+        const date = typeof dateRaw === 'string' ? dateRaw.trim() : '';
+        if (!workerId || !date) continue;
+        if (!isDateOnOrBeforeToday(date)) continue;
+        workerCounts.set(workerId, (workerCounts.get(workerId) ?? 0) + 1);
+      }
+    }
+  }
+
+  if (!workerCounts.size) return null;
+
+  const ranked = Array.from(workerCounts.entries())
+    .map(([workerId, count]) => ({
+      workerId,
+      name: studentByAnyId.get(workerId) ?? `Unknown (${workerId})`,
+      count
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  const topCount = ranked[0]?.count ?? 0;
+  const leaders = ranked.filter((row) => row.count === topCount).slice(0, 20);
+  const nextTier = ranked.filter((row) => row.count < topCount).slice(0, 20);
+
+  return [
+    `Most morning shifts worked: ${topCount} shift(s).`,
+    `Top worker(s): ${leaders.map((row) => `${row.name} (${row.count})`).join('; ') || 'none'}.`,
+    nextTier.length ? `Next highest: ${nextTier.map((row) => `${row.name} (${row.count})`).join('; ')}.` : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 function buildOperationalFallbackReply(params: {
@@ -885,6 +959,7 @@ export async function POST(request: NextRequest) {
       '- Do not dump metrics unless the user explicitly asks for status, overview, trends, or analysis.',
       '- When discussing shift attendance, prioritize morning and off-period attendance and their average; do not prioritize general shift attendance.',
       '- Ground every factual claim in the provided tool outputs or conversation history. Never invent fields, departments, or placeholders.',
+      '- Always prefer person names over IDs in responses. If a name is unavailable, use "Unknown (ID)" once and avoid ID-only lists.',
       '- Assume you have access to the executive tool outputs across HR, Product, Finance, Marketing, Inventory, CFA, and shared calendar when they are provided below.',
       '- Do not claim lack of access unless tool outputs for that domain are truly absent in this turn; if absent, state exactly which dataset is missing.',
       '- Do not produce generic numbered templates (for example 1..10 categories) unless the user explicitly asks for that format.',
@@ -968,6 +1043,9 @@ export async function POST(request: NextRequest) {
         const shift = buildMorningShiftOverviewFromRecords(executionRecords);
         forcedAttendanceReply = [meeting, shift].filter(Boolean).join('\n\n');
       }
+    }
+    if (!forcedAttendanceReply && isTopMorningShiftPrompt(message) && executionRecords.length > 0) {
+      forcedAttendanceReply = buildTopMorningShiftWorkersFromRecords(executionRecords);
     }
     const shouldForceScheduleReply =
       wantsOperationalData && Boolean(overview) && isScheduleRosterPrompt(message);
