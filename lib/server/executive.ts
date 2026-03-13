@@ -491,7 +491,24 @@ function decodeOffsetCursor(cursor: string | null | undefined): number {
 function resolveDateColumn(dateRange: ToolDateRange | undefined, candidates: string[]): string | null {
   if (dateRange?.column) return dateRange.column;
   if (!candidates.length) return null;
-  const preferred = ['created_at', 'updated_at', 'uploaded_at', 'requested_at', 'issued_at', 'starts_at', 'shift_date'];
+  const preferred = [
+    'checkin_date',
+    'shift_date',
+    'starts_at',
+    'ends_at',
+    'log_date',
+    'report_date',
+    'business_sales_date',
+    'payout_date',
+    'ach_bank_date',
+    'date_placed',
+    'requested_pickup_date',
+    'created_at',
+    'updated_at',
+    'uploaded_at',
+    'requested_at',
+    'issued_at'
+  ];
   for (const key of preferred) {
     const matched = candidates.find((candidate) => candidate === key);
     if (matched) return matched;
@@ -797,6 +814,7 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
           supabase
             .from(meetingAttendanceTable)
             .select('s_number,checkin_date,effective_status')
+            .lte('checkin_date', meetingTrendEndDate)
             .order('checkin_date', { ascending: false })
             .limit(8000)
         )

@@ -116,6 +116,14 @@ function isMorningShiftPrompt(message: string): boolean {
   return normalized.includes('morning shift') || normalized.includes('shift attendance');
 }
 
+function isDateOnOrBeforeToday(dateText: string): boolean {
+  const normalized = dateText.trim();
+  const dateOnly = normalized.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return true;
+  const today = new Date().toISOString().slice(0, 10);
+  return dateOnly <= today;
+}
+
 function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
   const attendanceTables = new Set(['hr_meeting_attendance_records', 'meeting_attendance_records']);
   const studentTables = new Set(['students']);
@@ -133,6 +141,7 @@ function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]):
         const date = typeof dateRaw === 'string' ? dateRaw.trim() : '';
         const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : '';
         if (!sNumber || !date) continue;
+        if (!isDateOnOrBeforeToday(date)) continue;
         attendanceRows.push({ sNumber, date, status });
       }
     } else if (studentTables.has(record.table)) {
@@ -221,6 +230,7 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
         const date = typeof dateRaw === 'string' ? dateRaw.trim() : '';
         const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : '';
         if (!sNumber || !date) continue;
+        if (!isDateOnOrBeforeToday(date)) continue;
         shiftRows.push({ sNumber, date, status });
       }
     } else if (studentTables.has(record.table)) {

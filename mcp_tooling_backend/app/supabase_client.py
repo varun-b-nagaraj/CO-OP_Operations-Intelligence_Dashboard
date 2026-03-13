@@ -164,15 +164,22 @@ class SupabaseProxyClient:
             return requested.strip()
         if date_columns:
             preferred = [
+                "checkin_date",
+                "shift_date",
+                "starts_at",
+                "ends_at",
+                "log_date",
+                "report_date",
+                "business_sales_date",
+                "payout_date",
+                "ach_bank_date",
+                "date_placed",
+                "requested_pickup_date",
                 "created_at",
                 "updated_at",
                 "uploaded_at",
                 "requested_at",
                 "issued_at",
-                "starts_at",
-                "shift_date",
-                "log_date",
-                "checkin_date",
             ]
             date_set = {column.lower(): column for column in date_columns}
             for key in preferred:
