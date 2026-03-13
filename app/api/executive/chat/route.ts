@@ -298,6 +298,50 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
   ].join(' ');
 }
 
+function buildOperationalFallbackReply(params: {
+  message: string;
+  overview: ExecutiveOverviewData | null;
+  toolContext: string;
+  executionRecords: ToolExecutionRecord[];
+  wantsAttendancePrecision: boolean;
+  wantsOperationalData: boolean;
+}): string {
+  if (params.wantsAttendancePrecision) {
+    const wantsMeeting = isMorningMeetingPrompt(params.message);
+    const wantsShift = isMorningShiftPrompt(params.message);
+    if (wantsMeeting && !wantsShift) {
+      const meeting = buildMorningMeetingOverviewFromRecords(params.executionRecords);
+      if (meeting) return meeting;
+    }
+    if (wantsShift && !wantsMeeting) {
+      const shift = buildMorningShiftOverviewFromRecords(params.executionRecords);
+      if (shift) return shift;
+    }
+    const meeting = buildMorningMeetingOverviewFromRecords(params.executionRecords);
+    const shift = buildMorningShiftOverviewFromRecords(params.executionRecords);
+    const combined = [meeting, shift].filter(Boolean).join('\n\n');
+    if (combined) return combined;
+  }
+
+  if (params.wantsOperationalData && params.overview) {
+    return `I could not get a model-written reply for this turn, so here is the validated tool summary: ${params.overview.executiveBrief}`;
+  }
+
+  if (params.wantsOperationalData && params.toolContext.trim()) {
+    const toolLines = params.toolContext
+      .split('\n')
+      .filter((line) => line.startsWith('Result: '))
+      .map((line) => line.replace(/^Result:\s*/, '').trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    if (toolLines.length) {
+      return `I could not get a model-written reply, so here are tool results: ${toolLines.join(' ')}`;
+    }
+  }
+
+  return 'I could not generate a model reply for this turn. Please retry your request.';
+}
+
 function stripLegacyProvenanceBlock(text: string): string {
   return text.replace(/\n*\[provenance\][\s\S]*$/i, '').trim();
 }
@@ -968,19 +1012,23 @@ export async function POST(request: NextRequest) {
         const upstreamJson = (await upstream.json()) as unknown;
         assistantMessage =
           parseAssistantMessage(upstreamJson) ??
-          [
-            'Tool execution finished, but the model response was empty.',
-            overview ? `Executive snapshot: ${overview.executiveBrief}` : ''
-          ]
-            .filter(Boolean)
-            .join(' ');
-        if (!assistantMessage) {
-          assistantMessage = [
-            'Tool execution finished, but the model response was empty.',
-            overview ? `Executive snapshot: ${overview.executiveBrief}` : ''
-          ]
-            .filter(Boolean)
-            .join(' ');
+          buildOperationalFallbackReply({
+            message,
+            overview,
+            toolContext,
+            executionRecords,
+            wantsAttendancePrecision,
+            wantsOperationalData
+          });
+        if (!assistantMessage?.trim()) {
+          assistantMessage = buildOperationalFallbackReply({
+            message,
+            overview,
+            toolContext,
+            executionRecords,
+            wantsAttendancePrecision,
+            wantsOperationalData
+          });
         }
       }
     }
@@ -1080,6 +1128,18 @@ export async function POST(request: NextRequest) {
               assistantMessage = await streamOllamaMessage(upstream, (delta) => {
                 send('delta', { text: delta });
               });
+              if (!assistantMessage.trim()) {
+                source = 'tooling';
+                assistantMessage = buildOperationalFallbackReply({
+                  message,
+                  overview,
+                  toolContext,
+                  executionRecords,
+                  wantsAttendancePrecision,
+                  wantsOperationalData
+                });
+                send('delta', { text: assistantMessage });
+              }
             } else if (assistantMessage) {
               send('delta', { text: assistantMessage });
             }
