@@ -15,6 +15,7 @@ export interface ExecutiveConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ExecutiveConversationSession {
@@ -174,7 +175,7 @@ export async function listConversationMessages(params: {
 
   const { data, error } = await supabase
     .from('executive_agent_messages')
-    .select('id,session_id,role,content,created_at')
+    .select('id,session_id,role,content,created_at,metadata')
     .eq('user_key', userKey)
     .eq('session_id', params.sessionId)
     .order('created_at', { ascending: true })
@@ -182,17 +183,23 @@ export async function listConversationMessages(params: {
 
   if (error || !data) return [];
 
-  return data
-    .map((row) => ({
+  const messages: ExecutiveConversationMessage[] = [];
+  for (const row of data) {
+    const rawRole = String(row.role);
+    if (rawRole !== 'user' && rawRole !== 'assistant') continue;
+    messages.push({
       id: String(row.id),
       sessionId: String(row.session_id),
-      role: String(row.role) as 'user' | 'assistant' | 'system',
+      role: rawRole,
       content: String(row.content),
-      createdAt: String(row.created_at)
-    }))
-    .filter(
-      (row): row is ExecutiveConversationMessage => row.role === 'user' || row.role === 'assistant'
-    );
+      createdAt: String(row.created_at),
+      metadata:
+        typeof row.metadata === 'object' && row.metadata !== null
+          ? (row.metadata as Record<string, unknown>)
+          : {}
+    });
+  }
+  return messages;
 }
 
 export async function listRecentConversationContext(params: {

@@ -89,6 +89,7 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   pending: boolean;
+  provenance?: unknown;
 }
 
 interface ConversationSession {
@@ -271,6 +272,71 @@ function renderMessageContent(content: string): ReactNode[] {
 
   flushBullets();
   return nodes;
+}
+
+function formatProvenanceTooltip(provenance: unknown): string {
+  if (!provenance || typeof provenance !== 'object') return '';
+  const payload = provenance as {
+    sourceTables?: unknown;
+    window?: unknown;
+    filters?: unknown;
+    rowCounts?: unknown;
+    toolIds?: unknown;
+    validationStatus?: unknown;
+  };
+
+  const sourceTables = Array.isArray(payload.sourceTables) ? payload.sourceTables.map(String).join(', ') : 'none';
+  const toolIds = Array.isArray(payload.toolIds) ? payload.toolIds.map(String).join(', ') : 'none';
+  const validation = typeof payload.validationStatus === 'string' ? payload.validationStatus : 'not_applicable';
+  const rowCounts =
+    payload.rowCounts && typeof payload.rowCounts === 'object'
+      ? Object.entries(payload.rowCounts as Record<string, unknown>)
+          .map(([key, value]) => `${key}:${String(value)}`)
+          .join(', ')
+      : 'none';
+
+  const windowText =
+    Array.isArray(payload.window) && payload.window.length
+      ? payload.window
+          .map((entry) => {
+            if (!entry || typeof entry !== 'object') return '';
+            const row = entry as { table?: unknown; column?: unknown; from?: unknown; to?: unknown };
+            return `${String(row.table ?? 'unknown')}:${String(row.column ?? 'n/a')}:${String(row.from ?? 'n/a')}->${String(row.to ?? 'n/a')}`;
+          })
+          .filter(Boolean)
+          .join('; ')
+      : 'none';
+
+  const filtersText =
+    Array.isArray(payload.filters) && payload.filters.length
+      ? payload.filters
+          .map((entry) => {
+            if (!entry || typeof entry !== 'object') return '';
+            const row = entry as { table?: unknown; filters?: unknown };
+            const filterList = Array.isArray(row.filters)
+              ? row.filters
+                  .map((filter) => {
+                    if (!filter || typeof filter !== 'object') return '';
+                    const item = filter as { column?: unknown; op?: unknown };
+                    return `${String(item.column ?? 'unknown')}:${String(item.op ?? 'eq')}`;
+                  })
+                  .filter(Boolean)
+                  .join(',')
+              : '';
+            return `${String(row.table ?? 'unknown')}[${filterList}]`;
+          })
+          .filter(Boolean)
+          .join('; ')
+      : 'none';
+
+  return [
+    `source_tables: ${sourceTables}`,
+    `window: ${windowText}`,
+    `filters: ${filtersText}`,
+    `row_counts: ${rowCounts}`,
+    `tool_ids: ${toolIds}`,
+    `validation: ${validation}`
+  ].join('\n');
 }
 
 function uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[] {
@@ -482,7 +548,12 @@ export function ExecutiveDashboard() {
       const response = await fetch(`/api/executive/history/messages?${params.toString()}`, { cache: 'no-store' });
       const payload = (await response.json()) as {
         ok: boolean;
-        messages?: Array<{ id: string; role: 'user' | 'assistant'; content: string }>;
+        messages?: Array<{
+          id: string;
+          role: 'user' | 'assistant';
+          content: string;
+          metadata?: { provenance?: unknown };
+        }>;
         error?: string;
       };
       if (!response.ok || !payload.ok) {
@@ -493,7 +564,8 @@ export function ExecutiveDashboard() {
           id: message.id,
           role: message.role,
           content: message.content,
-          pending: false
+          pending: false,
+          provenance: message.metadata?.provenance
         })) ?? [];
       setMessages(loadedMessages);
     } catch (error) {
@@ -758,6 +830,7 @@ export function ExecutiveDashboard() {
     setActiveBreadcrumbs(planned);
     setBreadcrumbIndex(0);
     let assistantText = '';
+    let assistantProvenance: unknown = null;
     let finalSessionId = workingSessionId;
     const controller = new AbortController();
     currentRequestControllerRef.current = controller;
@@ -816,6 +889,7 @@ export function ExecutiveDashboard() {
               text?: string;
               sessionId?: string;
               assistantMessage?: string;
+              provenance?: unknown;
               error?: string;
             };
             if (eventName === 'delta' && typeof payload.text === 'string') {
@@ -836,6 +910,7 @@ export function ExecutiveDashboard() {
               if (typeof payload.assistantMessage === 'string' && payload.assistantMessage.trim()) {
                 assistantText = payload.assistantMessage;
               }
+              assistantProvenance = payload.provenance ?? assistantProvenance;
             } else if (eventName === 'error') {
               throw new Error(payload.error ?? 'Streaming failed.');
             }
@@ -863,6 +938,7 @@ export function ExecutiveDashboard() {
           ok: boolean;
           assistantMessage?: string;
           sessionId?: string;
+          provenance?: unknown;
           error?: string;
         };
         if (!payload.ok) {
@@ -870,6 +946,7 @@ export function ExecutiveDashboard() {
         }
         assistantText = payload.assistantMessage ?? 'No response generated.';
         finalSessionId = payload.sessionId ?? finalSessionId;
+        assistantProvenance = payload.provenance ?? null;
       }
 
       setMessages((current) =>
@@ -878,7 +955,8 @@ export function ExecutiveDashboard() {
             ? {
                 ...message,
                 pending: false,
-                content: assistantText || 'No response generated.'
+                content: assistantText || 'No response generated.',
+                provenance: assistantProvenance
               }
             : message
         )
@@ -1079,6 +1157,16 @@ export function ExecutiveDashboard() {
                             : 'border border-neutral-200 bg-white text-neutral-900'
                         }`}
                       >
+                        {message.role === 'assistant' && !message.pending && message.provenance ? (
+                          <div className="mb-1 flex justify-end">
+                            <span
+                              className="inline-flex h-5 w-5 cursor-help items-center justify-center rounded-full border border-neutral-300 bg-neutral-50 text-[11px] text-neutral-600"
+                              title={formatProvenanceTooltip(message.provenance)}
+                            >
+                              i
+                            </span>
+                          </div>
+                        ) : null}
                         <div className="space-y-1">
                           {message.content ? <div className="space-y-1">{renderMessageContent(message.content)}</div> : null}
                           {message.pending ? (

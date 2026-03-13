@@ -407,26 +407,6 @@ function buildProvenance(params: {
   };
 }
 
-function appendProvenanceFooter(message: string, provenance: AnswerProvenance): string {
-  const footer = [
-    '',
-    '[provenance]',
-    `source_tables: ${provenance.sourceTables.join(', ') || 'none'}`,
-    `window: ${provenance.window
-      .map((entry) => `${entry.table}:${entry.column ?? 'n/a'}:${entry.from ?? 'n/a'}->${entry.to ?? 'n/a'}`)
-      .join('; ') || 'none'}`,
-    `filters: ${provenance.filters
-      .map((entry) => `${entry.table}[${entry.filters.map((filter) => `${filter.column}:${filter.op}`).join(',')}]`)
-      .join('; ') || 'none'}`,
-    `row_counts: ${Object.entries(provenance.rowCounts)
-      .map(([table, count]) => `${table}:${count}`)
-      .join(', ') || 'none'}`,
-    `tool_ids: ${provenance.toolIds.join(', ') || 'none'}`,
-    `validation: ${provenance.validationStatus}`
-  ].join('\n');
-  return `${message.trim()}\n${footer}`;
-}
-
 function toToolTraceItem(params: {
   id: string;
   status: 'complete' | 'failed';
@@ -622,14 +602,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (wantsToolList && toolCatalog.length) {
-      const manifestMessage = appendProvenanceFooter(
-        formatToolManifest(toolCatalog),
-        buildProvenance({
-          records: executionRecords,
-          toolTrace: [...toolTrace, ...overviewToolTrace],
-          validationStatus: 'not_applicable'
-        })
-      );
+      const manifestMessage = formatToolManifest(toolCatalog);
       await insertConversationMessage({
         userKey,
         sessionId,
@@ -857,9 +830,6 @@ export async function POST(request: NextRequest) {
           ? 'not_applicable'
           : 'not_applicable'
     });
-    if (wantsOperationalData && assistantMessage) {
-      assistantMessage = appendProvenanceFooter(assistantMessage, provenance);
-    }
 
     const assistantMetadata: Record<string, unknown> = {
       source,
@@ -896,20 +866,6 @@ export async function POST(request: NextRequest) {
               });
             } else if (assistantMessage) {
               send('delta', { text: assistantMessage });
-            }
-
-            if (wantsOperationalData && assistantMessage) {
-              const streamProvenance = buildProvenance({
-                records: executionRecords,
-                toolTrace: [...toolTrace, ...overviewToolTrace],
-                validationStatus: 'not_applicable'
-              });
-              const withFooter = appendProvenanceFooter(assistantMessage, streamProvenance);
-              const appended = withFooter.slice(assistantMessage.length);
-              if (appended.trim()) {
-                send('delta', { text: appended });
-              }
-              assistantMessage = withFooter;
             }
 
             await insertConversationMessage({
