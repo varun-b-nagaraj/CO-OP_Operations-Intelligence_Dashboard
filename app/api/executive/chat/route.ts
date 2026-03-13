@@ -106,6 +106,98 @@ function buildScheduleAssistantReply(message: string, overview: ExecutiveOvervie
   return `Tomorrow's schedule (${schedule.date}) has ${uniqueWorkers.length} workers: ${workerList}.`;
 }
 
+function buildAttendanceOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
+  const attendanceTables = new Set(['hr_meeting_attendance_records', 'meeting_attendance_records']);
+  const studentTables = new Set(['students']);
+  const attendanceRows: Array<{ sNumber: string; date: string; status: string }> = [];
+  const studentBySNumber = new Map<string, string>();
+
+  for (const record of records) {
+    if (!record.table) continue;
+    if (attendanceTables.has(record.table)) {
+      for (const row of record.rows) {
+        const sNumberRaw = row.s_number ?? row.employee_s_number ?? row.student_number;
+        const dateRaw = row.checkin_date ?? row.date ?? row.shift_date;
+        const statusRaw = row.effective_status ?? row.status;
+        const sNumber = typeof sNumberRaw === 'string' ? sNumberRaw.trim() : '';
+        const date = typeof dateRaw === 'string' ? dateRaw.trim() : '';
+        const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : '';
+        if (!sNumber || !date) continue;
+        attendanceRows.push({ sNumber, date, status });
+      }
+    } else if (studentTables.has(record.table)) {
+      for (const row of record.rows) {
+        const sNumberRaw = row.s_number ?? row.student_number;
+        const sNumber = typeof sNumberRaw === 'string' ? sNumberRaw.trim() : '';
+        if (!sNumber) continue;
+        const nameCandidates = [row.name, row.full_name, row.student_name];
+        const first = typeof row.first_name === 'string' ? row.first_name.trim() : '';
+        const last = typeof row.last_name === 'string' ? row.last_name.trim() : '';
+        const joined = `${first} ${last}`.trim();
+        const bestName =
+          nameCandidates.find((candidate) => typeof candidate === 'string' && candidate.trim()) ??
+          (joined || sNumber);
+        studentBySNumber.set(sNumber, String(bestName).trim());
+      }
+    }
+  }
+
+  if (!attendanceRows.length) return null;
+
+  const deduped = new Map<string, { sNumber: string; date: string; status: string }>();
+  for (const row of attendanceRows) {
+    const key = `${row.sNumber}|${row.date}|${row.status}`;
+    if (!deduped.has(key)) deduped.set(key, row);
+  }
+
+  const rows = Array.from(deduped.values());
+  const latestDate = rows.map((row) => row.date).sort().at(-1) ?? '';
+  const latestRows = latestDate ? rows.filter((row) => row.date === latestDate) : [];
+  const latestPresentExcused = latestRows.filter((row) => row.status === 'present' || row.status === 'excused').length;
+
+  const aggregate = new Map<string, { total: number; presentExcused: number }>();
+  for (const row of rows) {
+    const current = aggregate.get(row.sNumber) ?? { total: 0, presentExcused: 0 };
+    current.total += 1;
+    if (row.status === 'present' || row.status === 'excused') current.presentExcused += 1;
+    aggregate.set(row.sNumber, current);
+  }
+
+  const minMeetingsForFlag = 3;
+  const rollup = Array.from(aggregate.entries())
+    .map(([sNumber, stat]) => {
+      const rate = stat.total > 0 ? (stat.presentExcused / stat.total) * 100 : 0;
+      return {
+        sNumber,
+        name: studentBySNumber.get(sNumber) ?? sNumber,
+        total: stat.total,
+        presentExcused: stat.presentExcused,
+        rate
+      };
+    })
+    .filter((row) => row.total >= minMeetingsForFlag);
+
+  const below50 = rollup
+    .filter((row) => row.rate < 50)
+    .sort((a, b) => a.rate - b.rate || b.total - a.total || a.name.localeCompare(b.name));
+  const below70 = rollup
+    .filter((row) => row.rate < 70)
+    .sort((a, b) => a.rate - b.rate || b.total - a.total || a.name.localeCompare(b.name));
+
+  const fmt = (rowsToFormat: typeof below70) =>
+    rowsToFormat.slice(0, 60).map((row) => `${row.name} (${Math.round(row.rate)}%, ${row.presentExcused}/${row.total})`).join('; ');
+
+  return [
+    `Morning meeting overview (${latestDate || 'latest date unavailable'}): ${latestPresentExcused}/${latestRows.length} present/excused.`,
+    `Below 50% attendance (min ${minMeetingsForFlag} meetings): ${below50.length ? fmt(below50) : 'none'}.`,
+    `Below 70% attendance (min ${minMeetingsForFlag} meetings): ${below70.length ? fmt(below70) : 'none'}.`
+  ].join(' ');
+}
+
+function stripLegacyProvenanceBlock(text: string): string {
+  return text.replace(/\n*\[provenance\][\s\S]*$/i, '').trim();
+}
+
 function sseEvent(event: string, payload: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
@@ -704,9 +796,16 @@ export async function POST(request: NextRequest) {
     let source: 'ollama' | 'fallback' | 'tooling' = 'ollama';
     let upstream: Response | null = null;
 
+    const forcedAttendanceReply =
+      wantsAttendancePrecision && executionRecords.length > 0
+        ? buildAttendanceOverviewFromRecords(executionRecords)
+        : null;
     const shouldForceScheduleReply =
       wantsOperationalData && Boolean(overview) && isScheduleRosterPrompt(message);
-    if (shouldForceScheduleReply && overview) {
+    if (forcedAttendanceReply) {
+      source = 'tooling';
+      assistantMessage = forcedAttendanceReply;
+    } else if (shouldForceScheduleReply && overview) {
       source = 'tooling';
       assistantMessage = buildScheduleAssistantReply(message, overview);
     } else {
@@ -830,6 +929,8 @@ export async function POST(request: NextRequest) {
           ? 'not_applicable'
           : 'not_applicable'
     });
+
+    assistantMessage = stripLegacyProvenanceBlock(assistantMessage);
 
     const assistantMetadata: Record<string, unknown> = {
       source,

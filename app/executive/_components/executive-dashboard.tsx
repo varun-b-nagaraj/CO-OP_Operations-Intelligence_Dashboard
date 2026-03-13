@@ -339,6 +339,10 @@ function formatProvenanceTooltip(provenance: unknown): string {
   ].join('\n');
 }
 
+function stripLegacyProvenanceBlock(text: string): string {
+  return text.replace(/\n*\[provenance\][\s\S]*$/i, '').trim();
+}
+
 function uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[] {
   const seen = new Set<string>();
   const result: T[] = [];
@@ -563,7 +567,7 @@ export function ExecutiveDashboard() {
         payload.messages?.map((message) => ({
           id: message.id,
           role: message.role,
-          content: message.content,
+          content: stripLegacyProvenanceBlock(message.content),
           pending: false,
           provenance: message.metadata?.provenance
         })) ?? [];
@@ -945,6 +949,7 @@ export function ExecutiveDashboard() {
           throw new Error(payload.error ?? 'Chat request failed.');
         }
         assistantText = payload.assistantMessage ?? 'No response generated.';
+        assistantText = stripLegacyProvenanceBlock(assistantText);
         finalSessionId = payload.sessionId ?? finalSessionId;
         assistantProvenance = payload.provenance ?? null;
       }
@@ -955,7 +960,7 @@ export function ExecutiveDashboard() {
             ? {
                 ...message,
                 pending: false,
-                content: assistantText || 'No response generated.',
+                content: stripLegacyProvenanceBlock(assistantText || 'No response generated.'),
                 provenance: assistantProvenance
               }
             : message
