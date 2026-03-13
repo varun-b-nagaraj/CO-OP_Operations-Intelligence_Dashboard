@@ -185,6 +185,30 @@ export function isOperationalDataPrompt(prompt: string): boolean {
   ]);
 }
 
+export function isToolListingPrompt(prompt: string): boolean {
+  const normalized = prompt.toLowerCase();
+  return (
+    normalized.includes('list tools') ||
+    normalized.includes('all tools') ||
+    normalized.includes('what tools') ||
+    normalized.includes('tool manifest') ||
+    normalized.includes('each tool')
+  );
+}
+
+export function isAttendancePrecisionPrompt(prompt: string): boolean {
+  const normalized = prompt.toLowerCase();
+  return (
+    (normalized.includes('attendance') || normalized.includes('morning meeting')) &&
+    (normalized.includes('who') ||
+      normalized.includes('below') ||
+      normalized.includes('between') ||
+      normalized.includes('100%') ||
+      normalized.includes('75%') ||
+      normalized.includes('50%'))
+  );
+}
+
 export function planExecutiveDataPacks(prompt: string): ExecutiveDataPack[] {
   const normalized = prompt.toLowerCase();
   if (isGreetingPrompt(normalized)) return [];

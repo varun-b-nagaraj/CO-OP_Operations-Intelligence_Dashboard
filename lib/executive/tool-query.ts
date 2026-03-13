@@ -69,6 +69,55 @@ export interface ToolStorageMetadataRequest {
   prefix?: string;
 }
 
+export interface ToolCatalogEntry {
+  id: string;
+  label: string;
+  kind: 'department_pack' | 'table_tool' | 'discovery_tool';
+  department: string;
+  capabilityTags: string[];
+  table?: string;
+}
+
+export interface QueryPlan {
+  intentClass: 'tool_listing' | 'attendance_detail' | 'overview' | 'general';
+  selectedTools: string[];
+  dateRange: ToolDateRange;
+  filters: ToolQueryFilter[];
+  sort: ToolSort[];
+  limit: number;
+  targetEntities: string[];
+}
+
+export interface ToolExecutionRecord {
+  toolId: string;
+  table?: string;
+  args: {
+    dateRange?: ToolDateRange;
+    filters?: ToolQueryFilter[];
+    sort?: ToolSort[];
+    limit?: number;
+  };
+  rowCount: number;
+  rowHash: string;
+  effectiveWindow: { column: string; from?: string; to?: string } | null;
+  rows: Record<string, unknown>[];
+}
+
+export interface ValidationResult {
+  passed: boolean;
+  mismatches: string[];
+  retryReason?: string;
+}
+
+export interface AnswerProvenance {
+  sourceTables: string[];
+  window: Array<{ table: string; column?: string; from?: string; to?: string }>;
+  filters: Array<{ table: string; filters: ToolQueryFilter[] }>;
+  rowCounts: Record<string, number>;
+  toolIds: string[];
+  validationStatus: 'passed' | 'failed' | 'not_applicable';
+}
+
 export function inferDefaultWindowForDepartment(department: string): ToolDateRange {
   const normalized = department.toLowerCase();
   if (normalized === 'hr') return { mode: 'auto' };

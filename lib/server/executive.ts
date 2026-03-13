@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+
 import { createServerClient } from '@/lib/supabase';
 import { resolvePreferredTable } from '@/lib/server/common';
 import {
@@ -7,6 +9,8 @@ import {
   resolveExecutiveDateRange
 } from '@/lib/executive/tooling';
 import { ToolDateRange, ToolQueryFilter, ToolQueryResponse, ToolSort } from '@/lib/executive/tool-query';
+import { QueryPlan, ToolCatalogEntry, ToolExecutionRecord } from '@/lib/executive/tool-query';
+import { buildExecutiveToolCatalog } from '@/lib/executive/tool-catalog';
 
 export interface ExecutiveSummaryCard {
   id: string;
@@ -133,6 +137,10 @@ export interface ExecutiveToolTraceItem {
   startedAt: string;
   finishedAt: string;
   detail: string;
+}
+
+function hashRows(rows: Record<string, unknown>[]): string {
+  return createHash('sha256').update(JSON.stringify(rows)).digest('hex');
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -657,6 +665,42 @@ const PACK_TABLES: Record<ExecutiveDataPack, Array<{ table: string; dateColumns:
     { table: 'auth_sessions', dateColumns: ['created_at'] }
   ]
 };
+
+function buildQueryPlan(prompt: string, selectedPacks: ExecutiveDataPack[]): QueryPlan {
+  const normalized = prompt.toLowerCase();
+  const isAttendanceDetail =
+    (normalized.includes('attendance') || normalized.includes('morning meeting')) &&
+    (normalized.includes('who') ||
+      normalized.includes('below') ||
+      normalized.includes('between') ||
+      normalized.includes('100%') ||
+      normalized.includes('75%') ||
+      normalized.includes('50%'));
+
+  const forcedAttendanceTables = isAttendanceDetail
+    ? [
+        'table_hr_meeting_attendance_records',
+        'table_meeting_attendance_records',
+        'table_students',
+        'table_hr_morning_shift_attendance',
+        'table_morning_shift_attendance'
+      ]
+    : [];
+
+  const selectedTools = [
+    ...selectedPacks,
+    ...forcedAttendanceTables
+  ];
+  return {
+    intentClass: isAttendanceDetail ? 'attendance_detail' : selectedPacks.length ? 'overview' : 'general',
+    selectedTools,
+    dateRange: selectedPacks.length ? resolveExecutiveDateRange(prompt, selectedPacks[0]) : { mode: 'auto' },
+    filters: [],
+    sort: [{ column: 'id', direction: 'asc' }],
+    limit: isAttendanceDetail ? 2000 : 50,
+    targetEntities: isAttendanceDetail ? ['attendance', 'morning_meeting'] : []
+  };
+}
 
 export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const supabase = createServerClient();
@@ -1501,11 +1545,17 @@ export async function runExecutiveTooling(prompt: string): Promise<{
   toolTrace: ExecutiveToolTraceItem[];
   toolContext: string;
   overview: ExecutiveOverviewData;
+  toolCatalog: ToolCatalogEntry[];
+  queryPlan: QueryPlan;
+  executionRecords: ToolExecutionRecord[];
 }> {
   const selectedPacks = planExecutiveDataPacks(prompt);
   const overview = await fetchExecutiveOverview();
+  const toolCatalog = buildExecutiveToolCatalog();
+  const queryPlan = buildQueryPlan(prompt, selectedPacks);
   const toolTrace: ExecutiveToolTraceItem[] = [];
   const contextLines: string[] = [];
+  const executionRecords: ToolExecutionRecord[] = [];
   const supabase = createServerClient();
 
   for (const pack of selectedPacks) {
@@ -1523,6 +1573,20 @@ export async function runExecutiveTooling(prompt: string): Promise<{
           dateColumns: entry.dateColumns,
           sort: [{ column: entry.dateColumns[0] ?? 'id', direction: 'desc' }, { column: 'id', direction: 'asc' }],
           limit: 50
+        });
+        executionRecords.push({
+          toolId: `table_${entry.table.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase()}`,
+          table: entry.table,
+          args: {
+            dateRange,
+            filters: [],
+            sort: [{ column: entry.dateColumns[0] ?? 'id', direction: 'desc' }, { column: 'id', direction: 'asc' }],
+            limit: 50
+          },
+          rowCount: queryResult.row_count,
+          rowHash: hashRows(queryResult.rows),
+          effectiveWindow: queryResult.effective_window,
+          rows: queryResult.rows
         });
         tableSummaries.push(
           `${entry.table}: ${queryResult.row_count} rows` +
@@ -1564,9 +1628,69 @@ export async function runExecutiveTooling(prompt: string): Promise<{
     }
   }
 
+  if (queryPlan.intentClass === 'attendance_detail') {
+    const attendanceTables = [
+      { table: 'hr_meeting_attendance_records', dateColumns: ['checkin_date', 'created_at'] },
+      { table: 'meeting_attendance_records', dateColumns: ['checkin_date', 'created_at'] },
+      { table: 'students', dateColumns: ['created_at'] },
+      { table: 'hr_morning_shift_attendance', dateColumns: ['shift_date'] },
+      { table: 'morning_shift_attendance', dateColumns: ['shift_date'] }
+    ];
+    const dateRange = resolveExecutiveDateRange(prompt, 'hr_deep_dive');
+    for (const entry of attendanceTables) {
+      const startedAt = new Date().toISOString();
+      try {
+        const queryResult = await executeCanonicalTableQuery({
+          supabase,
+          table: entry.table,
+          dateRange,
+          dateColumns: entry.dateColumns,
+          sort: [{ column: entry.dateColumns[0] ?? 'id', direction: 'desc' }, { column: 'id', direction: 'asc' }],
+          limit: 4000
+        });
+        const finishedAt = new Date().toISOString();
+        executionRecords.push({
+          toolId: `table_${entry.table.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase()}`,
+          table: entry.table,
+          args: {
+            dateRange,
+            filters: [],
+            sort: [{ column: entry.dateColumns[0] ?? 'id', direction: 'desc' }, { column: 'id', direction: 'asc' }],
+            limit: 4000
+          },
+          rowCount: queryResult.row_count,
+          rowHash: hashRows(queryResult.rows),
+          effectiveWindow: queryResult.effective_window,
+          rows: queryResult.rows
+        });
+        toolTrace.push({
+          id: `table_${entry.table.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase()}`,
+          label: entry.table,
+          status: 'complete',
+          startedAt,
+          finishedAt,
+          detail: `Fetched ${queryResult.row_count} row(s) for attendance validation from ${entry.table}.`
+        });
+      } catch (error) {
+        const finishedAt = new Date().toISOString();
+        toolTrace.push({
+          id: `table_${entry.table.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase()}`,
+          label: entry.table,
+          status: 'failed',
+          startedAt,
+          finishedAt,
+          detail: error instanceof Error ? error.message : `Failed querying ${entry.table}`
+        });
+      }
+    }
+  }
+
   return {
     toolTrace,
     toolContext: contextLines.join('\n'),
-    overview
+    overview,
+    toolCatalog,
+    queryPlan,
+    executionRecords
   };
 }

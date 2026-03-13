@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ensureServerPermission } from '@/lib/server/permissions';
 import {
   getToolSpecById,
+  isAttendancePrecisionPrompt,
   isGreetingPrompt,
   isOperationalDataPrompt,
+  isToolListingPrompt,
   requiresFreshDataPrompt
 } from '@/lib/executive/tooling';
 import {
@@ -21,6 +23,14 @@ import {
   runExecutiveTooling
 } from '@/lib/server/executive';
 import { proxyOllamaChatRequest } from '@/lib/server/ollama-proxy';
+import {
+  AnswerProvenance,
+  QueryPlan,
+  ToolCatalogEntry,
+  ToolExecutionRecord,
+  ToolQueryFilter,
+  ValidationResult
+} from '@/lib/executive/tool-query';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -38,6 +48,9 @@ interface ToolingCachePayload {
   toolContext: string;
   overview: ExecutiveOverviewData;
   toolTrace: ExecutiveToolTraceItem[];
+  toolCatalog?: ToolCatalogEntry[];
+  queryPlan?: QueryPlan;
+  executionRecords?: ToolExecutionRecord[];
 }
 
 function isScheduleRosterPrompt(prompt: string): boolean {
@@ -275,6 +288,145 @@ function normalizeFactCandidates(payload: unknown): MemoryFactCandidate[] {
     .filter((row): row is MemoryFactCandidate => Boolean(row));
 }
 
+function formatToolManifest(catalog: ToolCatalogEntry[]): string {
+  const departmentPacks = catalog.filter((tool) => tool.kind === 'department_pack');
+  const discoveryTools = catalog.filter((tool) => tool.kind === 'discovery_tool');
+  const tableToolsByDepartment = new Map<string, ToolCatalogEntry[]>();
+
+  for (const tableTool of catalog.filter((tool) => tool.kind === 'table_tool')) {
+    const bucket = tableToolsByDepartment.get(tableTool.department) ?? [];
+    bucket.push(tableTool);
+    tableToolsByDepartment.set(tableTool.department, bucket);
+  }
+
+  const lines: string[] = [];
+  lines.push('Department packs:');
+  lines.push(...departmentPacks.map((tool) => `- ${tool.id} (${tool.label})`));
+  lines.push('Discovery tools:');
+  lines.push(...discoveryTools.map((tool) => `- ${tool.id}`));
+  lines.push('Table tools by department:');
+  for (const [department, tools] of Array.from(tableToolsByDepartment.entries()).sort((a, b) =>
+    a[0].localeCompare(b[0])
+  )) {
+    lines.push(`- ${department}: ${tools.length} tools`);
+    lines.push(`  ${tools.map((tool) => tool.id).join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+function extractKnownNamesFromRecords(records: ToolExecutionRecord[]): Set<string> {
+  const names = new Set<string>();
+  for (const record of records) {
+    if (!record.table) continue;
+    for (const row of record.rows) {
+      const candidates = [
+        row.name,
+        row.full_name,
+        row.student_name,
+        row.first_name && row.last_name ? `${String(row.first_name)} ${String(row.last_name)}` : null
+      ];
+      for (const value of candidates) {
+        if (typeof value === 'string' && value.trim()) {
+          names.add(value.trim().toLowerCase());
+        }
+      }
+    }
+  }
+  return names;
+}
+
+function extractResponseCandidateNames(message: string): string[] {
+  const names = new Set<string>();
+  const lineMatches = message.match(/(?:^|\n)[-•]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s*\(/gm) ?? [];
+  for (const match of lineMatches) {
+    const cleaned = match
+      .replace(/^[-•\s]+/, '')
+      .replace(/\(.*/, '')
+      .trim();
+    if (cleaned) names.add(cleaned);
+  }
+
+  const inlineMatches = message.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/g) ?? [];
+  for (const token of inlineMatches) {
+    if (token.toLowerCase().includes('source') || token.toLowerCase().includes('provenance')) continue;
+    if (token.split(' ').length >= 2) names.add(token.trim());
+  }
+  return Array.from(names);
+}
+
+function validateAssistantAgainstRecords(params: {
+  assistantMessage: string;
+  records: ToolExecutionRecord[];
+  enabled: boolean;
+}): ValidationResult {
+  if (!params.enabled) return { passed: true, mismatches: [] };
+  const knownNames = extractKnownNamesFromRecords(params.records);
+  const mentioned = extractResponseCandidateNames(params.assistantMessage);
+  const mismatches = mentioned.filter((name) => !knownNames.has(name.toLowerCase()));
+  return {
+    passed: mismatches.length === 0,
+    mismatches,
+    retryReason: mismatches.length
+      ? `Response referenced names not present in current tool rows: ${mismatches.join(', ')}`
+      : undefined
+  };
+}
+
+function buildProvenance(params: {
+  records: ToolExecutionRecord[];
+  toolTrace: ExecutiveToolTraceItem[];
+  validationStatus: AnswerProvenance['validationStatus'];
+}): AnswerProvenance {
+  const sourceTables = Array.from(new Set(params.records.map((record) => record.table).filter(Boolean))) as string[];
+  const rowCounts: Record<string, number> = {};
+  const window: Array<{ table: string; column?: string; from?: string; to?: string }> = [];
+  const filters: Array<{ table: string; filters: ToolQueryFilter[] }> = [];
+  for (const record of params.records) {
+    if (!record.table) continue;
+    rowCounts[record.table] = record.rowCount;
+    if (record.effectiveWindow) {
+      window.push({
+        table: record.table,
+        column: record.effectiveWindow.column,
+        from: record.effectiveWindow.from,
+        to: record.effectiveWindow.to
+      });
+    }
+    filters.push({
+      table: record.table,
+      filters: record.args.filters ?? []
+    });
+  }
+  return {
+    sourceTables,
+    window,
+    filters,
+    rowCounts,
+    toolIds: params.toolTrace.map((tool) => tool.id),
+    validationStatus: params.validationStatus
+  };
+}
+
+function appendProvenanceFooter(message: string, provenance: AnswerProvenance): string {
+  const footer = [
+    '',
+    '[provenance]',
+    `source_tables: ${provenance.sourceTables.join(', ') || 'none'}`,
+    `window: ${provenance.window
+      .map((entry) => `${entry.table}:${entry.column ?? 'n/a'}:${entry.from ?? 'n/a'}->${entry.to ?? 'n/a'}`)
+      .join('; ') || 'none'}`,
+    `filters: ${provenance.filters
+      .map((entry) => `${entry.table}[${entry.filters.map((filter) => `${filter.column}:${filter.op}`).join(',')}]`)
+      .join('; ') || 'none'}`,
+    `row_counts: ${Object.entries(provenance.rowCounts)
+      .map(([table, count]) => `${table}:${count}`)
+      .join(', ') || 'none'}`,
+    `tool_ids: ${provenance.toolIds.join(', ') || 'none'}`,
+    `validation: ${provenance.validationStatus}`
+  ].join('\n');
+  return `${message.trim()}\n${footer}`;
+}
+
 function toToolTraceItem(params: {
   id: string;
   status: 'complete' | 'failed';
@@ -414,12 +566,18 @@ export async function POST(request: NextRequest) {
     });
 
     const memoryContext = memoryFactsToPromptContext(memoryFacts);
-    const wantsOperationalData = isOperationalDataPrompt(message);
+    const wantsOperationalData = isOperationalDataPrompt(message) || isToolListingPrompt(message);
+    const wantsToolList = isToolListingPrompt(message);
+    const wantsAttendancePrecision = isAttendancePrecisionPrompt(message);
+    const streamEnabled = streamRequested && !wantsAttendancePrecision;
     const isGreeting = isGreetingPrompt(message);
 
     let overview: ExecutiveOverviewData | null = null;
     let toolContext = '';
     let overviewToolTrace: ExecutiveToolTraceItem[] = [];
+    let toolCatalog: ToolCatalogEntry[] = [];
+    let queryPlan: QueryPlan | null = null;
+    let executionRecords: ToolExecutionRecord[] = [];
     let toolingMode: 'fresh' | 'reused' | 'skipped' = 'skipped';
 
     if (wantsOperationalData) {
@@ -436,6 +594,9 @@ export async function POST(request: NextRequest) {
         toolingMode = 'reused';
         overview = cachedTooling.overview;
         toolContext = cachedTooling.toolContext;
+        toolCatalog = cachedTooling.toolCatalog ?? [];
+        queryPlan = cachedTooling.queryPlan ?? null;
+        executionRecords = cachedTooling.executionRecords ?? [];
         const startedAt = new Date().toISOString();
         const finishedAt = new Date().toISOString();
         overviewToolTrace = [
@@ -454,7 +615,43 @@ export async function POST(request: NextRequest) {
         overview = toolingResult.overview;
         toolContext = toolingResult.toolContext;
         overviewToolTrace = toolingResult.toolTrace;
+        toolCatalog = toolingResult.toolCatalog;
+        queryPlan = toolingResult.queryPlan;
+        executionRecords = toolingResult.executionRecords;
       }
+    }
+
+    if (wantsToolList && toolCatalog.length) {
+      const manifestMessage = appendProvenanceFooter(
+        formatToolManifest(toolCatalog),
+        buildProvenance({
+          records: executionRecords,
+          toolTrace: [...toolTrace, ...overviewToolTrace],
+          validationStatus: 'not_applicable'
+        })
+      );
+      await insertConversationMessage({
+        userKey,
+        sessionId,
+        role: 'assistant',
+        content: manifestMessage,
+        model: process.env.OLLAMA_MODEL?.trim() || 'deepseek-v3.1:671b-cloud',
+        metadata: {
+          source: 'tooling',
+          tooling_mode: toolingMode,
+          tool_manifest_only: true
+        }
+      });
+      return NextResponse.json({
+        ok: true,
+        source: 'tooling',
+        model: process.env.OLLAMA_MODEL?.trim() || 'deepseek-v3.1:671b-cloud',
+        userKey,
+        sessionId,
+        assistantMessage: manifestMessage,
+        toolTrace: [...toolTrace, ...overviewToolTrace],
+        memoryFactsWritten: 0
+      });
     }
 
     const systemPrompt = [
@@ -483,6 +680,23 @@ export async function POST(request: NextRequest) {
       wantsOperationalData && toolContext
         ? `Tool outputs:\n${toolContext}`
         : 'No operational tool output was requested for this turn.',
+      '',
+      wantsOperationalData && queryPlan
+        ? `Structured query plan:\n${JSON.stringify(queryPlan)}`
+        : 'No query plan was generated for this turn.',
+      '',
+      wantsOperationalData && executionRecords.length
+        ? `Structured execution records:\n${JSON.stringify(
+            executionRecords.map((record) => ({
+              toolId: record.toolId,
+              table: record.table,
+              rowCount: record.rowCount,
+              rowHash: record.rowHash,
+              effectiveWindow: record.effectiveWindow,
+              rows: record.rows
+            }))
+          )}`
+        : 'No execution records were generated for this turn.',
       '',
       isGreeting
         ? 'The latest user message is a greeting or casual opener. Keep your response short and friendly.'
@@ -526,7 +740,7 @@ export async function POST(request: NextRequest) {
       upstream = await proxyOllamaChatRequest({
         body: {
           model,
-          stream: streamRequested,
+          stream: streamEnabled,
           messages: [
             { role: 'system', content: systemPrompt },
             ...recentConversation.map((entry) => ({
@@ -563,7 +777,7 @@ export async function POST(request: NextRequest) {
         ]
           .filter(Boolean)
           .join(' ');
-      } else if (!streamRequested) {
+      } else if (!streamEnabled) {
         const upstreamJson = (await upstream.json()) as unknown;
         assistantMessage =
           parseAssistantMessage(upstreamJson) ??
@@ -584,20 +798,89 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    let validationResult: ValidationResult = { passed: true, mismatches: [] };
+    if (wantsAttendancePrecision && source === 'ollama' && assistantMessage) {
+      validationResult = validateAssistantAgainstRecords({
+        assistantMessage,
+        records: executionRecords,
+        enabled: true
+      });
+      if (!validationResult.passed) {
+        const retryResponse = await proxyOllamaChatRequest({
+          body: {
+            model,
+            stream: false,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              {
+                role: 'user',
+                content: [
+                  message,
+                  '',
+                  'Correction requirement:',
+                  validationResult.retryReason ?? 'Use only names that exist in tool rows for this turn.',
+                  'Regenerate the answer with names/counts strictly from tool rows only.'
+                ].join('\n')
+              }
+            ],
+            options: { temperature: 0.0 }
+          }
+        });
+        if (retryResponse.ok) {
+          const retryPayload = (await retryResponse.json()) as unknown;
+          const retryMessage = parseAssistantMessage(retryPayload) ?? assistantMessage;
+          const retryValidation = validateAssistantAgainstRecords({
+            assistantMessage: retryMessage,
+            records: executionRecords,
+            enabled: true
+          });
+          validationResult = retryValidation;
+          if (retryValidation.passed) {
+            assistantMessage = retryMessage;
+          } else {
+            assistantMessage =
+              'I could not produce a fully validated attendance name list from the current tool rows. Please narrow the date range or ask for raw table output.';
+            source = 'tooling';
+          }
+        }
+      }
+    }
+
+    const provenance = buildProvenance({
+      records: executionRecords,
+      toolTrace: [...toolTrace, ...overviewToolTrace],
+      validationStatus: wantsAttendancePrecision
+        ? validationResult.passed
+          ? 'passed'
+          : 'failed'
+        : wantsOperationalData
+          ? 'not_applicable'
+          : 'not_applicable'
+    });
+    if (wantsOperationalData && assistantMessage) {
+      assistantMessage = appendProvenanceFooter(assistantMessage, provenance);
+    }
+
     const assistantMetadata: Record<string, unknown> = {
       source,
-      tooling_mode: toolingMode
+      tooling_mode: toolingMode,
+      query_plan: queryPlan,
+      validation: validationResult,
+      provenance
     };
     if (wantsOperationalData && overview) {
       assistantMetadata.tooling_cache = {
         generatedAt: new Date().toISOString(),
         toolContext,
         overview,
-        toolTrace: overviewToolTrace
+        toolTrace: overviewToolTrace,
+        toolCatalog,
+        queryPlan: queryPlan ?? undefined,
+        executionRecords
       } satisfies ToolingCachePayload;
     }
 
-    if (streamRequested) {
+    if (streamEnabled) {
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           const encoder = new TextEncoder();
@@ -613,6 +896,20 @@ export async function POST(request: NextRequest) {
               });
             } else if (assistantMessage) {
               send('delta', { text: assistantMessage });
+            }
+
+            if (wantsOperationalData && assistantMessage) {
+              const streamProvenance = buildProvenance({
+                records: executionRecords,
+                toolTrace: [...toolTrace, ...overviewToolTrace],
+                validationStatus: 'not_applicable'
+              });
+              const withFooter = appendProvenanceFooter(assistantMessage, streamProvenance);
+              const appended = withFooter.slice(assistantMessage.length);
+              if (appended.trim()) {
+                send('delta', { text: appended });
+              }
+              assistantMessage = withFooter;
             }
 
             await insertConversationMessage({
@@ -694,6 +991,9 @@ export async function POST(request: NextRequest) {
               sessionId,
               assistantMessage,
               toolTrace: [...toolTrace, ...overviewToolTrace],
+              queryPlan,
+              validationResult,
+              provenance,
               memoryFactsWritten: memoryWriteCount
             });
           } catch (error) {
@@ -794,6 +1094,9 @@ export async function POST(request: NextRequest) {
       sessionId,
       assistantMessage,
       toolTrace: [...toolTrace, ...overviewToolTrace],
+      queryPlan,
+      validationResult,
+      provenance,
       memoryFactsWritten: memoryWriteCount
     });
   } catch (error) {
