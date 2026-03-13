@@ -44,6 +44,10 @@ Core tools:
 - `list_tables`
 - `describe_table`
 - `query_table`
+- `query_department`
+- `query_related`
+- `schema_map`
+- `storage_metadata`
 - `business_overview`
 - `employee_behavior_overview`
 - `sales_finance_overview`
@@ -51,6 +55,10 @@ Core tools:
 Dynamic per-table tools:
 - `table_<table_name_slug>` for every table in your migrations
 - Example: `table_students`, `table_hr_shift_attendance`, `table_finance_report_rows`
+
+Canonical query shape (read-only):
+- `table`, `select`, `filters[]`, `date_range`, `sort[]`, `limit`, `cursor`, `include_related[]`, `include_storage_metadata`
+- Cursor responses include: `next_cursor`, `has_more`, `applied_sort`, `effective_window`
 
 Prompts:
 - `executive_briefing_prompt`

@@ -1,6 +1,12 @@
 import { createServerClient } from '@/lib/supabase';
 import { resolvePreferredTable } from '@/lib/server/common';
-import { getToolSpecById, planExecutiveTools } from '@/lib/executive/tooling';
+import {
+  ExecutiveDataPack,
+  getToolSpecById,
+  planExecutiveDataPacks,
+  resolveExecutiveDateRange
+} from '@/lib/executive/tooling';
+import { ToolDateRange, ToolQueryFilter, ToolQueryResponse, ToolSort } from '@/lib/executive/tool-query';
 
 export interface ExecutiveSummaryCard {
   id: string;
@@ -458,6 +464,199 @@ async function resolveTableOrNull(
     return null;
   }
 }
+
+function encodeOffsetCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ offset: Math.max(0, offset) }), 'utf8').toString('base64');
+}
+
+function decodeOffsetCursor(cursor: string | null | undefined): number {
+  if (!cursor) return 0;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8')) as { offset?: unknown };
+    const offset = Number(parsed.offset ?? 0);
+    return Number.isFinite(offset) && offset > 0 ? Math.trunc(offset) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function resolveDateColumn(dateRange: ToolDateRange | undefined, candidates: string[]): string | null {
+  if (dateRange?.column) return dateRange.column;
+  if (!candidates.length) return null;
+  const preferred = ['created_at', 'updated_at', 'uploaded_at', 'requested_at', 'issued_at', 'starts_at', 'shift_date'];
+  for (const key of preferred) {
+    const matched = candidates.find((candidate) => candidate === key);
+    if (matched) return matched;
+  }
+  return candidates[0];
+}
+
+async function executeCanonicalTableQuery(params: {
+  supabase: ReturnType<typeof createServerClient>;
+  table: string;
+  select?: string;
+  filters?: ToolQueryFilter[];
+  dateRange?: ToolDateRange;
+  dateColumns?: string[];
+  sort?: ToolSort[];
+  limit?: number;
+  cursor?: string | null;
+}): Promise<ToolQueryResponse<Record<string, unknown>>> {
+  const limit = Math.min(Math.max(params.limit ?? 100, 1), 500);
+  const offset = decodeOffsetCursor(params.cursor);
+  const sort = (
+    params.sort && params.sort.length ? params.sort : [{ column: 'id', direction: 'asc' as const }]
+  ).map((entry) => ({
+    column: entry.column,
+    direction: entry.direction === 'desc' ? ('desc' as const) : ('asc' as const)
+  }));
+  const normalizedSort = sort.some((entry) => entry.column === 'id')
+    ? sort
+    : [...sort, { column: 'id', direction: 'asc' as const }];
+
+  let query = params.supabase
+    .from(params.table)
+    .select(params.select ?? '*')
+    .range(offset, offset + limit);
+
+  for (const filter of params.filters ?? []) {
+    const op = filter.op;
+    if (op === 'eq') query = query.eq(filter.column, filter.value as never);
+    else if (op === 'neq') query = query.neq(filter.column, filter.value as never);
+    else if (op === 'in' && Array.isArray(filter.value)) query = query.in(filter.column, filter.value as never[]);
+    else if (op === 'nin' && Array.isArray(filter.value)) query = query.not(filter.column, 'in', `(${filter.value.join(',')})`);
+    else if (op === 'gt') query = query.gt(filter.column, filter.value as never);
+    else if (op === 'gte') query = query.gte(filter.column, filter.value as never);
+    else if (op === 'lt') query = query.lt(filter.column, filter.value as never);
+    else if (op === 'lte') query = query.lte(filter.column, filter.value as never);
+    else if (op === 'ilike') query = query.ilike(filter.column, String(filter.value ?? ''));
+    else if (op === 'contains') query = query.contains(filter.column, filter.value as never);
+    else if (op === 'is') query = query.is(filter.column, (filter.value ?? null) as never);
+  }
+
+  const dateColumn = resolveDateColumn(params.dateRange, params.dateColumns ?? []);
+  if (dateColumn) {
+    if (params.dateRange?.from) query = query.gte(dateColumn, params.dateRange.from);
+    if (params.dateRange?.to) query = query.lte(dateColumn, params.dateRange.to);
+  }
+
+  for (const entry of normalizedSort) {
+    query = query.order(entry.column, { ascending: entry.direction !== 'desc' });
+  }
+
+  const result = await query;
+  const rows = result.error ? [] : (((result.data ?? []) as unknown) as Record<string, unknown>[]);
+  const hasMore = rows.length > limit;
+  const sliced = hasMore ? rows.slice(0, limit) : rows;
+  return {
+    table: params.table,
+    row_count: sliced.length,
+    rows: sliced,
+    next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
+    has_more: hasMore,
+    applied_sort: normalizedSort,
+    effective_window:
+      dateColumn && (params.dateRange?.from || params.dateRange?.to)
+        ? {
+            column: dateColumn,
+            from: params.dateRange?.from,
+            to: params.dateRange?.to
+          }
+        : null,
+    offset,
+    limit
+  };
+}
+
+const PACK_TABLES: Record<ExecutiveDataPack, Array<{ table: string; dateColumns: string[] }>> = {
+  executive_overview: [
+    { table: 'product_purchase_orders', dateColumns: ['created_at', 'requested_pickup_date'] },
+    { table: 'finance_report_headers', dateColumns: ['uploaded_at', 'created_at'] },
+    { table: 'marketing_events', dateColumns: ['starts_at', 'updated_at'] },
+    { table: 'inventory_sessions', dateColumns: ['updated_at', 'created_at'] },
+    { table: 'general_department_calendar_events', dateColumns: ['starts_at', 'created_at'] }
+  ],
+  hr_deep_dive: [
+    { table: 'hr_shift_attendance', dateColumns: ['shift_date'] },
+    { table: 'shift_attendance', dateColumns: ['shift_date'] },
+    { table: 'hr_shift_change_requests', dateColumns: ['requested_at', 'shift_date'] },
+    { table: 'shift_change_requests', dateColumns: ['requested_at', 'shift_date'] },
+    { table: 'hr_meeting_attendance_records', dateColumns: ['checkin_date', 'created_at'] },
+    { table: 'meeting_attendance_records', dateColumns: ['checkin_date', 'created_at'] },
+    { table: 'hr_strikes', dateColumns: ['issued_at', 'created_at'] },
+    { table: 'strikes', dateColumns: ['issued_at', 'created_at'] },
+    { table: 'hr_strike_appeals', dateColumns: ['requested_at', 'created_at'] },
+    { table: 'strike_appeals', dateColumns: ['requested_at', 'created_at'] },
+    { table: 'hr_points_ledger', dateColumns: ['created_at'] },
+    { table: 'points_ledger', dateColumns: ['created_at'] },
+    { table: 'students', dateColumns: ['created_at'] }
+  ],
+  product_ops_deep_dive: [
+    { table: 'product_purchase_orders', dateColumns: ['created_at', 'updated_at', 'date_placed'] },
+    { table: 'product_purchase_order_lines', dateColumns: ['created_at'] },
+    { table: 'product_receipts', dateColumns: ['created_at'] },
+    { table: 'product_receipt_lines', dateColumns: ['created_at'] },
+    { table: 'product_order_prompts', dateColumns: ['created_at'] },
+    { table: 'product_attachments', dateColumns: ['created_at'] },
+    { table: 'product_purchase_order_attachments', dateColumns: ['created_at'] },
+    { table: 'product_purchase_order_line_attachments', dateColumns: ['created_at'] },
+    { table: 'product_designs', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'product_wishlist_items', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'product_inventory_levels', dateColumns: ['updated_at'] },
+    { table: 'product_inventory_snapshot_lines', dateColumns: ['created_at'] },
+    { table: 'product_inventory_uploads', dateColumns: ['uploaded_at'] },
+    { table: 'product_products', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'product_vendors', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'product_categories', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'product_settings', dateColumns: ['created_at', 'updated_at'] }
+  ],
+  marketing_deep_dive: [
+    { table: 'marketing_events', dateColumns: ['starts_at', 'updated_at', 'created_at'] },
+    { table: 'external_contacts', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'internal_coordinators', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'event_contacts', dateColumns: ['created_at'] },
+    { table: 'event_assets', dateColumns: ['created_at'] },
+    { table: 'event_notes', dateColumns: ['created_at'] },
+    { table: 'coordination_logs', dateColumns: ['created_at'] },
+    { table: 'marketing_reports', dateColumns: ['report_date', 'created_at', 'updated_at'] },
+    { table: 'marketing_event_categories', dateColumns: ['created_at', 'updated_at'] }
+  ],
+  finance_deep_dive: [
+    { table: 'finance_report_headers', dateColumns: ['uploaded_at', 'created_at', 'updated_at'] },
+    { table: 'finance_report_rows', dateColumns: ['business_sales_date', 'payout_date', 'ach_bank_date', 'created_at'] },
+    { table: 'finance_report_issues', dateColumns: ['created_at'] },
+    { table: 'finance_report_activity_log', dateColumns: ['created_at'] },
+    { table: 'finance_report_config', dateColumns: ['updated_at'] }
+  ],
+  inventory_deep_dive: [
+    { table: 'Inventory', dateColumns: ['date'] },
+    { table: 'inventory_sessions', dateColumns: ['updated_at', 'created_at'] },
+    { table: 'inventory_session_events', dateColumns: ['created_at'] },
+    { table: 'inventory_session_participants', dateColumns: ['created_at'] },
+    { table: 'inventory_session_final', dateColumns: ['created_at'] },
+    { table: 'inventory_session_snapshots', dateColumns: ['created_at'] },
+    { table: 'inventory_manual_overrides', dateColumns: ['created_at'] },
+    { table: 'inventory_upload_runs', dateColumns: ['created_at'] },
+    { table: 'inventory_checks', dateColumns: ['starts_at', 'ends_at', 'created_at', 'updated_at'] },
+    { table: 'inventory_check_signups', dateColumns: ['updated_at'] },
+    { table: 'inventory_check_change_requests', dateColumns: ['requested_at'] },
+    { table: 'inventory_check_audit_log', dateColumns: ['created_at'] }
+  ],
+  cfa_deep_dive: [
+    { table: 'cfa_daily_logs', dateColumns: ['log_date', 'created_at', 'updated_at'] },
+    { table: 'cfa_daily_log_lines', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'cfa_items', dateColumns: ['created_at', 'updated_at'] }
+  ],
+  calendar_deep_dive: [{ table: 'general_department_calendar_events', dateColumns: ['starts_at', 'ends_at', 'created_at'] }],
+  access_deep_dive: [
+    { table: 'access_permissions', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'access_roles', dateColumns: ['created_at', 'updated_at'] },
+    { table: 'access_role_permissions', dateColumns: ['created_at'] },
+    { table: 'employee_role_assignments', dateColumns: ['created_at'] },
+    { table: 'employee_permission_overrides', dateColumns: ['created_at'] },
+    { table: 'auth_sessions', dateColumns: ['created_at'] }
+  ]
+};
 
 export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
   const supabase = createServerClient();
@@ -1205,11 +1404,9 @@ export async function fetchExecutiveOverview(): Promise<ExecutiveOverviewData> {
 
 function summarizeToolResult(toolId: string, overview: ExecutiveOverviewData): string {
   switch (toolId) {
-    case 'get_executive_overview':
+    case 'executive_overview':
       return overview.executiveBrief;
-    case 'get_department_updates':
-      return `Top feed updates loaded: ${overview.feed.slice(0, 5).map((item) => `${item.department}: ${item.title}`).join('; ')}`;
-    case 'get_hr_insights': {
+    case 'hr_deep_dive': {
       const hrHealth = overview.departmentHealth.find((row) => row.department === 'HR');
       const morningCard = overview.summaryCards.find((card) => card.id === 'morning-shift-recent');
       const meetingCard = overview.summaryCards.find((card) => card.id === 'morning-meeting-recent');
@@ -1269,30 +1466,32 @@ function summarizeToolResult(toolId: string, overview: ExecutiveOverviewData): s
         .filter(Boolean)
         .join(' ');
     }
-    case 'get_product_order_updates': {
+    case 'product_ops_deep_dive': {
       const productHealth = overview.departmentHealth.find((row) => row.department === 'Product');
       return productHealth?.summary ?? 'No product order summary available.';
     }
-    case 'get_finance_report_summary': {
+    case 'finance_deep_dive': {
       const financeHealth = overview.departmentHealth.find((row) => row.department === 'Finance');
       return financeHealth?.summary ?? 'No finance summary available.';
     }
-    case 'get_inventory_alerts': {
+    case 'inventory_deep_dive': {
       const inventoryHealth = overview.departmentHealth.find((row) => row.department === 'Inventory');
       return inventoryHealth?.summary ?? 'No inventory summary available.';
     }
-    case 'get_marketing_events_summary': {
+    case 'marketing_deep_dive': {
       const marketingHealth = overview.departmentHealth.find((row) => row.department === 'Marketing');
       return marketingHealth?.summary ?? 'No marketing summary available.';
     }
-    case 'get_cfa_shift_summary': {
+    case 'cfa_deep_dive': {
       const cfaHealth = overview.departmentHealth.find((row) => row.department === 'Chick-fil-A');
       return cfaHealth?.summary ?? 'No CFA summary available.';
     }
-    case 'get_calendar_conflicts': {
+    case 'calendar_deep_dive': {
       const calendarCard = overview.summaryCards.find((card) => card.id === 'calendar-upcoming');
       return calendarCard ? `${calendarCard.value} calendar items are upcoming.` : 'No calendar summary available.';
     }
+    case 'access_deep_dive':
+      return 'Access control and RBAC datasets were queried for role/permission visibility.';
     default:
       return 'Tool completed.';
   }
@@ -1303,38 +1502,60 @@ export async function runExecutiveTooling(prompt: string): Promise<{
   toolContext: string;
   overview: ExecutiveOverviewData;
 }> {
-  const selectedTools = planExecutiveTools(prompt).filter(
-    (tool) => tool.id !== 'get_user_preferences' && tool.id !== 'sync_user_memory'
-  );
+  const selectedPacks = planExecutiveDataPacks(prompt);
   const overview = await fetchExecutiveOverview();
   const toolTrace: ExecutiveToolTraceItem[] = [];
   const contextLines: string[] = [];
+  const supabase = createServerClient();
 
-  for (const tool of selectedTools) {
+  for (const pack of selectedPacks) {
     const startedAt = new Date().toISOString();
     try {
-      const detail = summarizeToolResult(tool.id, overview);
-      const toolSpec = getToolSpecById(tool.id);
+      const dateRange = resolveExecutiveDateRange(prompt, pack);
+      const tableEntries = PACK_TABLES[pack] ?? [];
+      const tableSummaries: string[] = [];
+
+      for (const entry of tableEntries) {
+        const queryResult = await executeCanonicalTableQuery({
+          supabase,
+          table: entry.table,
+          dateRange,
+          dateColumns: entry.dateColumns,
+          sort: [{ column: entry.dateColumns[0] ?? 'id', direction: 'desc' }, { column: 'id', direction: 'asc' }],
+          limit: 50
+        });
+        tableSummaries.push(
+          `${entry.table}: ${queryResult.row_count} rows` +
+            (queryResult.effective_window
+              ? ` (${queryResult.effective_window.column} ${queryResult.effective_window.from ?? ''} -> ${queryResult.effective_window.to ?? ''})`
+              : '')
+        );
+      }
+
+      const detail =
+        `${summarizeToolResult(pack, overview)} ` +
+        (tableSummaries.length ? `Canonical table coverage: ${tableSummaries.join('; ')}.` : 'No table entries configured.');
+      const toolSpec = getToolSpecById(pack);
       const detailedDescription = `${toolSpec?.purpose ?? 'No purpose documented.'} Result: ${detail}`;
       const finishedAt = new Date().toISOString();
       toolTrace.push({
-        id: tool.id,
-        label: toolSpec?.label ?? tool.id,
+        id: pack,
+        label: toolSpec?.label ?? pack,
         status: 'complete',
         startedAt,
         finishedAt,
         detail: detailedDescription
       });
       contextLines.push([
-        `[${tool.id}]`,
+        `[${pack}]`,
         `Purpose: ${toolSpec?.purpose ?? 'No purpose documented.'}`,
         `Result: ${detail}`
       ].join('\n'));
     } catch (error) {
       const finishedAt = new Date().toISOString();
       toolTrace.push({
-        id: tool.id,
-        label: getToolSpecById(tool.id)?.label ?? tool.id,
+        id: pack,
+        label: getToolSpecById(pack)?.label ?? pack,
         status: 'failed',
         startedAt,
         finishedAt,

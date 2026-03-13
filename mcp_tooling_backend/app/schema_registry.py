@@ -15,6 +15,7 @@ CREATE_TABLE_PATTERN = re.compile(
 class TableDefinition:
     name: str
     columns: tuple[str, ...]
+    date_columns: tuple[str, ...]
     source_file: str
 
 
@@ -26,15 +27,63 @@ class SchemaRegistry:
     def table_names(self) -> list[str]:
         return [table.name for table in self.tables]
 
+    @property
+    def table_map(self) -> dict[str, TableDefinition]:
+        return {table.name: table for table in self.tables}
+
     def to_dict(self) -> list[dict[str, object]]:
         return [
             {
                 "name": table.name,
                 "columns": list(table.columns),
+                "date_columns": list(table.date_columns),
                 "source_file": table.source_file,
             }
             for table in self.tables
         ]
+
+    def infer_relationships(self) -> list[dict[str, str]]:
+        relationships: list[dict[str, str]] = []
+        table_names_lower = {table.name.lower(): table.name for table in self.tables}
+        for table in self.tables:
+            for column in table.columns:
+                normalized = column.lower()
+                if normalized == "id" or not normalized.endswith("_id"):
+                    continue
+                token = normalized[:-3]
+                if token.endswith("y"):
+                    candidates = [token[:-1] + "ies", token + "s"]
+                else:
+                    candidates = [token + "s"]
+                matches = [table_names_lower[candidate] for candidate in candidates if candidate in table_names_lower]
+                if matches:
+                    relationships.append(
+                        {
+                            "from_table": table.name,
+                            "from_column": column,
+                            "to_table": matches[0],
+                            "to_column": "id",
+                        }
+                    )
+        return relationships
+
+
+def _infer_date_columns(columns: tuple[str, ...]) -> tuple[str, ...]:
+    markers = (
+        "date",
+        "time",
+        "created_at",
+        "updated_at",
+        "uploaded_at",
+        "issued_at",
+        "requested_at",
+        "starts_at",
+        "ends_at",
+        "log_date",
+        "checkin",
+    )
+    inferred = [column for column in columns if any(marker in column.lower() for marker in markers)]
+    return tuple(inferred)
 
 
 def _extract_block(sql_text: str, open_paren_index: int) -> str:
@@ -98,6 +147,7 @@ def load_schema_registry(project_root: Path) -> SchemaRegistry:
                 table_map[table_name] = TableDefinition(
                     name=table_name,
                     columns=columns,
+                    date_columns=_infer_date_columns(columns),
                     source_file=str(migration_path.relative_to(project_root)),
                 )
 

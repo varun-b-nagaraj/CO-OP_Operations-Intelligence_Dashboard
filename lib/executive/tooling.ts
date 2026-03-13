@@ -1,3 +1,5 @@
+import { parsePromptExplicitDateRange, ToolDateRange } from '@/lib/executive/tool-query';
+
 export type ExecutiveToolStatus = 'pending' | 'running' | 'complete' | 'failed';
 
 export interface ExecutiveToolSpec {
@@ -7,6 +9,17 @@ export interface ExecutiveToolSpec {
   runningText: string;
 }
 
+export type ExecutiveDataPack =
+  | 'executive_overview'
+  | 'hr_deep_dive'
+  | 'product_ops_deep_dive'
+  | 'marketing_deep_dive'
+  | 'finance_deep_dive'
+  | 'inventory_deep_dive'
+  | 'cfa_deep_dive'
+  | 'calendar_deep_dive'
+  | 'access_deep_dive';
+
 export const EXECUTIVE_TOOL_SPECS: ExecutiveToolSpec[] = [
   {
     id: 'get_user_preferences',
@@ -15,58 +28,58 @@ export const EXECUTIVE_TOOL_SPECS: ExecutiveToolSpec[] = [
     runningText: 'Loading saved preferences and durable memory facts...'
   },
   {
-    id: 'get_executive_overview',
+    id: 'executive_overview',
     label: 'Executive Overview',
-    purpose: 'Build the latest cross-department executive snapshot from source tables.',
-    runningText: 'Building fresh executive snapshot across departments...'
+    purpose: 'Cross-department baseline summary with canonical date-window context.',
+    runningText: 'Loading cross-department executive overview...'
   },
   {
-    id: 'get_department_updates',
-    label: 'Department Updates',
-    purpose: 'Extract the most recent important updates by department.',
-    runningText: 'Collecting department-specific update feed...'
+    id: 'hr_deep_dive',
+    label: 'HR Deep Dive',
+    purpose: 'Minute-level HR data including mirrors, attendance, meetings, requests, strikes, and appeals.',
+    runningText: 'Collecting HR mirror + canonical detail...'
   },
   {
-    id: 'get_hr_insights',
-    label: 'HR Insights',
-    purpose: 'Retrieve HR attendance, shift, meeting, and request insights for executive review.',
-    runningText: 'Analyzing HR attendance, meetings, and request signals...'
+    id: 'product_ops_deep_dive',
+    label: 'Product Deep Dive',
+    purpose: 'Detailed product operations data including orders, lines, receipts, prompts, attachments, and wishlist.',
+    runningText: 'Collecting detailed product operations data...'
   },
   {
-    id: 'get_product_order_updates',
-    label: 'Product Orders',
-    purpose: 'Summarize product order intake and current fulfillment status.',
-    runningText: 'Reviewing recent product order and fulfillment activity...'
+    id: 'marketing_deep_dive',
+    label: 'Marketing Deep Dive',
+    purpose: 'Detailed marketing events, contacts, assets, notes, coordination, and reports.',
+    runningText: 'Collecting detailed marketing event and reporting data...'
   },
   {
-    id: 'get_finance_report_summary',
-    label: 'Finance Reports',
-    purpose: 'Summarize latest finance report uploads and validation health.',
-    runningText: 'Reviewing finance report uploads and validation state...'
+    id: 'finance_deep_dive',
+    label: 'Finance Deep Dive',
+    purpose: 'Detailed finance report headers, rows, issues, config, activity, and metadata.',
+    runningText: 'Collecting detailed finance reporting data...'
   },
   {
-    id: 'get_inventory_alerts',
-    label: 'Inventory Alerts',
-    purpose: 'Review inventory session outcomes and active discrepancy risk.',
-    runningText: 'Checking inventory sessions and discrepancy risk signals...'
+    id: 'inventory_deep_dive',
+    label: 'Inventory Deep Dive',
+    purpose: 'Inventory sessions/checks/signups/events/manual overrides and upload lineage.',
+    runningText: 'Collecting detailed inventory data...'
   },
   {
-    id: 'get_marketing_events_summary',
-    label: 'Marketing Events',
-    purpose: 'Summarize upcoming marketing events and readiness signals.',
-    runningText: 'Loading upcoming marketing events and status...'
+    id: 'cfa_deep_dive',
+    label: 'CFA Deep Dive',
+    purpose: 'CFA daily logs, line items, and operational trend context.',
+    runningText: 'Collecting detailed CFA operational data...'
   },
   {
-    id: 'get_cfa_shift_summary',
-    label: 'CFA Shift Summary',
-    purpose: 'Summarize recent Chick-fil-A operational logs and cadence.',
-    runningText: 'Summarizing recent Chick-fil-A shift logs...'
+    id: 'calendar_deep_dive',
+    label: 'Calendar Deep Dive',
+    purpose: 'Cross-department calendar coverage and conflict context.',
+    runningText: 'Collecting detailed calendar data...'
   },
   {
-    id: 'get_calendar_conflicts',
-    label: 'Calendar Conflicts',
-    purpose: 'Identify upcoming cross-department calendar load and conflict risk.',
-    runningText: 'Checking shared calendar load and conflict risk...'
+    id: 'access_deep_dive',
+    label: 'Access Deep Dive',
+    purpose: 'Access/RBAC roles, permissions, assignments, and session context.',
+    runningText: 'Collecting detailed access control data...'
   },
   {
     id: 'use_recent_context',
@@ -165,16 +178,16 @@ export function isOperationalDataPrompt(prompt: string): boolean {
     'cfa',
     'chick',
     'report',
-    'metric'
+    'metric',
+    'permission',
+    'role',
+    'access'
   ]);
 }
 
-export function planExecutiveTools(prompt: string): ExecutiveToolSpec[] {
+export function planExecutiveDataPacks(prompt: string): ExecutiveDataPack[] {
   const normalized = prompt.toLowerCase();
   if (isGreetingPrompt(normalized)) return [];
-
-  const planned = new Set<string>();
-  const hasOperationalIntent = isOperationalDataPrompt(normalized);
 
   const wantsCrossDepartmentView = includesAny(normalized, [
     'all departments',
@@ -185,13 +198,6 @@ export function planExecutiveTools(prompt: string): ExecutiveToolSpec[] {
     'company-wide',
     'everything'
   ]);
-  const wantsOverviewStyle = includesAny(normalized, [
-    'overview',
-    'summary',
-    'snapshot',
-    'status',
-    'what changed'
-  ]);
 
   const needsHr = includesAny(normalized, [
     'hr',
@@ -200,58 +206,62 @@ export function planExecutiveTools(prompt: string): ExecutiveToolSpec[] {
     'employee',
     'strike',
     'shift',
-    'schedule',
-    'roster',
-    'working',
-    'tomorrow',
     'request',
-    'requests',
-    'schedule out',
-    'scheduling out',
-    'morning',
-    'off period',
-    'off-period'
+    'appeal'
   ]);
-  const needsProduct = includesAny(normalized, ['order', 'product', 'vendor', 'pickup']);
-  const needsFinance = includesAny(normalized, ['finance', 'sales', 'revenue', 'fees', 'payout']);
+  const needsProduct = includesAny(normalized, ['order', 'product', 'vendor', 'pickup', 'wishlist', 'receipt']);
+  const needsFinance = includesAny(normalized, ['finance', 'sales', 'revenue', 'fees', 'payout', 'report']);
   const needsInventory = includesAny(normalized, ['inventory', 'stock', 'count', 'reconcile']);
-  const needsMarketing = includesAny(normalized, ['marketing', 'event', 'campaign']);
+  const needsMarketing = includesAny(normalized, ['marketing', 'event', 'campaign', 'contact', 'coordination']);
   const needsCfa = includesAny(normalized, ['cfa', 'chick', 'menu']);
-  const needsCalendar = includesAny(normalized, ['calendar', 'conflict', 'schedule']);
-  const requestedDomains = [needsHr, needsProduct, needsFinance, needsInventory, needsMarketing, needsCfa].filter(
-    Boolean
-  ).length;
+  const needsCalendar = includesAny(normalized, ['calendar', 'conflict']);
+  const needsAccess = includesAny(normalized, ['access', 'permission', 'role', 'rbac', 'auth']);
 
-  if (hasOperationalIntent && (wantsCrossDepartmentView || requestedDomains !== 1)) {
-    planned.add('get_executive_overview');
+  const planned = new Set<ExecutiveDataPack>();
+  if (wantsCrossDepartmentView || ![needsHr, needsProduct, needsFinance, needsInventory, needsMarketing, needsCfa, needsCalendar, needsAccess].some(Boolean)) {
+    planned.add('executive_overview');
   }
-  if (hasOperationalIntent && wantsOverviewStyle && wantsCrossDepartmentView) {
-    planned.add('get_department_updates');
+  if (needsHr) planned.add('hr_deep_dive');
+  if (needsProduct) planned.add('product_ops_deep_dive');
+  if (needsFinance) planned.add('finance_deep_dive');
+  if (needsInventory) planned.add('inventory_deep_dive');
+  if (needsMarketing) planned.add('marketing_deep_dive');
+  if (needsCfa) planned.add('cfa_deep_dive');
+  if (needsCalendar) planned.add('calendar_deep_dive');
+  if (needsAccess) planned.add('access_deep_dive');
+
+  return Array.from(planned);
+}
+
+export function resolveExecutiveDateRange(prompt: string, pack: ExecutiveDataPack): ToolDateRange {
+  const explicit = parsePromptExplicitDateRange(prompt);
+  if (explicit) return explicit;
+
+  const now = new Date();
+  const from = new Date(now);
+  if (pack === 'hr_deep_dive') {
+    from.setDate(from.getDate() - 90);
+  } else if (pack === 'calendar_deep_dive') {
+    return {
+      mode: 'explicit',
+      from: now.toISOString(),
+      to: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      column: 'starts_at'
+    };
+  } else {
+    from.setDate(from.getDate() - 30);
   }
 
-  if (needsHr) {
-    planned.add('get_hr_insights');
-  }
-  if (needsProduct) {
-    planned.add('get_product_order_updates');
-  }
-  if (needsFinance) {
-    planned.add('get_finance_report_summary');
-  }
-  if (needsInventory) {
-    planned.add('get_inventory_alerts');
-  }
-  if (needsMarketing) {
-    planned.add('get_marketing_events_summary');
-  }
-  if (needsCfa) {
-    planned.add('get_cfa_shift_summary');
-  }
-  if (needsCalendar) {
-    planned.add('get_calendar_conflicts');
-  }
+  return {
+    mode: 'explicit',
+    from: from.toISOString(),
+    to: now.toISOString()
+  };
+}
 
-  return EXECUTIVE_TOOL_SPECS.filter((tool) => planned.has(tool.id));
+export function planExecutiveTools(prompt: string): ExecutiveToolSpec[] {
+  const packs = planExecutiveDataPacks(prompt);
+  return EXECUTIVE_TOOL_SPECS.filter((tool) => packs.includes(tool.id as ExecutiveDataPack));
 }
 
 export function getToolSpecById(id: string): ExecutiveToolSpec | undefined {
