@@ -133,13 +133,33 @@ function isDateOnOrBeforeToday(dateText: string): boolean {
   return dateOnly <= today;
 }
 
+function selectPreferredAttendanceRecords(
+  records: ToolExecutionRecord[],
+  preferredTables: string[],
+  fallbackTables: string[]
+): ToolExecutionRecord[] {
+  const preferred = records.filter(
+    (record) => Boolean(record.table) && preferredTables.includes(record.table as string)
+  );
+  const preferredHasRows = preferred.some((record) => record.rows.length > 0);
+  if (preferredHasRows) return preferred;
+  return records.filter(
+    (record) => Boolean(record.table) && [...preferredTables, ...fallbackTables].includes(record.table as string)
+  );
+}
+
 function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
+  const scopedRecords = selectPreferredAttendanceRecords(
+    records,
+    ['hr_meeting_attendance_records'],
+    ['meeting_attendance_records']
+  );
   const attendanceTables = new Set(['hr_meeting_attendance_records', 'meeting_attendance_records']);
   const studentTables = new Set(['students']);
   const attendanceRows: Array<{ sNumber: string; date: string; status: string }> = [];
   const studentBySNumber = new Map<string, string>();
 
-  for (const record of records) {
+  for (const record of scopedRecords) {
     if (!record.table) continue;
     if (attendanceTables.has(record.table)) {
       for (const row of record.rows) {
@@ -223,12 +243,17 @@ function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]):
 }
 
 function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
+  const scopedRecords = selectPreferredAttendanceRecords(
+    records,
+    ['hr_morning_shift_attendance'],
+    ['morning_shift_attendance']
+  );
   const shiftTables = new Set(['hr_morning_shift_attendance', 'morning_shift_attendance']);
   const studentTables = new Set(['students']);
   const shiftRows: Array<{ sNumber: string; date: string; status: string }> = [];
   const studentBySNumber = new Map<string, string>();
 
-  for (const record of records) {
+  for (const record of scopedRecords) {
     if (!record.table) continue;
     if (shiftTables.has(record.table)) {
       for (const row of record.rows) {
@@ -318,12 +343,17 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
 }
 
 function buildTopMorningShiftWorkersFromRecords(records: ToolExecutionRecord[]): string | null {
+  const scopedRecords = selectPreferredAttendanceRecords(
+    records,
+    ['hr_morning_shift_attendance'],
+    ['morning_shift_attendance']
+  );
   const shiftTables = new Set(['hr_morning_shift_attendance', 'morning_shift_attendance']);
   const studentTables = new Set(['students']);
   const studentByAnyId = new Map<string, string>();
   const workerCounts = new Map<string, number>();
 
-  for (const record of records) {
+  for (const record of scopedRecords) {
     if (!record.table) continue;
     if (studentTables.has(record.table)) {
       for (const row of record.rows) {
@@ -354,6 +384,9 @@ function buildTopMorningShiftWorkersFromRecords(records: ToolExecutionRecord[]):
         const date = typeof dateRaw === 'string' ? dateRaw.trim() : '';
         if (!workerId || !date) continue;
         if (!isDateOnOrBeforeToday(date)) continue;
+        const statusRaw = row.status;
+        const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : '';
+        if (status !== 'present' && status !== 'excused') continue;
         workerCounts.set(workerId, (workerCounts.get(workerId) ?? 0) + 1);
       }
     }
