@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { canonicalizePermissions, expandForLegacyClients } from '@/lib/access/engine';
-import { ALL_PERMISSION_KEYS } from '@/lib/access/registry';
+import { ALL_PERMISSION_KEYS, PERMISSION_BY_KEY } from '@/lib/access/registry';
 import { PermissionKey } from '@/lib/access/types';
 import { createServerClient } from '@/lib/supabase';
 
@@ -25,6 +25,58 @@ export interface EmployeeAccessRecordV2 {
   role_permissions: string[];
   effective_permissions: string[];
   updated_at: string;
+}
+
+async function ensurePermissionCatalogRows(
+  permissionKeys: string[]
+): Promise<void> {
+  const normalized = Array.from(new Set(permissionKeys))
+    .filter((permission) => ALL_PERMISSION_KEYS.includes(permission as PermissionKey));
+  if (normalized.length === 0) return;
+
+  const supabase = createServerClient();
+  const { data: existingRows, error: existingError } = await supabase
+    .from('access_permissions')
+    .select('permission_key')
+    .in('permission_key', normalized);
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const existing = new Set(
+    ((existingRows ?? []) as Array<Record<string, unknown>>)
+      .map((row) => String(row.permission_key ?? '').trim())
+      .filter(Boolean)
+  );
+
+  const missingRows = normalized
+    .filter((permissionKey) => !existing.has(permissionKey))
+    .map((permissionKey) => {
+      const definition = PERMISSION_BY_KEY.get(permissionKey as PermissionKey);
+      if (!definition) return null;
+      return {
+        permission_key: definition.permissionKey,
+        department: definition.department,
+        resource: definition.resource,
+        action: definition.action,
+        scope: definition.scope,
+        label: definition.label,
+        description: definition.description ?? null,
+        is_active: true
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  if (missingRows.length === 0) return;
+
+  const { error: insertError } = await supabase
+    .from('access_permissions')
+    .upsert(missingRows, { onConflict: 'permission_key' });
+
+  if (insertError) {
+    throw new Error(insertError.message);
+  }
 }
 
 async function loadRolePermissionsMap(): Promise<Map<string, string[]>> {
@@ -103,6 +155,7 @@ export async function createRoleV2(input: {
     .map((permission) => ({ role_key: input.role_key, permission_key: permission }));
 
   if (permissionRows.length > 0) {
+    await ensurePermissionCatalogRows(permissionRows.map((row) => row.permission_key));
     const { error: permissionError } = await supabase.from('access_role_permissions').insert(permissionRows);
     if (permissionError) {
       throw new Error(permissionError.message);
@@ -162,6 +215,7 @@ export async function updateRoleV2(
     }
 
     if (normalized.length > 0) {
+      await ensurePermissionCatalogRows(normalized);
       const { error: insertError } = await supabase.from('access_role_permissions').insert(
         normalized.map((permission) => ({ role_key: roleKey, permission_key: permission }))
       );
