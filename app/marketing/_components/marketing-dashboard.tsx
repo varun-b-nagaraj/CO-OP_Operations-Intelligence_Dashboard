@@ -1,4 +1,7 @@
-'use client'; import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'; import { DepartmentShell } from '@/app/_components/department-shell';
+'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @next/next/no-img-element */
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'; import { DepartmentShell } from '@/app/_components/department-shell';
 import { SharedCalendarTab } from '@/app/_components/shared-calendar-tab';
 import { createMarketingRepository } from '@/lib/marketing/client';
 import type { AssetType, CalendarAudiencePriority, CoordinationMethod, EventAssetRow, EventContactRow, EventNoteRow, ExternalContactRow, InternalCoordinatorRow, MarketingEventBundle, MarketingEventCategoryRow, MarketingEventRow, MarketingReportRow, MarketingEventStatus

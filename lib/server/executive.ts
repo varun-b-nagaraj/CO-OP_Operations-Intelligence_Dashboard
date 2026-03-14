@@ -242,11 +242,6 @@ type InventorySessionRow = {
   updated_at: string;
 };
 
-type ShiftAttendanceRow = {
-  status: 'expected' | 'present' | 'absent' | 'excused';
-  shift_date: string;
-};
-
 type SplitShiftAttendanceRow = {
   status: 'expected' | 'present' | 'absent' | 'excused';
   shift_date: string;

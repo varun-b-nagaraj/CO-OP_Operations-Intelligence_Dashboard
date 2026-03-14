@@ -9,19 +9,13 @@ import {
   Calendar,
   CalendarClock,
   ClipboardCheck,
-  ClipboardList,
   Contact,
-  FileScan,
-  FileClock,
   FileSpreadsheet,
-  FileText,
   FolderKanban,
   HandCoins,
-  Handshake,
   HeartHandshake,
   History,
   Home,
-  ListChecks,
   LayoutDashboard,
   LineChart,
   Megaphone,
@@ -33,14 +27,10 @@ import {
   ScanSearch,
   Settings2,
   ShieldCheck,
-  ScanBarcode,
-  Settings,
   ShoppingCart,
   TimerReset,
   UserRoundCog,
-  UsersRound,
-  Users,
-  UserCog
+  UsersRound
 } from 'lucide-react';
 import Link from 'next/link';
 import { ReactNode, useEffect, useState } from 'react';

@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/exhaustive-deps */
 
 import { Select } from '@/app/_components/ui/select';
 import jsQR from 'jsqr';

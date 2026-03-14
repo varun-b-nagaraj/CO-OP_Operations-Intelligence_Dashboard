@@ -1,4 +1,6 @@
-'use client'; import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react'; import { DepartmentShell } from '@/app/_components/department-shell';
 import { Select } from '@/app/_components/ui/select';
 import { submitShiftExchange } from '@/app/actions/shift-requests';

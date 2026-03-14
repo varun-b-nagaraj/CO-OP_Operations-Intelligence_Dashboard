@@ -5,6 +5,20 @@ import { ALL_PERMISSION_KEYS, PERMISSION_BY_KEY } from '@/lib/access/registry';
 import { PermissionKey } from '@/lib/access/types';
 import { createServerClient } from '@/lib/supabase';
 
+const GLOBAL_WILDCARD = '*' as PermissionKey;
+
+function normalizeIncomingRolePermissions(permissionKeys: string[]): string[] {
+  const canonical = canonicalizePermissions(permissionKeys);
+  const normalized: string[] = [];
+  for (const permission of canonical) {
+    if (permission === GLOBAL_WILDCARD) continue;
+    if (!ALL_PERMISSION_KEYS.includes(permission)) continue;
+    if (!PERMISSION_BY_KEY.has(permission)) continue;
+    normalized.push(permission);
+  }
+  return Array.from(new Set(normalized));
+}
+
 export interface AccessRoleRecordV2 {
   role_key: string;
   role_name: string;
@@ -30,8 +44,7 @@ export interface EmployeeAccessRecordV2 {
 async function ensurePermissionCatalogRows(
   permissionKeys: string[]
 ): Promise<void> {
-  const normalized = Array.from(new Set(permissionKeys))
-    .filter((permission) => ALL_PERMISSION_KEYS.includes(permission as PermissionKey));
+  const normalized = normalizeIncomingRolePermissions(permissionKeys);
   if (normalized.length === 0) return;
 
   const supabase = createServerClient();
@@ -88,8 +101,11 @@ async function loadRolePermissionsMap(): Promise<Map<string, string[]>> {
   const map = new Map<string, string[]>();
   for (const row of (data ?? []) as Array<Record<string, unknown>>) {
     const roleKey = String(row.role_key ?? '');
-    const permissionKey = String(row.permission_key ?? '').trim();
-    if (!roleKey || !permissionKey) continue;
+    const rawPermissionKey = String(row.permission_key ?? '').trim();
+    if (!roleKey || !rawPermissionKey) continue;
+    const normalizedPermissions = normalizeIncomingRolePermissions([rawPermissionKey]);
+    const permissionKey = normalizedPermissions[0];
+    if (!permissionKey) continue;
     const bucket = map.get(roleKey) ?? [];
     bucket.push(permissionKey);
     map.set(roleKey, bucket);
@@ -150,9 +166,11 @@ export async function createRoleV2(input: {
     throw new Error(roleError?.message ?? 'Failed to create role.');
   }
 
-  const permissionRows = Array.from(new Set(input.role_permissions))
-    .filter((permission) => ALL_PERMISSION_KEYS.includes(permission as PermissionKey))
-    .map((permission) => ({ role_key: input.role_key, permission_key: permission }));
+  const normalizedPermissions = normalizeIncomingRolePermissions(input.role_permissions);
+  const permissionRows = normalizedPermissions.map((permission) => ({
+    role_key: input.role_key,
+    permission_key: permission
+  }));
 
   if (permissionRows.length > 0) {
     await ensurePermissionCatalogRows(permissionRows.map((row) => row.permission_key));
@@ -202,9 +220,7 @@ export async function updateRoleV2(
   }
 
   if (Array.isArray(input.role_permissions)) {
-    const normalized = Array.from(new Set(input.role_permissions)).filter((permission) =>
-      ALL_PERMISSION_KEYS.includes(permission as PermissionKey)
-    );
+    const normalized = normalizeIncomingRolePermissions(input.role_permissions);
 
     const { error: deleteError } = await supabase
       .from('access_role_permissions')

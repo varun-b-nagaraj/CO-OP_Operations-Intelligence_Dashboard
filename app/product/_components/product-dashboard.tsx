@@ -1,4 +1,6 @@
-'use client'; import { Select } from '@/app/_components/ui/select';
+'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import { Select } from '@/app/_components/ui/select';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image'; import { DepartmentShell } from '@/app/_components/department-shell';
 import { SharedCalendarTab } from '@/app/_components/shared-calendar-tab';

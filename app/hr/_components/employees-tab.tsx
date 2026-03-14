@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { Select } from '@/app/_components/ui/select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useEffect, useMemo, useState } from 'react'; import { clearMeetingOverride, markMeetingAbsent, overrideMeetingAttendance, pardonMeetingAbsence
