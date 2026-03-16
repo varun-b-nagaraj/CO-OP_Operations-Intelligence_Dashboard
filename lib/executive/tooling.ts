@@ -20,6 +20,8 @@ export type ExecutiveDataPack =
   | 'calendar_deep_dive'
   | 'access_deep_dive';
 
+export type ShiftScope = 'morning' | 'off_period' | 'any' | 'none';
+
 export const EXECUTIVE_TOOL_SPECS: ExecutiveToolSpec[] = [
   {
     id: 'get_user_preferences',
@@ -198,15 +200,58 @@ export function isToolListingPrompt(prompt: string): boolean {
 
 export function isAttendancePrecisionPrompt(prompt: string): boolean {
   const normalized = prompt.toLowerCase();
-  return (
-    (normalized.includes('attendance') || normalized.includes('morning meeting')) &&
-    (normalized.includes('who') ||
-      normalized.includes('below') ||
-      normalized.includes('between') ||
-      normalized.includes('100%') ||
-      normalized.includes('75%') ||
-      normalized.includes('50%'))
-  );
+  const asksAttendance = includesAny(normalized, [
+    'attendance',
+    'morning meeting',
+    'morning shift',
+    'off period shift',
+    'off-period shift',
+    'shift attendance',
+    'meeting attendance'
+  ]);
+  if (!asksAttendance) return false;
+  return includesAny(normalized, [
+    'who',
+    'below',
+    'between',
+    'trend',
+    'patterns',
+    'pattern',
+    'most',
+    'least',
+    'consistently',
+    'over the last',
+    'last',
+    'past',
+    '100%',
+    '75%',
+    '50%'
+  ]);
+}
+
+export function detectShiftScope(prompt: string): ShiftScope {
+  const normalized = prompt.toLowerCase();
+  const hasShiftLanguage = includesAny(normalized, ['shift', 'attendance']);
+  if (!hasShiftLanguage) return 'none';
+
+  if (
+    includesAny(normalized, [
+      'off period',
+      'off-period',
+      'off period shift',
+      'off-period shift',
+      'off period attendance',
+      'off-period attendance'
+    ])
+  ) {
+    return 'off_period';
+  }
+
+  if (includesAny(normalized, ['morning shift', 'morning attendance', 'period 0', 'p0'])) {
+    return 'morning';
+  }
+
+  return 'any';
 }
 
 export function planExecutiveDataPacks(prompt: string): ExecutiveDataPack[] {

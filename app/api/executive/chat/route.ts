@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { ensureServerPermission } from '@/lib/server/permissions';
 import {
+  detectShiftScope,
   getToolSpecById,
   isAttendancePrecisionPrompt,
   isGreetingPrompt,
   isOperationalDataPrompt,
   isToolListingPrompt,
-  requiresFreshDataPrompt
+  requiresFreshDataPrompt,
+  ShiftScope
 } from '@/lib/executive/tooling';
 import {
   getLatestAssistantMessageState,
@@ -111,17 +113,27 @@ function isMorningMeetingPrompt(message: string): boolean {
   return normalized.includes('morning meeting') || normalized.includes('meeting attendance');
 }
 
-function isMorningShiftPrompt(message: string): boolean {
+function isShiftAttendancePrompt(message: string): boolean {
   const normalized = message.toLowerCase();
-  return normalized.includes('morning shift') || normalized.includes('shift attendance');
+  return normalized.includes('shift') || normalized.includes('shift attendance');
+}
+
+function resolveRequestedShiftScope(message: string): ShiftScope {
+  if (!isShiftAttendancePrompt(message)) return 'none';
+  return detectShiftScope(message);
 }
 
 function isTopMorningShiftPrompt(message: string): boolean {
   const normalized = message.toLowerCase();
   return (
     normalized.includes('most morning shifts') ||
+    normalized.includes('most off period shifts') ||
+    normalized.includes('most off-period shifts') ||
+    normalized.includes('most shifts') ||
     normalized.includes('worked the most morning shifts') ||
-    (normalized.includes('morning shift') && normalized.includes('who') && normalized.includes('most'))
+    normalized.includes('worked the most off period shifts') ||
+    normalized.includes('worked the most off-period shifts') ||
+    (normalized.includes('shift') && normalized.includes('who') && normalized.includes('most'))
   );
 }
 
@@ -148,6 +160,32 @@ function selectPreferredAttendanceRecords(
   );
 }
 
+function buildStudentDirectory(records: ToolExecutionRecord[]): Map<string, string> {
+  const studentBySNumber = new Map<string, string>();
+  for (const record of records) {
+    if (record.table !== 'students') continue;
+    for (const row of record.rows) {
+      const sNumberRaw = row.s_number ?? row.student_number;
+      const sNumber = typeof sNumberRaw === 'string' ? sNumberRaw.trim() : '';
+      if (!sNumber) continue;
+      const nameCandidates = [row.name, row.full_name, row.student_name];
+      const first = typeof row.first_name === 'string' ? row.first_name.trim() : '';
+      const last = typeof row.last_name === 'string' ? row.last_name.trim() : '';
+      const joined = `${first} ${last}`.trim();
+      const bestName =
+        nameCandidates.find((candidate) => typeof candidate === 'string' && candidate.trim()) ??
+        (joined || '');
+      if (!bestName) continue;
+      studentBySNumber.set(sNumber, String(bestName).trim());
+    }
+  }
+  return studentBySNumber;
+}
+
+function resolveDisplayName(studentBySNumber: Map<string, string>, sNumber: string): string {
+  return studentBySNumber.get(sNumber) ?? 'Unknown employee';
+}
+
 function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
   const scopedRecords = selectPreferredAttendanceRecords(
     records,
@@ -155,9 +193,8 @@ function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]):
     ['meeting_attendance_records']
   );
   const attendanceTables = new Set(['hr_meeting_attendance_records', 'meeting_attendance_records']);
-  const studentTables = new Set(['students']);
   const attendanceRows: Array<{ sNumber: string; date: string; status: string }> = [];
-  const studentBySNumber = new Map<string, string>();
+  const studentBySNumber = buildStudentDirectory(records);
 
   for (const record of scopedRecords) {
     if (!record.table) continue;
@@ -172,20 +209,6 @@ function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]):
         if (!sNumber || !date) continue;
         if (!isDateOnOrBeforeToday(date)) continue;
         attendanceRows.push({ sNumber, date, status });
-      }
-    } else if (studentTables.has(record.table)) {
-      for (const row of record.rows) {
-        const sNumberRaw = row.s_number ?? row.student_number;
-        const sNumber = typeof sNumberRaw === 'string' ? sNumberRaw.trim() : '';
-        if (!sNumber) continue;
-        const nameCandidates = [row.name, row.full_name, row.student_name];
-        const first = typeof row.first_name === 'string' ? row.first_name.trim() : '';
-        const last = typeof row.last_name === 'string' ? row.last_name.trim() : '';
-        const joined = `${first} ${last}`.trim();
-        const bestName =
-          nameCandidates.find((candidate) => typeof candidate === 'string' && candidate.trim()) ??
-          (joined || sNumber);
-        studentBySNumber.set(sNumber, String(bestName).trim());
       }
     }
   }
@@ -217,7 +240,7 @@ function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]):
       const rate = stat.total > 0 ? (stat.presentExcused / stat.total) * 100 : 0;
       return {
         sNumber,
-        name: studentBySNumber.get(sNumber) ?? sNumber,
+        name: resolveDisplayName(studentBySNumber, sNumber),
         total: stat.total,
         presentExcused: stat.presentExcused,
         rate
@@ -243,15 +266,37 @@ function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]):
 }
 
 function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
-  const scopedRecords = selectPreferredAttendanceRecords(
-    records,
-    ['hr_morning_shift_attendance'],
-    ['morning_shift_attendance']
-  );
-  const shiftTables = new Set(['hr_morning_shift_attendance', 'morning_shift_attendance']);
-  const studentTables = new Set(['students']);
+  return buildShiftOverviewFromRecords(records, {
+    label: 'Morning shift',
+    preferredTables: ['hr_morning_shift_attendance'],
+    fallbackTables: ['morning_shift_attendance']
+  });
+}
+
+function buildOffPeriodShiftOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
+  return buildShiftOverviewFromRecords(records, {
+    label: 'Off-period shift',
+    preferredTables: ['hr_off_period_shift_attendance'],
+    fallbackTables: ['off_period_shift_attendance']
+  });
+}
+
+function buildGeneralShiftOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
+  return buildShiftOverviewFromRecords(records, {
+    label: 'Shift attendance',
+    preferredTables: ['hr_shift_attendance'],
+    fallbackTables: ['shift_attendance']
+  });
+}
+
+function buildShiftOverviewFromRecords(
+  records: ToolExecutionRecord[],
+  params: { label: string; preferredTables: string[]; fallbackTables: string[] }
+): string | null {
+  const scopedRecords = selectPreferredAttendanceRecords(records, params.preferredTables, params.fallbackTables);
+  const shiftTables = new Set([...params.preferredTables, ...params.fallbackTables]);
   const shiftRows: Array<{ sNumber: string; date: string; status: string }> = [];
-  const studentBySNumber = new Map<string, string>();
+  const studentBySNumber = buildStudentDirectory(records);
 
   for (const record of scopedRecords) {
     if (!record.table) continue;
@@ -267,20 +312,6 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
         if (!isDateOnOrBeforeToday(date)) continue;
         shiftRows.push({ sNumber, date, status });
       }
-    } else if (studentTables.has(record.table)) {
-      for (const row of record.rows) {
-        const sNumberRaw = row.s_number ?? row.student_number;
-        const sNumber = typeof sNumberRaw === 'string' ? sNumberRaw.trim() : '';
-        if (!sNumber) continue;
-        const nameCandidates = [row.name, row.full_name, row.student_name];
-        const first = typeof row.first_name === 'string' ? row.first_name.trim() : '';
-        const last = typeof row.last_name === 'string' ? row.last_name.trim() : '';
-        const joined = `${first} ${last}`.trim();
-        const bestName =
-          nameCandidates.find((candidate) => typeof candidate === 'string' && candidate.trim()) ??
-          (joined || sNumber);
-        studentBySNumber.set(sNumber, String(bestName).trim());
-      }
     }
   }
 
@@ -292,16 +323,18 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
     if (!deduped.has(key)) deduped.set(key, row);
   }
   const rows = Array.from(deduped.values());
-  const latestDate = rows.map((row) => row.date).sort().at(-1) ?? '';
+  const orderedDates = rows.map((row) => row.date).sort();
+  const latestDate = orderedDates.at(-1) ?? '';
+  const firstDate = orderedDates.at(0) ?? '';
   const latestRows = latestDate ? rows.filter((row) => row.date === latestDate) : [];
   const latestPresentExcused = latestRows.filter((row) => row.status === 'present' || row.status === 'excused').length;
 
   const absentNames = latestRows
     .filter((row) => row.status === 'absent')
-    .map((row) => studentBySNumber.get(row.sNumber) ?? row.sNumber);
+    .map((row) => resolveDisplayName(studentBySNumber, row.sNumber));
   const presentNames = latestRows
     .filter((row) => row.status === 'present' || row.status === 'excused')
-    .map((row) => studentBySNumber.get(row.sNumber) ?? row.sNumber);
+    .map((row) => resolveDisplayName(studentBySNumber, row.sNumber));
 
   const aggregate = new Map<string, { total: number; presentExcused: number }>();
   for (const row of rows) {
@@ -316,7 +349,7 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
       const rate = stat.total > 0 ? (stat.presentExcused / stat.total) * 100 : 0;
       return {
         sNumber,
-        name: studentBySNumber.get(sNumber) ?? sNumber,
+        name: resolveDisplayName(studentBySNumber, sNumber),
         total: stat.total,
         presentExcused: stat.presentExcused,
         rate
@@ -334,7 +367,8 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
     rowsToFormat.slice(0, 60).map((row) => `${row.name} (${Math.round(row.rate)}%, ${row.presentExcused}/${row.total})`).join('; ');
 
   return [
-    `Morning shift overview (${latestDate || 'latest date unavailable'}): ${latestPresentExcused}/${latestRows.length} present/excused.`,
+    `${params.label} overview (${latestDate || 'latest date unavailable'}): ${latestPresentExcused}/${latestRows.length} present/excused.`,
+    `Window analyzed: ${firstDate || 'unknown'} to ${latestDate || 'unknown'}.`,
     `Present/excused: ${presentNames.length ? presentNames.join(', ') : 'none'}.`,
     `Absent: ${absentNames.length ? absentNames.join(', ') : 'none'}.`,
     `Below 50% attendance (min ${minShiftsForFlag} shifts): ${below50.length ? fmt(below50) : 'none'}.`,
@@ -343,19 +377,46 @@ function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): s
 }
 
 function buildTopMorningShiftWorkersFromRecords(records: ToolExecutionRecord[]): string | null {
-  const scopedRecords = selectPreferredAttendanceRecords(
-    records,
-    ['hr_morning_shift_attendance'],
-    ['morning_shift_attendance']
-  );
-  const shiftTables = new Set(['hr_morning_shift_attendance', 'morning_shift_attendance']);
-  const studentTables = new Set(['students']);
+  return buildTopShiftWorkersFromRecords(records, {
+    label: 'morning shifts',
+    preferredTables: ['hr_morning_shift_attendance'],
+    fallbackTables: ['morning_shift_attendance']
+  });
+}
+
+function buildTopOffPeriodShiftWorkersFromRecords(records: ToolExecutionRecord[]): string | null {
+  return buildTopShiftWorkersFromRecords(records, {
+    label: 'off-period shifts',
+    preferredTables: ['hr_off_period_shift_attendance'],
+    fallbackTables: ['off_period_shift_attendance']
+  });
+}
+
+function buildTopGeneralShiftWorkersFromRecords(records: ToolExecutionRecord[]): string | null {
+  return buildTopShiftWorkersFromRecords(records, {
+    label: 'shifts',
+    preferredTables: ['hr_shift_attendance'],
+    fallbackTables: ['shift_attendance']
+  });
+}
+
+function buildTopShiftWorkersFromRecords(
+  records: ToolExecutionRecord[],
+  params: { label: string; preferredTables: string[]; fallbackTables: string[] }
+): string | null {
+  const scopedRecords = selectPreferredAttendanceRecords(records, params.preferredTables, params.fallbackTables);
+  const shiftTables = new Set([...params.preferredTables, ...params.fallbackTables]);
+  const studentBySNumber = buildStudentDirectory(records);
   const studentByAnyId = new Map<string, string>();
   const workerCounts = new Map<string, number>();
 
+  for (const [sNumber, name] of studentBySNumber.entries()) {
+    studentByAnyId.set(sNumber, name);
+  }
+
   for (const record of scopedRecords) {
     if (!record.table) continue;
-    if (studentTables.has(record.table)) {
+    if (record.table === 'students') {
       for (const row of record.rows) {
         const idCandidates = [row.s_number, row.student_number, row.id]
           .map((value) => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''))
@@ -397,7 +458,7 @@ function buildTopMorningShiftWorkersFromRecords(records: ToolExecutionRecord[]):
   const ranked = Array.from(workerCounts.entries())
     .map(([workerId, count]) => ({
       workerId,
-      name: studentByAnyId.get(workerId) ?? `Unknown (${workerId})`,
+      name: studentByAnyId.get(workerId) ?? 'Unknown employee',
       count
     }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
@@ -407,7 +468,7 @@ function buildTopMorningShiftWorkersFromRecords(records: ToolExecutionRecord[]):
   const nextTier = ranked.filter((row) => row.count < topCount).slice(0, 20);
 
   return [
-    `Most morning shifts worked: ${topCount} shift(s).`,
+    `Most ${params.label} worked: ${topCount} shift(s).`,
     `Top worker(s): ${leaders.map((row) => `${row.name} (${row.count})`).join('; ') || 'none'}.`,
     nextTier.length ? `Next highest: ${nextTier.map((row) => `${row.name} (${row.count})`).join('; ')}.` : ''
   ]
@@ -425,17 +486,28 @@ function buildOperationalFallbackReply(params: {
 }): string {
   if (params.wantsAttendancePrecision) {
     const wantsMeeting = isMorningMeetingPrompt(params.message);
-    const wantsShift = isMorningShiftPrompt(params.message);
+    const wantsShift = isShiftAttendancePrompt(params.message);
+    const shiftScope = resolveRequestedShiftScope(params.message);
     if (wantsMeeting && !wantsShift) {
       const meeting = buildMorningMeetingOverviewFromRecords(params.executionRecords);
       if (meeting) return meeting;
     }
     if (wantsShift && !wantsMeeting) {
-      const shift = buildMorningShiftOverviewFromRecords(params.executionRecords);
+      const shift =
+        shiftScope === 'off_period'
+          ? buildOffPeriodShiftOverviewFromRecords(params.executionRecords)
+          : shiftScope === 'morning'
+            ? buildMorningShiftOverviewFromRecords(params.executionRecords)
+            : buildGeneralShiftOverviewFromRecords(params.executionRecords);
       if (shift) return shift;
     }
     const meeting = buildMorningMeetingOverviewFromRecords(params.executionRecords);
-    const shift = buildMorningShiftOverviewFromRecords(params.executionRecords);
+    const shift =
+      shiftScope === 'off_period'
+        ? buildOffPeriodShiftOverviewFromRecords(params.executionRecords)
+        : shiftScope === 'morning'
+          ? buildMorningShiftOverviewFromRecords(params.executionRecords)
+          : buildGeneralShiftOverviewFromRecords(params.executionRecords);
     const combined = [meeting, shift].filter(Boolean).join('\n\n');
     if (combined) return combined;
   }
@@ -457,6 +529,62 @@ function buildOperationalFallbackReply(params: {
   }
 
   return 'I could not generate a model reply for this turn. Please retry your request.';
+}
+
+function buildDeterministicInsightContext(params: {
+  message: string;
+  executionRecords: ToolExecutionRecord[];
+  wantsAttendancePrecision: boolean;
+  wantsOperationalData: boolean;
+  overview: ExecutiveOverviewData | null;
+}): string | null {
+  const lines: string[] = [];
+
+  if (params.wantsAttendancePrecision && params.executionRecords.length > 0) {
+    const wantsMeeting = isMorningMeetingPrompt(params.message);
+    const wantsShift = isShiftAttendancePrompt(params.message);
+    const shiftScope = resolveRequestedShiftScope(params.message);
+
+    if (wantsMeeting && !wantsShift) {
+      const meeting = buildMorningMeetingOverviewFromRecords(params.executionRecords);
+      if (meeting) lines.push(meeting);
+    } else if (wantsShift && !wantsMeeting) {
+      const shift =
+        shiftScope === 'off_period'
+          ? buildOffPeriodShiftOverviewFromRecords(params.executionRecords)
+          : shiftScope === 'morning'
+            ? buildMorningShiftOverviewFromRecords(params.executionRecords)
+            : buildGeneralShiftOverviewFromRecords(params.executionRecords);
+      if (shift) lines.push(shift);
+    } else {
+      const meeting = buildMorningMeetingOverviewFromRecords(params.executionRecords);
+      const shift =
+        shiftScope === 'off_period'
+          ? buildOffPeriodShiftOverviewFromRecords(params.executionRecords)
+          : shiftScope === 'morning'
+            ? buildMorningShiftOverviewFromRecords(params.executionRecords)
+            : buildGeneralShiftOverviewFromRecords(params.executionRecords);
+      if (meeting) lines.push(meeting);
+      if (shift) lines.push(shift);
+    }
+
+    if (isTopMorningShiftPrompt(params.message)) {
+      const shiftScope = resolveRequestedShiftScope(params.message);
+      const topWorkers =
+        shiftScope === 'off_period'
+          ? buildTopOffPeriodShiftWorkersFromRecords(params.executionRecords)
+          : shiftScope === 'morning'
+            ? buildTopMorningShiftWorkersFromRecords(params.executionRecords)
+            : buildTopGeneralShiftWorkersFromRecords(params.executionRecords);
+      if (topWorkers) lines.push(topWorkers);
+    }
+  }
+
+  if (params.wantsOperationalData && params.overview && isScheduleRosterPrompt(params.message)) {
+    lines.push(buildScheduleAssistantReply(params.message, params.overview));
+  }
+
+  return lines.length ? lines.join('\n\n') : null;
 }
 
 function stripLegacyProvenanceBlock(text: string): string {
@@ -984,6 +1112,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const deterministicInsightContext = buildDeterministicInsightContext({
+      message,
+      executionRecords,
+      wantsAttendancePrecision,
+      wantsOperationalData,
+      overview
+    });
+
     const systemPrompt = [
       'You are the executive AI agent for the CO-OP Operations dashboard.',
       'Conversation style requirements:',
@@ -998,6 +1134,8 @@ export async function POST(request: NextRequest) {
       '- Do not produce generic numbered templates (for example 1..10 categories) unless the user explicitly asks for that format.',
       '- For direct questions like "who came?" or "how many came?", answer in the first sentence with exact date + names/counts from tool output.',
       '- For "consistently skipped" / "<50% attendance" questions, use morning meeting trend results from tool output and return names with percentages.',
+      '- Never return raw employee IDs in user-facing answers. Use names; if unknown, write "Unknown employee".',
+      '- Do not dump unformatted blobs. Provide a short interpreted summary with key concerns first, then concise supporting details.',
       '- Avoid repetitive wording and avoid unnecessary warnings.',
       '- If a specific detail is unavailable, state exactly what is missing and continue with the available data.',
       '',
@@ -1028,6 +1166,10 @@ export async function POST(request: NextRequest) {
             }))
           )}`
         : 'No execution records were generated for this turn.',
+      '',
+      deterministicInsightContext
+        ? `Deterministic insight pre-analysis (derived from tool rows, use this first):\n${deterministicInsightContext}`
+        : 'No deterministic pre-analysis was generated for this turn.',
       '',
       isGreeting
         ? 'The latest user message is a greeting or casual opener. Keep your response short and friendly.'
@@ -1062,95 +1204,67 @@ export async function POST(request: NextRequest) {
     let source: 'ollama' | 'fallback' | 'tooling' = 'ollama';
     let upstream: Response | null = null;
 
-    let forcedAttendanceReply: string | null = null;
-    if (wantsAttendancePrecision && executionRecords.length > 0) {
-      const wantsMeeting = isMorningMeetingPrompt(message);
-      const wantsShift = isMorningShiftPrompt(message);
-      if (wantsMeeting && !wantsShift) {
-        forcedAttendanceReply = buildMorningMeetingOverviewFromRecords(executionRecords);
-      } else if (wantsShift && !wantsMeeting) {
-        forcedAttendanceReply = buildMorningShiftOverviewFromRecords(executionRecords);
-      } else {
-        // Ambiguous attendance prompt: provide both sections explicitly.
-        const meeting = buildMorningMeetingOverviewFromRecords(executionRecords);
-        const shift = buildMorningShiftOverviewFromRecords(executionRecords);
-        forcedAttendanceReply = [meeting, shift].filter(Boolean).join('\n\n');
+    upstream = await proxyOllamaChatRequest({
+      body: {
+        model,
+        stream: streamEnabled,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...recentConversation.map((entry) => ({
+            role: entry.role,
+            content: entry.content
+          })),
+          ...(hasCurrentUserPromptAlready ? [] : [{ role: 'user', content: message }])
+        ],
+        options: {
+          temperature: 0.1
+        }
       }
-    }
-    if (!forcedAttendanceReply && isTopMorningShiftPrompt(message) && executionRecords.length > 0) {
-      forcedAttendanceReply = buildTopMorningShiftWorkersFromRecords(executionRecords);
-    }
-    const shouldForceScheduleReply =
-      wantsOperationalData && Boolean(overview) && isScheduleRosterPrompt(message);
-    if (forcedAttendanceReply) {
-      source = 'tooling';
-      assistantMessage = forcedAttendanceReply;
-    } else if (shouldForceScheduleReply && overview) {
-      source = 'tooling';
-      assistantMessage = buildScheduleAssistantReply(message, overview);
-    } else {
-      upstream = await proxyOllamaChatRequest({
-        body: {
-          model,
-          stream: streamEnabled,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...recentConversation.map((entry) => ({
-              role: entry.role,
-              content: entry.content
-            })),
-            ...(hasCurrentUserPromptAlready ? [] : [{ role: 'user', content: message }])
-          ],
-          options: {
-            temperature: 0.1
-          }
-        }
-      });
+    });
 
-      if (!upstream.ok) {
-        source = 'fallback';
-        const upstreamDetail = await readResponseError(upstream);
-        const debugId = upstream.headers.get('x-coop-ollama-debug-id') ?? '';
-        const isAuthError = upstream.status === 401 || upstream.status === 403;
-        assistantMessage = [
-          isAuthError
-            ? 'Ollama authentication failed through the internal proxy.'
-            : 'Unable to reach Ollama through the internal proxy right now.',
-          `Upstream status: ${upstream.status}.`,
-          upstreamDetail ? `Upstream detail: ${upstreamDetail}` : '',
-          debugId ? `Debug ID: ${debugId}.` : '',
-          isAuthError
-            ? 'Check OLLAMA_API_KEY and OLLAMA_BASE_URL in Vercel environment settings.'
-            : '',
-          overview ? `Executive snapshot: ${overview.executiveBrief}` : '',
-          overview
-            ? 'Check the Overview tab for current metrics and the Alerts tab for follow-up actions.'
-            : 'Try again in a moment.'
-        ]
-          .filter(Boolean)
-          .join(' ');
-      } else if (!streamEnabled) {
-        const upstreamJson = (await upstream.json()) as unknown;
-        assistantMessage =
-          parseAssistantMessage(upstreamJson) ??
-          buildOperationalFallbackReply({
-            message,
-            overview,
-            toolContext,
-            executionRecords,
-            wantsAttendancePrecision,
-            wantsOperationalData
-          });
-        if (!assistantMessage?.trim()) {
-          assistantMessage = buildOperationalFallbackReply({
-            message,
-            overview,
-            toolContext,
-            executionRecords,
-            wantsAttendancePrecision,
-            wantsOperationalData
-          });
-        }
+    if (!upstream.ok) {
+      source = 'fallback';
+      const upstreamDetail = await readResponseError(upstream);
+      const debugId = upstream.headers.get('x-coop-ollama-debug-id') ?? '';
+      const isAuthError = upstream.status === 401 || upstream.status === 403;
+      assistantMessage = [
+        isAuthError
+          ? 'Ollama authentication failed through the internal proxy.'
+          : 'Unable to reach Ollama through the internal proxy right now.',
+        `Upstream status: ${upstream.status}.`,
+        upstreamDetail ? `Upstream detail: ${upstreamDetail}` : '',
+        debugId ? `Debug ID: ${debugId}.` : '',
+        isAuthError
+          ? 'Check OLLAMA_API_KEY and OLLAMA_BASE_URL in Vercel environment settings.'
+          : '',
+        overview ? `Executive snapshot: ${overview.executiveBrief}` : '',
+        overview
+          ? 'Check the Overview tab for current metrics and the Alerts tab for follow-up actions.'
+          : 'Try again in a moment.'
+      ]
+        .filter(Boolean)
+        .join(' ');
+    } else if (!streamEnabled) {
+      const upstreamJson = (await upstream.json()) as unknown;
+      assistantMessage =
+        parseAssistantMessage(upstreamJson) ??
+        buildOperationalFallbackReply({
+          message,
+          overview,
+          toolContext,
+          executionRecords,
+          wantsAttendancePrecision,
+          wantsOperationalData
+        });
+      if (!assistantMessage?.trim()) {
+        assistantMessage = buildOperationalFallbackReply({
+          message,
+          overview,
+          toolContext,
+          executionRecords,
+          wantsAttendancePrecision,
+          wantsOperationalData
+        });
       }
     }
 

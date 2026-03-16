@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { createServerClient } from '@/lib/supabase';
 import { resolvePreferredTable } from '@/lib/server/common';
 import {
+  detectShiftScope,
   ExecutiveDataPack,
   getToolSpecById,
   planExecutiveDataPacks,
@@ -680,28 +681,44 @@ const PACK_TABLES: Record<ExecutiveDataPack, Array<{ table: string; dateColumns:
 
 function buildQueryPlan(prompt: string, selectedPacks: ExecutiveDataPack[]): QueryPlan {
   const normalized = prompt.toLowerCase();
-  const isAttendanceDetail =
-    (normalized.includes('attendance') || normalized.includes('morning meeting')) &&
-    (normalized.includes('who') ||
-      normalized.includes('below') ||
-      normalized.includes('between') ||
-      normalized.includes('100%') ||
-      normalized.includes('75%') ||
-      normalized.includes('50%'));
+  const asksAttendance = ['attendance', 'morning meeting', 'meeting attendance', 'shift'].some((term) =>
+    normalized.includes(term)
+  );
+  const asksAnalyticalAttendance = ['who', 'below', 'between', 'trend', 'patterns', 'pattern', 'most', 'least', 'last', 'past'].some(
+    (term) => normalized.includes(term)
+  );
+  const isAttendanceDetail = asksAttendance && asksAnalyticalAttendance;
+  const asksMeeting = normalized.includes('morning meeting') || normalized.includes('meeting attendance');
+  const asksShift = normalized.includes('shift') || normalized.includes('shift attendance') || normalized.includes('morning shift');
+  const shiftScope = detectShiftScope(prompt);
 
-  const forcedAttendanceTables = isAttendanceDetail
-    ? [
-        'table_hr_meeting_attendance_records',
-        'table_meeting_attendance_records',
-        'table_students',
-        'table_hr_morning_shift_attendance',
-        'table_morning_shift_attendance'
-      ]
-    : [];
+  const forcedAttendanceTables: string[] = [];
+  if (isAttendanceDetail && asksMeeting) {
+    forcedAttendanceTables.push('table_hr_meeting_attendance_records', 'table_meeting_attendance_records', 'table_students');
+  }
+  if (isAttendanceDetail && asksShift) {
+    if (shiftScope === 'off_period') {
+      forcedAttendanceTables.push('table_hr_off_period_shift_attendance', 'table_off_period_shift_attendance', 'table_students');
+    } else if (shiftScope === 'morning') {
+      forcedAttendanceTables.push('table_hr_morning_shift_attendance', 'table_morning_shift_attendance', 'table_students');
+    } else {
+      forcedAttendanceTables.push('table_hr_shift_attendance', 'table_shift_attendance', 'table_students');
+    }
+  }
+  const uniqueForcedTables = Array.from(new Set(forcedAttendanceTables));
+  const targetEntities = Array.from(
+    new Set(
+      [
+        asksMeeting ? 'morning_meeting' : null,
+        asksShift ? 'shift_attendance' : null,
+        asksShift ? `shift_scope:${shiftScope}` : null
+      ].filter(Boolean)
+    )
+  ) as string[];
 
   const selectedTools = [
     ...selectedPacks,
-    ...forcedAttendanceTables
+    ...uniqueForcedTables
   ];
   return {
     intentClass: isAttendanceDetail ? 'attendance_detail' : selectedPacks.length ? 'overview' : 'general',
@@ -710,7 +727,7 @@ function buildQueryPlan(prompt: string, selectedPacks: ExecutiveDataPack[]): Que
     filters: [],
     sort: [{ column: 'id', direction: 'asc' }],
     limit: isAttendanceDetail ? 2000 : 50,
-    targetEntities: isAttendanceDetail ? ['attendance', 'morning_meeting'] : []
+    targetEntities: isAttendanceDetail ? targetEntities : []
   };
 }
 
@@ -1572,6 +1589,9 @@ export async function runExecutiveTooling(prompt: string): Promise<{
   const supabase = createServerClient();
 
   for (const pack of selectedPacks) {
+    if (queryPlan.intentClass === 'attendance_detail' && pack === 'hr_deep_dive') {
+      continue;
+    }
     const startedAt = new Date().toISOString();
     try {
       const dateRange = resolveExecutiveDateRange(prompt, pack);
@@ -1642,34 +1662,65 @@ export async function runExecutiveTooling(prompt: string): Promise<{
   }
 
   if (queryPlan.intentClass === 'attendance_detail') {
-    const attendanceTables = [
-      { table: 'hr_meeting_attendance_records', dateColumns: ['checkin_date', 'created_at'] },
-      { table: 'meeting_attendance_records', dateColumns: ['checkin_date', 'created_at'] },
-      { table: 'students', dateColumns: ['created_at'] },
-      { table: 'hr_morning_shift_attendance', dateColumns: ['shift_date'] },
-      { table: 'morning_shift_attendance', dateColumns: ['shift_date'] }
-    ];
-    const dateRange = resolveExecutiveDateRange(prompt, 'hr_deep_dive');
-    for (const entry of attendanceTables) {
+    const asksMeeting = queryPlan.targetEntities.includes('morning_meeting');
+    const shiftScopeEntity = queryPlan.targetEntities.find((entity) => entity.startsWith('shift_scope:'));
+    const shiftScope = (shiftScopeEntity?.split(':')[1] ?? 'any') as 'morning' | 'off_period' | 'any';
+    const asksShift = queryPlan.targetEntities.includes('shift_attendance');
+
+    const attendanceTables: Array<{ table: string; dateColumns: string[] }> = [];
+    if (asksMeeting) {
+      attendanceTables.push(
+        { table: 'hr_meeting_attendance_records', dateColumns: ['checkin_date', 'created_at'] },
+        { table: 'meeting_attendance_records', dateColumns: ['checkin_date', 'created_at'] }
+      );
+    }
+    if (asksShift) {
+      if (shiftScope === 'off_period') {
+        attendanceTables.push(
+          { table: 'hr_off_period_shift_attendance', dateColumns: ['shift_date'] },
+          { table: 'off_period_shift_attendance', dateColumns: ['shift_date'] }
+        );
+      } else if (shiftScope === 'morning') {
+        attendanceTables.push(
+          { table: 'hr_morning_shift_attendance', dateColumns: ['shift_date'] },
+          { table: 'morning_shift_attendance', dateColumns: ['shift_date'] }
+        );
+      } else {
+        attendanceTables.push(
+          { table: 'hr_shift_attendance', dateColumns: ['shift_date'] },
+          { table: 'shift_attendance', dateColumns: ['shift_date'] }
+        );
+      }
+    }
+    attendanceTables.push({ table: 'students', dateColumns: ['created_at'] });
+    const uniqueAttendanceTables = attendanceTables.filter(
+      (entry, index, all) => all.findIndex((candidate) => candidate.table === entry.table) === index
+    );
+    const dateRange = queryPlan.dateRange.mode === 'explicit' ? queryPlan.dateRange : resolveExecutiveDateRange(prompt, 'hr_deep_dive');
+    for (const entry of uniqueAttendanceTables) {
+      const isStudentDirectoryTable = entry.table === 'students';
+      const queryDateRange = isStudentDirectoryTable ? undefined : dateRange;
+      const queryDateColumns = isStudentDirectoryTable ? [] : entry.dateColumns;
+      const sortColumn = isStudentDirectoryTable ? 'id' : (entry.dateColumns[0] ?? 'id');
       const startedAt = new Date().toISOString();
       try {
         const queryResult = await executeCanonicalTableQuery({
           supabase,
           table: entry.table,
-          dateRange,
-          dateColumns: entry.dateColumns,
-          sort: [{ column: entry.dateColumns[0] ?? 'id', direction: 'desc' }, { column: 'id', direction: 'asc' }],
-          limit: 4000
+          dateRange: queryDateRange,
+          dateColumns: queryDateColumns,
+          sort: [{ column: sortColumn, direction: 'desc' }, { column: 'id', direction: 'asc' }],
+          limit: 6000
         });
         const finishedAt = new Date().toISOString();
         executionRecords.push({
           toolId: `table_${entry.table.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase()}`,
           table: entry.table,
           args: {
-            dateRange,
+            dateRange: queryDateRange,
             filters: [],
-            sort: [{ column: entry.dateColumns[0] ?? 'id', direction: 'desc' }, { column: 'id', direction: 'asc' }],
-            limit: 4000
+            sort: [{ column: sortColumn, direction: 'desc' }, { column: 'id', direction: 'asc' }],
+            limit: 6000
           },
           rowCount: queryResult.row_count,
           rowHash: hashRows(queryResult.rows),

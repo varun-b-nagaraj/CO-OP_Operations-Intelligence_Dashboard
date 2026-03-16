@@ -162,6 +162,14 @@ export async function resolveEffectivePermissions(
     (assignments ?? []).find((row) => Boolean(row.is_primary))?.role_key ?? roleKeys[0] ?? 'employee_self_service';
 
   if (roleKeys.length === 0) {
+    const legacy = await resolveEffectivePermissionsLegacy(employeeId);
+    if (legacy.permissions.length > 0 || legacy.role !== 'employee') {
+      const canonicalResolved = canonicalizePermissions(legacy.permissions);
+      return {
+        role: legacy.role,
+        permissions: expandForLegacyClients(canonicalResolved)
+      };
+    }
     return { role: 'employee_self_service', permissions: [] };
   }
 
@@ -177,6 +185,16 @@ export async function resolveEffectivePermissions(
   const basePermissions = (rolePermissionRows ?? [])
     .map((row) => String(row.permission_key ?? '').trim())
     .filter(Boolean);
+  if (basePermissions.length === 0) {
+    const legacy = await resolveEffectivePermissionsLegacy(employeeId);
+    if (legacy.permissions.length > 0 || legacy.role !== 'employee') {
+      const canonicalFromLegacy = canonicalizePermissions(legacy.permissions);
+      return {
+        role: legacy.role,
+        permissions: expandForLegacyClients(canonicalFromLegacy)
+      };
+    }
+  }
   const canonicalResolved = canonicalizePermissions(basePermissions);
   const effectivePermissions = expandForLegacyClients(canonicalResolved);
 
