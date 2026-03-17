@@ -681,15 +681,38 @@ const PACK_TABLES: Record<ExecutiveDataPack, Array<{ table: string; dateColumns:
 
 function buildQueryPlan(prompt: string, selectedPacks: ExecutiveDataPack[]): QueryPlan {
   const normalized = prompt.toLowerCase();
-  const asksAttendance = ['attendance', 'morning meeting', 'meeting attendance', 'shift'].some((term) =>
+  const asksAttendance = ['attendance', 'morning meeting', 'meeting attendance', 'shift', 'meetings'].some((term) =>
     normalized.includes(term)
   );
-  const asksAnalyticalAttendance = ['who', 'below', 'between', 'trend', 'patterns', 'pattern', 'most', 'least', 'last', 'past'].some(
-    (term) => normalized.includes(term)
-  );
+  const asksAnalyticalAttendance = [
+    'who',
+    'below',
+    'between',
+    'trend',
+    'patterns',
+    'pattern',
+    'most',
+    'least',
+    'last',
+    'past',
+    'year',
+    'since',
+    'this year',
+    'meeting by meeting',
+    'by date',
+    'date-wise',
+    'each meeting',
+    'breakdown',
+    'how many meetings'
+  ].some((term) => normalized.includes(term));
   const isAttendanceDetail = asksAttendance && asksAnalyticalAttendance;
-  const asksMeeting = normalized.includes('morning meeting') || normalized.includes('meeting attendance');
   const asksShift = normalized.includes('shift') || normalized.includes('shift attendance') || normalized.includes('morning shift');
+  const asksMeeting =
+    normalized.includes('morning meeting') ||
+    normalized.includes('meeting attendance') ||
+    normalized.includes('meeting') ||
+    normalized.includes('meetings') ||
+    (asksAttendance && !asksShift);
   const shiftScope = detectShiftScope(prompt);
 
   const forcedAttendanceTables: string[] = [];

@@ -223,6 +223,55 @@ export function parsePromptExplicitDateRange(prompt: string): ToolDateRange | nu
   }
 
   const today = new Date();
+  if (/\bthis\s+year\b/.test(normalized)) {
+    const year = today.getUTCFullYear();
+    const start = new Date(Date.UTC(year, 0, 1));
+    return {
+      mode: 'explicit',
+      from: startOfUtcDay(start).toISOString(),
+      to: endOfUtcDay(today).toISOString()
+    };
+  }
+
+  if (/\blast\s+year\b/.test(normalized)) {
+    const year = today.getUTCFullYear() - 1;
+    const start = new Date(Date.UTC(year, 0, 1));
+    const end = new Date(Date.UTC(year, 11, 31));
+    return {
+      mode: 'explicit',
+      from: startOfUtcDay(start).toISOString(),
+      to: endOfUtcDay(end).toISOString()
+    };
+  }
+
+  const sinceYearMatch = normalized.match(/\bsince\s+(20\d{2})\b/);
+  if (sinceYearMatch) {
+    const year = Number(sinceYearMatch[1]);
+    if (Number.isFinite(year) && year >= 2000 && year <= 2100) {
+      const start = new Date(Date.UTC(year, 0, 1));
+      return {
+        mode: 'explicit',
+        from: startOfUtcDay(start).toISOString(),
+        to: endOfUtcDay(today).toISOString()
+      };
+    }
+  }
+
+  const inYearMatch = normalized.match(/\b(?:in|for)\s+(20\d{2})\b/);
+  if (inYearMatch) {
+    const year = Number(inYearMatch[1]);
+    if (Number.isFinite(year) && year >= 2000 && year <= 2100) {
+      const start = new Date(Date.UTC(year, 0, 1));
+      const isCurrentYear = year === today.getUTCFullYear();
+      const end = isCurrentYear ? today : new Date(Date.UTC(year, 11, 31));
+      return {
+        mode: 'explicit',
+        from: startOfUtcDay(start).toISOString(),
+        to: endOfUtcDay(end).toISOString()
+      };
+    }
+  }
+
   if (/\btoday\b/.test(normalized)) {
     return {
       mode: 'explicit',

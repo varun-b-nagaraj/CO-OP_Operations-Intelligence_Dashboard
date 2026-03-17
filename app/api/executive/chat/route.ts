@@ -265,6 +265,80 @@ function buildMorningMeetingOverviewFromRecords(records: ToolExecutionRecord[]):
   ].join(' ');
 }
 
+function wantsMeetingByMeetingBreakdown(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('meeting by meeting') ||
+    normalized.includes('each meeting') ||
+    normalized.includes('by date') ||
+    normalized.includes('date-wise') ||
+    normalized.includes('breakdown') ||
+    normalized.includes('how many meetings') ||
+    normalized.includes('this year') ||
+    normalized.includes('since ')
+  );
+}
+
+function buildMeetingByMeetingInsightsFromRecords(records: ToolExecutionRecord[]): string | null {
+  const scopedRecords = selectPreferredAttendanceRecords(
+    records,
+    ['hr_meeting_attendance_records'],
+    ['meeting_attendance_records']
+  );
+  const attendanceTables = new Set(['hr_meeting_attendance_records', 'meeting_attendance_records']);
+  const rows: Array<{ sNumber: string; date: string; status: string }> = [];
+
+  for (const record of scopedRecords) {
+    if (!record.table || !attendanceTables.has(record.table)) continue;
+    for (const row of record.rows) {
+      const sNumberRaw = row.s_number ?? row.employee_s_number ?? row.student_number;
+      const dateRaw = row.checkin_date ?? row.date ?? row.shift_date;
+      const statusRaw = row.effective_status ?? row.status;
+      const sNumber = typeof sNumberRaw === 'string' ? sNumberRaw.trim() : '';
+      const date = typeof dateRaw === 'string' ? dateRaw.trim() : '';
+      const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : '';
+      if (!sNumber || !date) continue;
+      if (!isDateOnOrBeforeToday(date)) continue;
+      rows.push({ sNumber, date, status });
+    }
+  }
+
+  if (!rows.length) return null;
+
+  const deduped = new Map<string, { sNumber: string; date: string; status: string }>();
+  for (const row of rows) {
+    const key = `${row.sNumber}|${row.date}|${row.status}`;
+    if (!deduped.has(key)) deduped.set(key, row);
+  }
+
+  const byDate = new Map<string, { total: number; presentExcused: number; absent: number; excused: number }>();
+  for (const row of deduped.values()) {
+    const bucket = byDate.get(row.date) ?? { total: 0, presentExcused: 0, absent: 0, excused: 0 };
+    bucket.total += 1;
+    if (row.status === 'present' || row.status === 'excused') bucket.presentExcused += 1;
+    if (row.status === 'absent') bucket.absent += 1;
+    if (row.status === 'excused') bucket.excused += 1;
+    byDate.set(row.date, bucket);
+  }
+
+  const ordered = Array.from(byDate.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  if (!ordered.length) return null;
+  const capped = ordered.slice(-24);
+  const average =
+    capped.reduce((acc, [, stats]) => acc + (stats.total ? (stats.presentExcused / stats.total) * 100 : 0), 0) /
+    capped.length;
+
+  const lines = capped.map(([date, stats]) => {
+    const rate = stats.total ? Math.round((stats.presentExcused / stats.total) * 100) : 0;
+    return `${date}: ${stats.presentExcused}/${stats.total} present/excused (${rate}%), absent ${stats.absent}, excused ${stats.excused}`;
+  });
+
+  return [
+    `Meeting-by-meeting attendance (${capped[0]?.[0]} to ${capped[capped.length - 1]?.[0]}): ${capped.length} meeting(s), average ${Math.round(average)}%.`,
+    ...lines
+  ].join('\n');
+}
+
 function buildMorningShiftOverviewFromRecords(records: ToolExecutionRecord[]): string | null {
   return buildShiftOverviewFromRecords(records, {
     label: 'Morning shift',
@@ -548,6 +622,10 @@ function buildDeterministicInsightContext(params: {
     if (wantsMeeting && !wantsShift) {
       const meeting = buildMorningMeetingOverviewFromRecords(params.executionRecords);
       if (meeting) lines.push(meeting);
+      if (wantsMeetingByMeetingBreakdown(params.message)) {
+        const perMeeting = buildMeetingByMeetingInsightsFromRecords(params.executionRecords);
+        if (perMeeting) lines.push(perMeeting);
+      }
     } else if (wantsShift && !wantsMeeting) {
       const shift =
         shiftScope === 'off_period'
@@ -565,6 +643,10 @@ function buildDeterministicInsightContext(params: {
             ? buildMorningShiftOverviewFromRecords(params.executionRecords)
             : buildGeneralShiftOverviewFromRecords(params.executionRecords);
       if (meeting) lines.push(meeting);
+      if (meeting && wantsMeetingByMeetingBreakdown(params.message)) {
+        const perMeeting = buildMeetingByMeetingInsightsFromRecords(params.executionRecords);
+        if (perMeeting) lines.push(perMeeting);
+      }
       if (shift) lines.push(shift);
     }
 
