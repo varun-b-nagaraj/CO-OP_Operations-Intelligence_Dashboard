@@ -3,11 +3,12 @@
 import dynamic from 'next/dynamic';
 import type { Route } from 'next';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { DepartmentShell } from '@/app/_components/department-shell';
 import { InventoryAttendanceSummary } from '@/app/_components/inventory-attendance-summary';
-import { hasPermission } from '@/lib/permissions';
+import { can, canonicalizePermissions } from '@/lib/access/engine';
+import { useCurrentUser } from '@/lib/permissions';
 import { PermissionFlag } from '@/lib/types';
 
 import { CFATabId, CFAModule, CFA_TABS, isCFATab } from './cfa-module';
@@ -48,6 +49,15 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const { user, loading: permissionsLoading } = useCurrentUser();
+  const resolvedPermissions = useMemo(
+    () => canonicalizePermissions(user?.permissions ?? []),
+    [user?.permissions]
+  );
+  const hasPermission = useCallback(
+    (permission: PermissionFlag) => can(permission, resolvedPermissions),
+    [resolvedPermissions]
+  );
 
   const visibleTabs = tabs.filter((tab) => hasPermission(tab.permission));
   const [globalDateRange, setGlobalDateRange] = useState(currentMonthRange());
@@ -144,6 +154,10 @@ export function HRModule(props?: { forcedModule?: PrimaryModule }) {
   const activeNavLabel = navItems.find((item) => item.id === activeNavId)?.label ?? 'Overview';
   const canEditHRSettings = hasPermission('hr.settings.edit');
   const showHRDateRange = resolvedModule === 'hr' && resolvedHRTab !== 'schedule';
+
+  if (permissionsLoading) {
+    return <main className="p-4 text-sm text-neutral-700">Loading permissions...</main>;
+  }
 
   return (
     <DepartmentShell
