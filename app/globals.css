@@ -1,31 +1,126 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   RRHS Co-Op — Operations & Intelligence Dashboard
+   Design tokens. Brand maroon preserved (#800000) as the spine of the system,
+   layered onto a refined neutral canvas with depth, motion, and dark mode.
+   ========================================================================== */
+
 :root {
   color-scheme: light;
+
+  /* Brand */
+  --brand: #800000;
+  --brand-600: #9a1f1f;
+  --brand-700: #6b0000;
+  --brand-tint: #f5e9e9;
+  --brand-glow: rgba(128, 0, 0, 0.16);
+
+  /* Surfaces (light) */
+  --bg: #f4f3f1;
+  --bg-grad-1: #f6f5f3;
+  --bg-grad-2: #efedea;
+  --surface: #ffffff;
+  --surface-2: #faf9f7;
+  --surface-sunken: #f1efec;
+  --border: #e5e1da;
+  --border-strong: #d6d1c8;
+
+  /* Text */
+  --text: #1a1614;
+  --text-soft: #54504a;
+  --text-muted: #837d74;
+
+  /* Accents for data-viz */
+  --accent-amber: #c97a14;
+  --accent-teal: #0f766e;
+  --accent-blue: #1d4ed8;
+  --accent-green: #15803d;
+  --accent-rose: #be123c;
+
+  /* Elevation */
+  --shadow-xs: 0 1px 2px rgba(26, 22, 20, 0.05);
+  --shadow-sm: 0 1px 3px rgba(26, 22, 20, 0.07), 0 1px 2px rgba(26, 22, 20, 0.04);
+  --shadow-md: 0 4px 16px -4px rgba(26, 22, 20, 0.1), 0 2px 6px -2px rgba(26, 22, 20, 0.06);
+  --shadow-lg: 0 18px 40px -12px rgba(26, 22, 20, 0.18), 0 6px 16px -8px rgba(26, 22, 20, 0.1);
+  --ring: 0 0 0 3px var(--brand-glow);
+
+  /* Geometry */
+  --radius-sm: 7px;
+  --radius: 11px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --brand: #d24b4b;
+  --brand-600: #e06464;
+  --brand-700: #b83838;
+  --brand-tint: #2a1414;
+  --brand-glow: rgba(210, 75, 75, 0.22);
+
+  --bg: #100d0c;
+  --bg-grad-1: #14100f;
+  --bg-grad-2: #0c0a09;
+  --surface: #1a1614;
+  --surface-2: #211b19;
+  --surface-sunken: #15110f;
+  --border: #2e2724;
+  --border-strong: #3d342f;
+
+  --text: #f5f1ec;
+  --text-soft: #c4bcb2;
+  --text-muted: #8a8178;
+
+  --accent-amber: #e09a3e;
+  --accent-teal: #2dd4bf;
+  --accent-blue: #60a5fa;
+  --accent-green: #4ade80;
+  --accent-rose: #fb7185;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px -4px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 18px 44px -12px rgba(0, 0, 0, 0.7), 0 6px 16px -8px rgba(0, 0, 0, 0.5);
+}
+
+/* ----------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
 * {
-  border-radius: 0 !important;
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f7f7f7;
-  color: #111111;
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    Segoe UI,
-    Roboto,
-    Helvetica,
-    Arial,
-    Apple Color Emoji,
-    Segoe UI Emoji;
+  background:
+    radial-gradient(1100px 700px at 12% -8%, var(--brand-glow), transparent 55%),
+    linear-gradient(165deg, var(--bg-grad-1), var(--bg-grad-2));
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 a {
@@ -33,19 +128,25 @@ a {
   text-decoration: none;
 }
 
+/* Soften the previously hard-edged world. The old build forced radius:0 on
+   everything; we now round interactive + container surfaces by default while
+   letting components opt out with `rounded-none`. */
+button,
+input,
+select,
+textarea,
+[role='button'],
+[role='tab'] {
+  border-radius: var(--radius-sm);
+}
+
 button,
 input,
 select,
 textarea {
-  transition-duration: 160ms;
-  transition-timing-function: ease-out;
-  transition-property:
-    color,
-    background-color,
-    border-color,
-    opacity,
-    box-shadow,
-    transform;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
 }
 
 button,
@@ -58,26 +159,190 @@ button:active,
 [role='button']:active,
 [role='tab']:active,
 .ui-click:active {
-  transform: scale(0.98);
-}
-
-.ui-fade-in {
-  animation: ui-fade-in 180ms ease-out;
-}
-
-@keyframes ui-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  transform: scale(0.97);
 }
 
 :focus-visible {
-  outline: 2px solid #800000;
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Refined scrollbars */
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: content-box;
+}
+
+/* ----------------------------------------------------------------------------
+   Reusable surface utilities (used by the new design-system components and
+   available to any existing page that opts in)
+   -------------------------------------------------------------------------- */
+.surface-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.surface-glass {
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.hairline {
+  border-color: var(--border);
+}
+
+/* The Tailwind `white` token is remapped to the themed surface so the app's
+   many `bg-white` cards gain dark-mode support for free. But `text-white` is
+   almost always white text sitting on the maroon brand (buttons, active tabs,
+   badges) and must stay literally white in both themes. We override only the
+   text utility here — `bg-white` keeps following the theme. */
+.text-white { color: #ffffff; }
+.text-pure-white { color: #ffffff !important; }
+.bg-pure-white { background-color: #ffffff !important; }
+
+.text-gradient-brand {
+  background: linear-gradient(100deg, var(--text), var(--brand) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ----------------------------------------------------------------------------
+   Motion
+   -------------------------------------------------------------------------- */
+@keyframes ui-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ui-fade-in { animation: ui-fade-in 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+@keyframes reveal-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.reveal {
+  opacity: 0;
+  animation: reveal-up 620ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--surface) 60%, transparent),
+    transparent
+  );
+  animation: shimmer 1.6s infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.pulse-dot { animation: pulse-glow 2.2s ease-in-out infinite; }
+
+@keyframes float-blob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(3%, -4%) scale(1.05); }
+  66% { transform: translate(-3%, 3%) scale(0.97); }
+}
+.float-blob { animation: float-blob 18s ease-in-out infinite; }
+
+/* Stagger helpers */
+.reveal-d1 { animation-delay: 70ms; }
+.reveal-d2 { animation-delay: 140ms; }
+.reveal-d3 { animation-delay: 210ms; }
+.reveal-d4 { animation-delay: 280ms; }
+.reveal-d5 { animation-delay: 350ms; }
+.reveal-d6 { animation-delay: 420ms; }
+
+/* ----------------------------------------------------------------------------
+   Dark-mode status colors
+   The app uses hardcoded Tailwind status tints (bg-{c}-50 + text-{c}-700/800)
+   for badges, alerts, and health cards. Those are LIGHT values that stay pale
+   in dark mode while their dark text becomes unreadable. We retune the exact
+   shades in use so the same markup reads correctly on dark surfaces:
+   tint backgrounds -> dark translucent fills; text -> bright accent.
+   -------------------------------------------------------------------------- */
+:root[data-theme='dark'] {
+  /* Tinted backgrounds become low-alpha dark fills */
+  --tw-emerald-50: rgba(34, 197, 94, 0.14);
+  --tw-green-50: rgba(34, 197, 94, 0.14);
+  --tw-amber-50: rgba(217, 154, 30, 0.16);
+  --tw-orange-50: rgba(234, 130, 40, 0.16);
+  --tw-yellow-50: rgba(217, 154, 30, 0.16);
+  --tw-red-50: rgba(244, 63, 94, 0.16);
+  --tw-rose-50: rgba(244, 63, 94, 0.16);
+  --tw-blue-50: rgba(96, 165, 250, 0.15);
+}
+
+:root[data-theme='dark'] .bg-emerald-50 { background-color: var(--tw-emerald-50) !important; }
+:root[data-theme='dark'] .bg-green-50 { background-color: var(--tw-green-50) !important; }
+:root[data-theme='dark'] .bg-amber-50 { background-color: var(--tw-amber-50) !important; }
+:root[data-theme='dark'] .bg-orange-50 { background-color: var(--tw-orange-50) !important; }
+:root[data-theme='dark'] .bg-yellow-50 { background-color: var(--tw-yellow-50) !important; }
+:root[data-theme='dark'] .bg-red-50 { background-color: var(--tw-red-50) !important; }
+:root[data-theme='dark'] .bg-rose-50 { background-color: var(--tw-rose-50) !important; }
+:root[data-theme='dark'] .bg-blue-50 { background-color: var(--tw-blue-50) !important; }
+
+/* Borders: brighten so card outlines stay visible on dark */
+:root[data-theme='dark'] .border-emerald-200 { border-color: rgba(74, 222, 128, 0.45) !important; }
+:root[data-theme='dark'] .border-green-200 { border-color: rgba(74, 222, 128, 0.45) !important; }
+:root[data-theme='dark'] .border-amber-200 { border-color: rgba(224, 154, 62, 0.45) !important; }
+:root[data-theme='dark'] .border-orange-200 { border-color: rgba(234, 130, 40, 0.45) !important; }
+:root[data-theme='dark'] .border-red-200 { border-color: rgba(251, 113, 133, 0.45) !important; }
+:root[data-theme='dark'] .border-rose-200 { border-color: rgba(251, 113, 133, 0.45) !important; }
+
+/* Text on tints: pull dark status text up to bright, legible accents */
+:root[data-theme='dark'] .text-emerald-700,
+:root[data-theme='dark'] .text-emerald-800,
+:root[data-theme='dark'] .text-green-700,
+:root[data-theme='dark'] .text-green-900 { color: #6ee7a8 !important; }
+:root[data-theme='dark'] .text-amber-700,
+:root[data-theme='dark'] .text-amber-800,
+:root[data-theme='dark'] .text-amber-900 { color: #f0b860 !important; }
+:root[data-theme='dark'] .text-red-700,
+:root[data-theme='dark'] .text-red-800,
+:root[data-theme='dark'] .text-red-900,
+:root[data-theme='dark'] .text-rose-700,
+:root[data-theme='dark'] .text-rose-800 { color: #fb8a9b !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal { opacity: 1; transform: none; }
 }

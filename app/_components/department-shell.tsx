@@ -36,6 +36,7 @@ import Link from 'next/link';
 import { ReactNode, useEffect, useState } from 'react';
 
 import { LogoutButton } from '@/app/_components/logout-button';
+import { ThemeToggle } from '@/app/_components/ui/theme';
 
 export interface DepartmentShellNavItem {
   id: string;
@@ -222,7 +223,7 @@ export function DepartmentShell({
           <div className="border-b border-neutral-300 py-3 md:min-h-[74px]">
             <div className="grid h-12 grid-cols-[64px_minmax(0,1fr)] items-center">
               <span className="flex items-center justify-center">
-                <span className="inline-flex h-9 w-9 items-center justify-center border border-neutral-300 bg-white">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-brand-maroon text-white shadow-sm">
                   <DepartmentIcon className="h-4 w-4" />
                 </span>
               </span>
@@ -246,8 +247,10 @@ export function DepartmentShell({
                 <button
                   key={item.id}
                   aria-selected={isActive}
-                  className={`ui-click relative flex min-h-[44px] w-full items-center border-b border-neutral-300 px-3 py-3 text-left text-sm font-medium ${
-                    isActive ? 'bg-brand-maroon text-white' : 'bg-white text-neutral-800 hover:bg-neutral-50'
+                  className={`ui-click relative flex min-h-[44px] w-full items-center border-b border-neutral-200 px-3 py-3 text-left text-sm font-medium transition-colors duration-200 before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-brand-maroon before:transition-transform before:duration-200 ${
+                    isActive
+                      ? 'bg-brand-maroon text-white before:scale-y-100'
+                      : 'bg-white text-neutral-800 before:scale-y-0 hover:bg-neutral-50 hover:text-brand-maroon'
                   }`}
                   onClick={() => {
                     onNavSelect(item.id);
@@ -318,17 +321,15 @@ export function DepartmentShell({
                 <span>Menu</span>
               </button>
               <h2 className="truncate text-base font-semibold">{contentHeading ?? title}</h2>
-              <span className="h-9 w-9" aria-hidden="true" />
+              <ThemeToggle />
             </div>
           </header>
-          {contentHeading ? (
-            <header className="hidden border-b border-neutral-300 bg-white px-4 py-4 md:block md:px-6">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">{contentHeading}</h2>
-                <div aria-hidden="true" />
-              </div>
-            </header>
-          ) : null}
+          <header className="hidden border-b border-neutral-300 bg-white px-4 py-4 md:block md:px-6">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">{contentHeading ?? title}</h2>
+              <ThemeToggle />
+            </div>
+          </header>
           {children}
         </section>
       </div>

@@ -196,6 +196,12 @@ function toneClass(tone: 'neutral' | 'positive' | 'warning'): string {
   return 'border-neutral-200 bg-white';
 }
 
+function toneAccent(tone: 'neutral' | 'positive' | 'warning'): string {
+  if (tone === 'positive') return 'var(--accent-green)';
+  if (tone === 'warning') return 'var(--accent-amber)';
+  return 'var(--brand)';
+}
+
 function healthClass(status: 'healthy' | 'watch' | 'risk'): string {
   if (status === 'healthy') return 'border-emerald-200 bg-emerald-50';
   if (status === 'risk') return 'border-red-200 bg-red-50';
@@ -1263,23 +1269,41 @@ export function ExecutiveDashboard() {
             {overviewError ? <p className="text-sm text-red-700">{overviewError}</p> : null}
             {overview ? (
               <>
-                <section className="border border-neutral-300 bg-white p-4">
-                  <h2 className="text-lg font-semibold">Executive Brief</h2>
-                  <div className="mt-2">
+                <section className="relative overflow-hidden rounded-lg border border-neutral-300 bg-white p-5 shadow-sm">
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-y-0 left-0 w-[3px] bg-brand-maroon"
+                  />
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-brand-maroon pulse-dot" aria-hidden="true" />
+                    <h2 className="font-display text-lg font-semibold">Executive Brief</h2>
+                  </div>
+                  <div className="mt-2.5">
                     <ExpandableText limit={420} text={overview.executiveBrief} />
                   </div>
                 </section>
                 <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {overview.summaryCards.map((card) => (
+                  {overview.summaryCards.map((card, cardIndex) => (
                     <Link
-                      className={`block border p-3 transition hover:shadow-sm ${toneClass(card.tone)}`}
+                      className={`group relative block overflow-hidden rounded-lg border p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${toneClass(card.tone)}`}
                       href={resolveSummaryCardHref(card.id)}
                       key={card.id}
+                      style={{ animation: `reveal-up 520ms cubic-bezier(0.22,1,0.36,1) ${cardIndex * 60}ms both` }}
                     >
-                      <p className="text-xs uppercase tracking-wide text-neutral-500">{card.title}</p>
-                      <p className="mt-1 text-2xl font-semibold text-neutral-900">{card.value}</p>
-                      <p className="mt-1 text-xs text-neutral-700">{card.subtitle}</p>
-                      <p className="mt-2 text-xs font-medium text-neutral-700 underline">Open details</p>
+                      <span
+                        aria-hidden="true"
+                        className="absolute inset-x-0 top-0 h-[3px] opacity-90"
+                        style={{ background: toneAccent(card.tone) }}
+                      />
+                      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">{card.title}</p>
+                      <p className="mt-1.5 font-display text-2xl font-bold leading-none text-neutral-900">{card.value}</p>
+                      <p className="mt-1.5 text-xs text-neutral-700">{card.subtitle}</p>
+                      <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-brand-maroon">
+                        Open details
+                        <svg className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M5 12h14M13 6l6 6-6 6" />
+                        </svg>
+                      </span>
                     </Link>
                   ))}
                 </section>
